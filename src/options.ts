@@ -40,6 +40,8 @@ export interface GlassOptions {
   shadowOffsetY: number;
   /** drag to move */
   floating: boolean;
+  /** floating glass stretches along the way it's dragged, by how fast, and springs back (0.15; 0 = rigid) */
+  elasticity: number;
   /** button: hover brightens, press flattens the bevel and deepens the shadow */
   button: boolean;
   /** 0 = a pill with a bevelled rim, 1 = a dome that magnifies the whole element */
@@ -98,6 +100,7 @@ export const DEFAULTS: GlassOptions = {
   shadowSpread: 10,
   shadowOffsetY: 1,
   floating: false,
+  elasticity: 0.15,
   button: false,
   bevelMode: 0,
   strength: 1,
@@ -127,7 +130,7 @@ export const VARIANTS: Record<Variant, Partial<GlassOptions>> = {
 
 const NUMBERS = ['blurAmount', 'refraction', 'chromAberration', 'edgeHighlight', 'specular', 'fresnel', 'distortion', 'cornerRadius',
   'zRadius', 'opacity', 'saturation', 'tintStrength', 'brightness', 'shadowOpacity', 'shadowSpread', 'shadowOffsetY', 'bevelMode',
-  'pressBulge', 'strength'] as const;
+  'pressBulge', 'strength', 'elasticity'] as const;
 const BOOLEANS = ['floating', 'button', 'interactive', 'smooth', 'magnify', 'adaptive'] as const;
 const STRINGS = ['variant', 'tint', 'fill', 'shape', 'press', 'path', 'pathBox'] as const;
 const ALL: readonly string[] = [...NUMBERS, ...BOOLEANS, ...STRINGS];

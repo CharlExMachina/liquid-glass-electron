@@ -92,9 +92,12 @@ export function installStyles() {
 
 /**
  * Whether `backdrop-filter: url(#svg-filter)` bends the backdrop here: Chromium (and so Electron) does; Firefox and
- * Safari accept the syntax but draw nothing, so there the glass falls back to a plain blur.
+ * Safari accept the syntax but draw nothing, so there the glass falls back to a plain blur (with its light, fill and
+ * shadow). globalThis.LIQUID_GLASS_FALLBACK = true forces the fallback.
  */
 export function supportsSvgBackdrop(): boolean {
+  // set to see (or test) what other browsers get
+  if ((globalThis as { LIQUID_GLASS_FALLBACK?: boolean }).LIQUID_GLASS_FALLBACK) return false;
   if (typeof navigator === 'undefined') return false;
   const ua = navigator.userAgent;
   const brands = (navigator as Navigator & { userAgentData?: { brands: { brand: string }[] } }).userAgentData?.brands ?? [];

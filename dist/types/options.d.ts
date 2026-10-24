@@ -33,6 +33,8 @@ export interface GlassOptions {
     shadowOffsetY: number;
     /** drag to move */
     floating: boolean;
+    /** floating glass stretches along the way it's dragged, by how fast, and springs back (0.15; 0 = rigid) */
+    elasticity: number;
     /** button: hover brightens, press flattens the bevel and deepens the shadow */
     button: boolean;
     /** 0 = a pill with a bevelled rim, 1 = a dome that magnifies the whole element */

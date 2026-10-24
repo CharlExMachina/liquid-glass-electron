@@ -63,6 +63,7 @@ function installStyles() {
   }
 }
 function supportsSvgBackdrop() {
+  if (globalThis.LIQUID_GLASS_FALLBACK) return false;
   if (typeof navigator === "undefined") return false;
   const ua = navigator.userAgent;
   const brands = navigator.userAgentData?.brands ?? [];
@@ -498,6 +499,7 @@ var DEFAULTS = {
   shadowSpread: 10,
   shadowOffsetY: 1,
   floating: false,
+  elasticity: 0.15,
   button: false,
   bevelMode: 0,
   strength: 1,
@@ -541,7 +543,8 @@ var NUMBERS = [
   "shadowOffsetY",
   "bevelMode",
   "pressBulge",
-  "strength"
+  "strength",
+  "elasticity"
 ];
 var BOOLEANS = ["floating", "button", "interactive", "smooth", "magnify", "adaptive"];
 var STRINGS = ["variant", "tint", "fill", "shape", "press", "path", "pathBox"];
@@ -707,7 +710,7 @@ var Lens = class {
     this.host = host2;
     this.shape = shape;
     el.dataset.liquidGlass = this.id;
-    for (const p of ["backdrop-filter", "border-image", "border-style", "border-width", "border-radius", "scale", "translate"]) this.saved[p] = el.style.getPropertyValue(p);
+    for (const p of ["backdrop-filter", "border-image", "border-style", "border-width", "border-radius", "scale", "translate", "transition"]) this.saved[p] = el.style.getPropertyValue(p);
     const start = (e) => {
       if (e.target !== el) return;
       if (e instanceof TransitionEvent && !e.propertyName.startsWith("--glass")) return;
@@ -1220,21 +1223,42 @@ var Lens = class {
     }
     if (o.floating) {
       let start = null;
+      let last = { x: 0, y: 0, t: 0 }, vx = 0, vy = 0;
+      const stretch = (sx, sy) => {
+        if (o.elasticity <= 0 || this.host.env().reduceMotion) return;
+        el.style.setProperty("scale", `${sx.toFixed(3)} ${sy.toFixed(3)}`);
+      };
       on(el, "pointerdown", (e) => {
         if (e.button !== 0) return;
         const [tx = 0, ty = 0] = (el.style.translate || "0px 0px").split(" ").map((v) => parseFloat(v) || 0);
         start = { x: e.clientX, y: e.clientY, tx, ty, id: e.pointerId };
+        last = { x: e.clientX, y: e.clientY, t: e.timeStamp };
+        vx = vy = 0;
         el.setPointerCapture(e.pointerId);
         el.toggleAttribute("data-lg-dragging", true);
+        el.style.setProperty("transition", "none");
       });
       on(el, "pointermove", (e) => {
         if (!start || e.pointerId !== start.id) return;
         el.style.translate = `${start.tx + e.clientX - start.x}px ${start.ty + e.clientY - start.y}px`;
+        const dt = Math.max(e.timeStamp - last.t, 1);
+        vx = vx * 0.7 + (e.clientX - last.x) / dt * 0.3;
+        vy = vy * 0.7 + (e.clientY - last.y) / dt * 0.3;
+        last = { x: e.clientX, y: e.clientY, t: e.timeStamp };
+        const k = o.elasticity * 0.25, ax = Math.min(Math.abs(vx) * k, 0.35), ay = Math.min(Math.abs(vy) * k, 0.35);
+        stretch((1 + ax) / (1 + ay * 0.5), (1 + ay) / (1 + ax * 0.5));
       });
       const end = (e) => {
         if (!start || e.pointerId !== start.id) return;
         start = null;
         el.toggleAttribute("data-lg-dragging", false);
+        if (o.elasticity > 0) {
+          el.style.setProperty("transition", "scale 0.45s cubic-bezier(0.3, 1.8, 0.5, 1)");
+          el.style.setProperty("scale", this.saved.scale || "1");
+          setTimeout(() => {
+            if (!start) el.style.setProperty("transition", this.saved.transition || "");
+          }, 480);
+        } else el.style.setProperty("transition", this.saved.transition || "");
         el.dispatchEvent(new CustomEvent("glassmove", { bubbles: true }));
       };
       on(el, "pointerup", end);

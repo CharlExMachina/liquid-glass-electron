@@ -77,6 +77,12 @@ const CASES = {
     hs[1].set({ strength: 0.5 });
     hs[2].set({ strength: 0 });
   },
+  async fallback() {
+    // what Firefox and Safari get: frost, light, fill and shadow, no bending
+    globalThis.LIQUID_GLASS_FALLBACK = true;
+    await photo('coast');
+    glass(box(140, 90, 360, 200, 'fallback'), { variant: 'regular', cornerRadius: 40 });
+  },
   async contrast() {
     await photo('coast');
     setEnvironment({ increaseContrast: true, reduceTransparency: true });

@@ -9,8 +9,15 @@ const NUM = [
   ['Frost and colour', [['blurAmount', 0, 4, 0.05], ['saturation', -1, 2, 0.05], ['brightness', -0.5, 0.8, 0.02], ['tintStrength', 0, 1, 0.02], ['opacity', 0, 1, 0.02]]],
   ['Shadow', [['shadowOpacity', 0, 1, 0.02], ['shadowSpread', 1, 40, 1], ['shadowOffsetY', -10, 30, 1]]],
   ['Shape', [['cornerRadius', 0, 120, 1]]],
+  ['Amount', [['strength', 0, 1, 0.01]]],
 ];
-const CHOICES = [['variant', ['', 'regular', 'clear', 'identity']], ['shape', ['rect', 'capsule', 'circle']], ['press', ['', 'bulge', 'flatten', 'none']]];
+const CHOICES = [['variant', ['', 'regular', 'clear', 'identity']], ['shape', ['rect', 'capsule', 'circle', 'squircle', 'star', 'heart', 'blob']], ['press', ['', 'bulge', 'flatten', 'none']]];
+// shapes given as paths, in a 100 × 100 box stretched over the element
+const PATHS = {
+  star: 'M50 2 L62 36 L98 37 L69 59 L80 95 L50 74 L20 95 L31 59 L2 37 L38 36 Z',
+  heart: 'M50 90 C20 70 4 52 6 32 C8 14 30 6 50 26 C70 6 92 14 94 32 C96 52 80 70 50 90 Z',
+  blob: 'M50 6 C78 2 98 22 94 48 C91 74 74 97 46 94 C20 91 2 72 6 46 C9 22 26 9 50 6 Z',
+};
 const FLAGS = ['interactive', 'button', 'floating', 'magnify', 'smooth'];
 const COLOURS = [['tint', ''], ['fill', '']];
 
@@ -36,7 +43,7 @@ export default {
     let g = null;
     const apply = () => {
       const o = { ...options };
-      for (const k of ['variant', 'press', 'tint', 'fill']) if (!o[k]) o[k] = null;
+      for (const k of ['variant', 'press', 'tint', 'fill', 'path', 'pathBox']) if (!o[k]) o[k] = null;
       g?.update(o);
       const changed = Object.entries(o).filter(([k, v]) => v !== DEFAULTS[k] && !(k === 'floating' && v));
       code.textContent = `glass(el, {\n${changed.map(([k, v]) => `  ${k}: ${JSON.stringify(v)},`).join('\n')}\n});`;
@@ -62,6 +69,10 @@ export default {
       sel.value = options[k] ?? '';
       sel.addEventListener('change', () => {
         options[k] = sel.value || null;
+        if (k === 'shape') {
+          const path = PATHS[sel.value];
+          Object.assign(options, path ? { shape: 'path', path, pathBox: '0 0 100 100' } : { path: null, pathBox: null });
+        }
         apply();
       });
       rows.push(row(k, sel));

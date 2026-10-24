@@ -15,6 +15,8 @@ can't do in a browser engine. Sources are Apple's documentation and the WWDC25 s
 | `Glass.identity` | `variant: 'identity'` | No glass at all, the layout unchanged: for switching it off conditionally. |
 | `.tint(_ color:)` | `fill: '<css colour>'` (laid over the glass), or `tint` + `tintStrength` (the backdrop multiplied toward the colour, as liquidglass's tint) | Apple maps its tint to the brightness of what's behind; here the fill is a plain colour with alpha. |
 | `.interactive()` | `interactive: true` | A press scales the glass up (1.04, with a spring), bends it more, and lights it where it's pressed; hover lights it a little. Apple's shimmer isn't reproduced. |
+| Glass that appears only during an interaction (a slider's knob turning to glass while held, a toggle's knob swelling into a lens) | `strength` | 0..1, cheap to change every frame, followed through CSS transitions of `--glass-strength`; at 0 there's no filter. The gallery's "iOS controls" builds iOS 26's controls this way |
+| Glass stretching as it's dragged | `elasticity` (floating glass) | Stretches along the way it moves, by how fast, keeping its volume, and springs back |
 | Glass adapting light/dark to what's behind it | not done | A page can't read the pixels behind an element, so the glass can't switch on its own. Set `data-glass-theme` or `setEnvironment({ dark })`. |
 | Larger glass looking thicker | partly | `zRadius` (the bevel's depth) is per element; nothing scales it with size automatically. |
 
@@ -26,6 +28,8 @@ can't do in a browser engine. Sources are Apple's documentation and the WWDC25 s
 | `.circle` | `shape: 'circle'` |
 | `.rect(cornerRadius:)`, `RoundedRectangle` | `cornerRadius: n`, or the element's CSS `border-radius` (per corner) |
 | `ConcentricRectangle`, `.rect(corners: .concentric)`, `.containerConcentric` | `shape: 'concentric'`: each corner is the radius of the rounded box the element sits in, less how far in it sits, never below 4 px (Apple's `concentric(minimum:)`; the minimum isn't configurable yet) |
+| Continuous corners (`RoundedRectangle(style: .continuous)`, the system's shapes) | `shape: 'squircle'`: superellipse corners whose curvature eases in from the straight edges |
+| Any `Shape` | `shape: 'path'` with SVG path data (`path`, optionally in a `pathBox` viewBox): the glass bends along the path's own edge, and its light and shadow follow it |
 
 ## Containers, unions, morphing
 
