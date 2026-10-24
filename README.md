@@ -84,6 +84,14 @@ The rest of the API:
 | `setEnvironment({ dark, appearance, reduceTransparency, increaseContrast, reduceMotion })` | what the glass adapts to, if not the page's media queries |
 | `unglass(el)`, `glassOf(el)`, `refreshAll()` | |
 
+## If you are an AI agent
+
+Read [docs/AGENTS.md](docs/AGENTS.md): the whole API on one page, recipes for what people build with glass, the rules
+that silently break it, and which demo shows each one working. The demos in `demo/demos/` are reference code, the
+iOS controls (`ios.js`) especially: glass that turns on for part of an animation, slides, swells and flows into menus.
+The short version: this is a primitive, so you can build whatever you want with it. Any element, any shape, any
+amount of glass, changed every frame.
+
 ## Options
 
 liquidglass's options, with its defaults:
@@ -168,7 +176,39 @@ The gallery runs sandboxed, context-isolated and under a strict Content-Security
 
 ## Limitations
 
-<!-- LIMITS -->
+- **Chromium only.** Electron, Chrome and Edge bend the backdrop; Firefox and Safari accept the syntax but draw nothing,
+  so there the glass is a plain blur with its light, fill and shadow (`globalThis.LIQUID_GLASS_FALLBACK = true` shows
+  what that looks like).
+- **Every glass costs something on every frame anything on the page changes**, even glass whose own backdrop didn't
+  change: Chromium runs every backdrop filter again for each frame. Idle, it's nothing; while something animates or
+  scrolls, it's roughly proportional to the number of glass elements on screen (see [Performance](#performance)). Glass
+  at `strength` 0 has no filter and costs nothing; so does `refraction: 0` (light and fill only). A container draws
+  all of its members with one filter.
+- **Glass inside glass only sees the outer glass's own painting**, not what's behind it, and an ancestor with
+  `opacity` below 1, a `filter`, a `mask`, `clip-path` or `mix-blend-mode` turns the bending off inside it. These are
+  CSS's rules (the backdrop root). Apple's design rule is the same: don't stack glass on glass.
+- **The page can't read the pixels behind an element**, so the glass can't switch between light and dark by itself, as
+  Apple's small controls do over changing content. Set the theme (`data-glass-theme`, `setEnvironment({ dark })`).
+- **A glass element's own border isn't drawn**: the light is a `border-image`. Its border width still lays out. Use
+  `edgeHighlight` instead of a border.
+- **Bending samples the nearest pixel** (that's Chromium's feDisplacementMap), so the backdrop is smoothed slightly
+  first (σ ≈ 0.7 px), which softens fine detail under the glass a little. `smooth: false` turns it off, with grain
+  where the rim squeezes the backdrop.
+- **Specular highlights and strong edge light are laid over as white**, where liquidglass adds them to the colour: at
+  high `specular` they're dimmer over mid-tones than liquidglass's. At its defaults (`specular` 0) it makes no
+  visible difference.
+- **Colour fringing follows Libre Hub's model**: each channel bent by its own share of the bevel's shift. At the
+  default `chromAberration` it matches liquidglass (see the comparison); turned up, its fringes are about twice as wide
+  at the rim as liquidglass's. A dome (`bevelMode` 1) uses liquidglass's exact fringe.
+- **Maps are small**: a few thousand pixels, exact along straight edges thanks to their lookup tables, approximate in
+  tight corners of large elements. They're drawn on the CPU when an element's size settles (a few ms), and stretched
+  while it's changing; containers and morphs moving their shapes draw them every frame, at half the resolution.
+- **Free shapes** (`path`) are rasterised to work out their distances, at most about 400 × 400, so very fine details of
+  a large path are softened, and their magnification pulls toward the middle of the box, not of the shape.
+- **The OS's Clear/Tinted setting can't be read** on any platform; offer it as the app's own setting. Reduce
+  Transparency and Increase Contrast come from the page's media queries, which Chromium fills in on macOS and Windows;
+  on Linux pass them from the main process ([docs/ELECTRON.md](docs/ELECTRON.md#the-systems-settings)).
+- Not done: Apple's shimmer on interactive glass, `backgroundExtensionEffect`, glass that thickens with its size.
 
 ## Tests
 
