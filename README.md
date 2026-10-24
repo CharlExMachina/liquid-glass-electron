@@ -86,7 +86,7 @@ The rest of the API:
 
 ## If you are an AI agent
 
-Read [docs/AGENTS.md](docs/AGENTS.md): the whole API on one page, recipes for what people build with glass, the rules
+Read [docs/AGENTS.md](docs/AGENTS.md) (also in the installed package, `node_modules/liquid-glass-electron/docs/AGENTS.md`): the whole API on one page, recipes for what people build with glass, the rules
 that silently break it, and which demo shows each one working. The demos in `demo/demos/` are reference code, the
 iOS controls (`ios.js`) especially: glass that turns on for part of an animation, slides, swells and flows into menus.
 The short version: this is a primitive, so you can build whatever you want with it. Any element, any shape, any

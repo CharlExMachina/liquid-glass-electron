@@ -39,6 +39,9 @@
   "files": [
     "dist",
     "src",
+    "docs/AGENTS.md",
+    "docs/APPLE.md",
+    "docs/ELECTRON.md",
     "README.md",
     "LICENSE"
   ],
