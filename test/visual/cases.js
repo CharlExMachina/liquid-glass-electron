@@ -34,6 +34,16 @@ const CASES = {
     glass(box(340, 120, 180, 44, 'r1.2'), { shape: 'capsule', zRadius: 16, refraction: 1.2, variant: 'regular' });
     glass(box(230, 230, 180, 44, 'z40'), { shape: 'capsule', zRadius: 40 });
   },
+  async applelens() {
+    // bevelMode 2 on a light page, at an iPhone's slider sizes: the track flares where it enters the knob
+    document.body.style.background = 'rgb(243 243 243)';
+    const track = at(h('div', 'track'), 60, 194, 520, 12);
+    Object.assign(track.style, { position: 'absolute', borderRadius: '6px', background: 'linear-gradient(90deg, rgb(0 125 254) 50%, rgb(216 216 216) 50%)' });
+    document.body.append(track);
+    const knob = box(250, 158.5, 113, 83);
+    knob.style.borderRadius = '41.5px';
+    glass(knob, { bevelMode: 2, zRadius: 24, refraction: 1.15, chromAberration: 0, brightness: -0.057, edgeHighlight: 0, fresnel: 0, fill: 'rgb(255 255 255 / 0.05)' });
+  },
   async dome() {
     await photo('ponds');
     glass(box(220, 100, 200, 200), { shape: 'circle', bevelMode: 1, refraction: 1.4 });

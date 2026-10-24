@@ -18,6 +18,11 @@ export interface Optics {
     bevel: number;
     /** a dome that magnifies the whole element instead of a pill with a bevelled rim (bevelMode 1) */
     dome: boolean;
+    /**
+     * Apple's lens (bevelMode 2): the rim magnifies toward the middle, most at the edge and fading out over `bevel` px,
+     * and the middle is flat
+     */
+    rim?: boolean;
     /** the slight magnification toward the middle of a pill */
     magnify: boolean;
     /** keep the bevel's slope at its peak (2 px in) all the way to the edge, so the profile only falls inward */

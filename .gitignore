@@ -5,4 +5,4 @@ out/
 *.log
 bench/adapters/lgreact.js
 bench/results/*/shots/
-docs/media/*.tmp
+docs/media/

@@ -96,6 +96,11 @@ function shiftAt(x, y, f, o) {
     const [tx, ty] = f.toward(x, y), k2 = o.refraction * depth * 0.35;
     return [tx * k2, ty * k2];
   }
+  if (o.rim) {
+    const t = clamp(d / zR, 0, 1), k2 = o.refraction * 0.5 * (1 - t) ** 2;
+    const [tx, ty] = f.toward(x, y);
+    return [tx * k2, ty * k2];
+  }
   if (o.monotone && d < 2) {
     const g = Math.hypot(gx, gy) || 1, peak = slope(2, zR) * (1 + 0.02 * (2 - d));
     gx = gx / g * peak;
@@ -353,7 +358,7 @@ function tableMap(f, o, scale, N = 256, fringe = 0, profile = f) {
   };
   const zR = Math.min(Math.max(o.bevel, 1), f.shortHalf);
   const margin = Math.ceil(2 / scale);
-  if (o.dome) return smoothMap(f, shift, scale, margin, N);
+  if (o.dome || o.rim) return smoothMap(f, shift, scale, margin, N);
   const edgeShift = (axis, d) => {
     const [x, y] = profile.probe(axis, Math.max(d, 0.01));
     return (profile === f ? shift(x, y) : shiftAt(x, y, profile, opt))[axis];
@@ -1040,7 +1045,7 @@ var Lens = class {
           const k = `${key}|${map.fringe}`;
           return mapCache.get(k) ?? remember(mapCache, k, (() => {
             const profile = free && o.shape === "path" ? roundedRect(w, h, [0, 0, 0, 0]) : sub;
-            const m = tableMap(sub, { refraction, bevel: zR, dome: o.bevelMode === 1, magnify: o.magnify }, scale, moving ? 64 : 256, map.fringe, profile);
+            const m = tableMap(sub, { refraction, bevel: zR, dome: o.bevelMode === 1, rim: o.bevelMode === 2, magnify: o.magnify }, scale, moving ? 64 : 256, map.fringe, profile);
             return { url: toDataURL(m), rimPx: m.rimPx, margin: m.margin, tables: [m.tableX.join(" "), m.tableY.join(" "), m.tableB.join(" ")] };
           })());
         });

@@ -3,7 +3,7 @@
 Liquid glass for Electron: Apple's Liquid Glass look, built from a primitive you can bend, fade, reshape and animate,
 on any element of an Electron app.
 
-<!-- MEDIA:hero -->
+<p align="center"><img src="https://raw.githubusercontent.com/CharlExMachina/liquid-glass-electron/media/ios.gif" alt="iOS 26's controls built with the library: a slider knob and a switch knob that turn to glass only while held, a glass lens sliding across a segmented control, a menu growing out of a blob of glass" width="760"></p>
 
 Electron is Chromium, and Chromium's `backdrop-filter` accepts an SVG filter. An `feDisplacementMap` in that filter
 bends whatever the compositor has already drawn behind the element, on the GPU. So the glass needs no copy of the page,
@@ -12,8 +12,9 @@ nothing on screen changes it costs nothing at all.
 
 - **The optics are [liquidglass](https://github.com/ybouane/liquidglass)'s**, at the same option names and defaults: a
   quarter-circle bevel that bends light where it enters and where it leaves, slight magnification toward the middle,
-  colour fringing at the rim, and its Fresnel, specular and edge light. At its defaults this library's glass is within
-  the difference liquidglass has with itself moved by one pixel (see [the comparison](#compared-with-liquidglass)).
+  colour fringing at the rim, and its Fresnel, specular and edge light. At its defaults this library's glass differs
+  from liquidglass's about as much as liquidglass differs from itself moved by one pixel (see
+  [the comparison](#compared-with-liquidglass)).
 - **Apple's knobs:** regular, clear and identity glass, tints, interactive glass, capsules, circles, concentric and
   continuous ("squircle") corners, containers whose glass flows together, morphing, materializing, `.glass` and
   `.glassProminent` buttons, scroll edges, the system's Clear/Tinted setting, Reduce Transparency, Increase Contrast and
@@ -100,7 +101,7 @@ liquidglass's options, with its defaults:
 |---|---|---|
 | `refraction` | 0.69 | How much the bevel bends what's behind it. 0 = no bending at all (light, fill and shadow only, which cost nothing per frame) |
 | `zRadius` | 40 | The bevel's depth, px: how far in from the edge it curves |
-| `bevelMode` | 0 | 0 = a pill with a bevelled rim; 1 = a dome that magnifies the whole element |
+| `bevelMode` | 0 | 0 = a pill with a bevelled rim; 1 = a dome that magnifies the whole element; 2 = Apple's lens (this library's): the rim magnifies toward the middle, most at the edge and fading out `zRadius` px in, and the middle is flat |
 | `chromAberration` | 0.05 | Colour fringing at the rim. Two more passes per frame; 0 for less work |
 | `blurAmount` | 0 | Frost: 1 ≈ a 7.6 px blur |
 | `saturation`, `brightness` | 0, 0 | Boosts (0.5 = 1.5×). The glass is always 6% brighter, as liquidglass's is |
@@ -164,7 +165,15 @@ npm run playground    # every option, live
 The gallery runs sandboxed, context-isolated and under a strict Content-Security-Policy. Photos and video are NASA's
 ([credits](demo/assets/CREDITS.md)).
 
-<!-- MEDIA:gallery -->
+<table>
+<tr><td width="50%"><img src="https://raw.githubusercontent.com/CharlExMachina/liquid-glass-electron/media/toolbar.gif" alt="Toolbar: grouped buttons on capsules of glass"><br><b>Toolbar</b>: grouped buttons on capsules of glass (<a href="https://raw.githubusercontent.com/CharlExMachina/liquid-glass-electron/media/toolbar.mp4">MP4</a>, <code>demo/demos/toolbar.js</code>)</td><td width="50%"><img src="https://raw.githubusercontent.com/CharlExMachina/liquid-glass-electron/media/tabbar.gif" alt="Tab bar: a floating tab bar and a separate search button"><br><b>Tab bar</b>: a floating tab bar and a separate search button (<a href="https://raw.githubusercontent.com/CharlExMachina/liquid-glass-electron/media/tabbar.mp4">MP4</a>, <code>demo/demos/tabbar.js</code>)</td></tr>
+<tr><td width="50%"><img src="https://raw.githubusercontent.com/CharlExMachina/liquid-glass-electron/media/scroll.gif" alt="Over scrolling content: a bar floating over a scrolling page, with a soft scroll edge"><br><b>Over scrolling content</b>: a bar floating over a scrolling page, with a soft scroll edge (<a href="https://raw.githubusercontent.com/CharlExMachina/liquid-glass-electron/media/scroll.mp4">MP4</a>, <code>demo/demos/scroll.js</code>)</td><td width="50%"><img src="https://raw.githubusercontent.com/CharlExMachina/liquid-glass-electron/media/controls.gif" alt="Sliders and toggles: knobs that turn to glass while held"><br><b>Sliders and toggles</b>: knobs that turn to glass while held (<a href="https://raw.githubusercontent.com/CharlExMachina/liquid-glass-electron/media/controls.mp4">MP4</a>, <code>demo/demos/controls.js</code>)</td></tr>
+<tr><td width="50%"><img src="https://raw.githubusercontent.com/CharlExMachina/liquid-glass-electron/media/buttons.gif" alt="Buttons: glass and prominent glass buttons, interactive glass"><br><b>Buttons</b>: <code>.glass</code> and <code>.glassProminent</code>, interactive glass (<a href="https://raw.githubusercontent.com/CharlExMachina/liquid-glass-electron/media/buttons.mp4">MP4</a>, <code>demo/demos/buttons.js</code>)</td><td width="50%"><img src="https://raw.githubusercontent.com/CharlExMachina/liquid-glass-electron/media/toasts.gif" alt="Toasts: notifications materializing and leaving"><br><b>Toasts</b>: notifications materializing and leaving (<a href="https://raw.githubusercontent.com/CharlExMachina/liquid-glass-electron/media/toasts.mp4">MP4</a>, <code>demo/demos/toasts.js</code>)</td></tr>
+<tr><td width="50%"><img src="https://raw.githubusercontent.com/CharlExMachina/liquid-glass-electron/media/morph.gif" alt="Morphing: a button's glass flowing into a sheet and back"><br><b>Morphing</b>: a button's glass flowing into a sheet and back (<a href="https://raw.githubusercontent.com/CharlExMachina/liquid-glass-electron/media/morph.mp4">MP4</a>, <code>demo/demos/morph.js</code>)</td><td width="50%"><img src="https://raw.githubusercontent.com/CharlExMachina/liquid-glass-electron/media/container.gif" alt="Merging glass: shapes in a container flowing together and splitting"><br><b>Merging glass</b>: shapes in a container flowing together and splitting (<a href="https://raw.githubusercontent.com/CharlExMachina/liquid-glass-electron/media/container.mp4">MP4</a>, <code>demo/demos/container.js</code>)</td></tr>
+<tr><td width="50%"><img src="https://raw.githubusercontent.com/CharlExMachina/liquid-glass-electron/media/drag.gif" alt="Dragging: floating glass that stretches as it moves"><br><b>Dragging</b>: floating glass that stretches as it moves (<a href="https://raw.githubusercontent.com/CharlExMachina/liquid-glass-electron/media/drag.mp4">MP4</a>, <code>demo/demos/drag.js</code>)</td><td width="50%"><img src="https://raw.githubusercontent.com/CharlExMachina/liquid-glass-electron/media/dock.gif" alt="Dock: a dock of icons on one piece of glass"><br><b>Dock</b>: a dock of icons on one piece of glass (<a href="https://raw.githubusercontent.com/CharlExMachina/liquid-glass-electron/media/dock.mp4">MP4</a>, <code>demo/demos/dock.js</code>)</td></tr>
+<tr><td width="50%"><img src="https://raw.githubusercontent.com/CharlExMachina/liquid-glass-electron/media/video.gif" alt="Over video: glass bending a playing video"><br><b>Over video</b>: glass bending a playing video (<a href="https://raw.githubusercontent.com/CharlExMachina/liquid-glass-electron/media/video.mp4">MP4</a>, <code>demo/demos/video.js</code>)</td><td width="50%"><img src="https://raw.githubusercontent.com/CharlExMachina/liquid-glass-electron/media/magnifier.gif" alt="Magnifier: a dome lens"><br><b>Magnifier</b>: a dome lens (<a href="https://raw.githubusercontent.com/CharlExMachina/liquid-glass-electron/media/magnifier.mp4">MP4</a>, <code>demo/demos/magnifier.js</code>)</td></tr>
+<tr><td width="50%"><img src="https://raw.githubusercontent.com/CharlExMachina/liquid-glass-electron/media/appearance.gif" alt="Clear, tinted, accessible: Clear/Tinted, Reduce Transparency, Increase Contrast, light and dark"><br><b>Clear, tinted, accessible</b>: Clear/Tinted, Reduce Transparency, Increase Contrast, light and dark (<a href="https://raw.githubusercontent.com/CharlExMachina/liquid-glass-electron/media/appearance.mp4">MP4</a>, <code>demo/demos/appearance.js</code>)</td><td width="50%"><img src="https://raw.githubusercontent.com/CharlExMachina/liquid-glass-electron/media/playground.gif" alt="Playground: every option, live, including any SVG path as the shape"><br><b>Playground</b>: every option, live, including any SVG path as the shape (<a href="https://raw.githubusercontent.com/CharlExMachina/liquid-glass-electron/media/playground.mp4">MP4</a>, <code>demo/demos/playground.js</code>)</td></tr>
+</table>
 
 ## Performance
 

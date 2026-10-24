@@ -111,7 +111,7 @@ export function tableMap(f: Field, o: Optics, scale: number, N = 256, fringe = 0
   };
   const zR = Math.min(Math.max(o.bevel, 1), f.shortHalf);
   const margin = Math.ceil(2 / scale);
-  if (o.dome) return smoothMap(f, shift, scale, margin, N);
+  if (o.dome || o.rim) return smoothMap(f, shift, scale, margin, N);
   // Per axis: the shift d px in from a straight edge (left, top), d from the bevel's end to `margin` outside.
   // Outside the element the shift stays what it is at the edge.
   const edgeShift = (axis: 0 | 1, d: number) => {

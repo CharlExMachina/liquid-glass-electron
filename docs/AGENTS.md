@@ -36,7 +36,7 @@ Options can also come from data attributes (`data-glass-refraction="0.4"`, `data
 
 | You want | Do this | See |
 |---|---|---|
-| A control that turns to glass only while touched (iOS 26 slider and switch knobs) | The element's own CSS background is the solid look; animate `strength` 0 → 1 (or transition `--glass-strength`) while fading that background out, and `scale` it up | `demo/demos/ios.js`, `demo/demos/controls.js` |
+| A control that turns to glass only while touched (iOS 26 slider and switch knobs) | The element's own CSS background is the solid look; animate `strength` 0 → 1 (or transition `--glass-strength`) while fading that background out, and `scale` it up. For Apple's look use `bevelMode: 2` (the rim magnifies toward the middle, so a track flares where it enters), `brightness: -0.057` on light pages, and draw the rim's line and shading in CSS (`.ios-knob::after`) | `demo/demos/ios.js`, `demo/demos/controls.js` |
 | Glass that comes and goes within any animation | `g.set({ strength })` each frame, `g.animate({ strength })`, or a CSS transition/keyframes on `--glass-strength` | `demo/demos/ios.js` |
 | A lens that slides between positions (segmented control) | One glass element moved with `translate`; `strength` up while it moves, down when it lands | `demo/demos/ios.js` |
 | A menu or sheet that grows out of its button | `await morph(button, menu)` (menu laid out, `visibility: hidden`); back: `morph(menu, button)` | `demo/demos/morph.js` |

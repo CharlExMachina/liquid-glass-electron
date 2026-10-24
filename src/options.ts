@@ -44,8 +44,11 @@ export interface GlassOptions {
   elasticity: number;
   /** button: hover brightens, press flattens the bevel and deepens the shadow */
   button: boolean;
-  /** 0 = a pill with a bevelled rim, 1 = a dome that magnifies the whole element */
-  bevelMode: 0 | 1;
+  /**
+   * 0 = a pill with a bevelled rim (liquidglass's), 1 = a dome that magnifies the whole element, 2 = Apple's lens: the
+   * rim magnifies toward the middle, most at the edge and fading out `zRadius` px in, and the middle is flat
+   */
+  bevelMode: 0 | 1 | 2;
 
   // ---- beyond liquidglass
   /**

@@ -91,3 +91,19 @@ test('the shadow is liquidglass\'s, squared as its canvas draws it', () => {
   assert.equal(boxShadow(0, 10, 1), 'none');
   assert.match(boxShadow(0.3, 10, 1), /^0 1px 9px 5px rgb\(0 0 0 \/ 0\.06\), 0 1px 13px -4px rgb\(0 0 0 \/ 0\.186\)$/);
 });
+
+test('Apple\'s lens (bevelMode 2) pulls the rim toward the middle and leaves the middle flat', () => {
+  const f = roundedRect(113, 83, [41.5, 41.5, 41.5, 41.5]);
+  const o = { refraction: 1, bevel: 24, dome: false, rim: true, magnify: false };
+  // at the edge, halfway to the middle (refraction 1); the samples on a ray all head for the middle
+  const [ex, ey] = shiftAt(0.01, 41.5, f, o);
+  near(ex, (56.5 - 0.01) * 0.5 * (1 - 0.01 / 24) ** 2, 1e-6);
+  near(ey, 0, 1e-9);
+  // falling as (1 − d/zR)²: a quarter at half the depth
+  near(shiftAt(12, 41.5, f, o)[0], (56.5 - 12) * 0.5 * 0.25, 1e-6);
+  // nothing from zR in, so the middle isn't magnified
+  assert.deepEqual(shiftAt(30, 41.5, f, o).map((v) => Math.abs(v)), [0, 0]);
+  assert.deepEqual(shiftAt(56.5, 41.5, f, o).map((v) => Math.abs(v)), [0, 0]);
+  // linear in refraction
+  near(shiftAt(4, 41.5, f, { ...o, refraction: 2 })[0], 2 * shiftAt(4, 41.5, f, o)[0], 1e-9);
+});

@@ -4,7 +4,7 @@ import { css, h, ready, sleep } from './lib.js';
 // Every option, live. Drag the glass around; the code below is the glass() call for what's set (only what differs
 // from the defaults).
 const NUM = [
-  ['Bending', [['refraction', 0, 2, 0.01], ['zRadius', 1, 120, 1], ['bevelMode', 0, 1, 1], ['chromAberration', 0, 0.4, 0.005], ['distortion', 0, 2, 0.05]]],
+  ['Bending', [['refraction', 0, 2, 0.01], ['zRadius', 1, 120, 1], ['bevelMode', 0, 2, 1], ['chromAberration', 0, 0.4, 0.005], ['distortion', 0, 2, 0.05]]],
   ['Light', [['edgeHighlight', 0, 1, 0.01], ['fresnel', 0, 3, 0.05], ['specular', 0, 2, 0.05]]],
   ['Frost and colour', [['blurAmount', 0, 4, 0.05], ['saturation', -1, 2, 0.05], ['brightness', -0.5, 0.8, 0.02], ['tintStrength', 0, 1, 0.02], ['opacity', 0, 1, 0.02]]],
   ['Shadow', [['shadowOpacity', 0, 1, 0.02], ['shadowSpread', 1, 40, 1], ['shadowOffsetY', -10, 30, 1]]],

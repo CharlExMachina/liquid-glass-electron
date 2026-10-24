@@ -466,7 +466,7 @@ export class Lens {
           return mapCache.get(k) ?? remember(mapCache, k, (() => {
             // a path's edges are anywhere: its tables come from a plain box's straight edges
             const profile = free && o.shape === 'path' ? roundedRect(w, h, [0, 0, 0, 0]) : sub;
-            const m = tableMap(sub, { refraction, bevel: zR, dome: o.bevelMode === 1, magnify: o.magnify }, scale, moving ? 64 : 256, map.fringe, profile);
+            const m = tableMap(sub, { refraction, bevel: zR, dome: o.bevelMode === 1, rim: o.bevelMode === 2, magnify: o.magnify }, scale, moving ? 64 : 256, map.fringe, profile);
             return { url: toDataURL(m), rimPx: m.rimPx, margin: m.margin, tables: [m.tableX.join(' '), m.tableY.join(' '), m.tableB.join(' ')] as [string, string, string] };
           })());
         });

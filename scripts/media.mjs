@@ -1,4 +1,5 @@
-// The README's media: a screenshot, an MP4 and a GIF of each demo, in docs/media/. npm run media (needs ffmpeg).
+// The README's media: a screenshot, an MP4 and a GIF of each demo, in docs/media/ (ignored here: they live on the
+// repository's media branch, so that installing from GitHub doesn't download them). npm run media (needs ffmpeg).
 //
 //   node scripts/media.mjs [--only=toolbar,morph] [--seconds=n] [--recorder=fast|demo] [--no-shots] [--no-video]
 //                          [--fps=30] [--gif-mb=4] [--out=docs/media] [--keep]
@@ -25,7 +26,8 @@ const arg = (name, fallback) => {
 };
 
 const DEMOS = ['toolbar', 'tabbar', 'scroll', 'controls', 'buttons', 'toasts', 'morph', 'container', 'drag', 'dock', 'video', 'magnifier', 'appearance', 'playground', 'ios'];
-const LONG = new Set(['video', 'scroll', 'morph', 'container', 'ios']); // these act out more, record 10 s
+// seconds recorded, for the demos that act out more than the usual 7
+const LONG = { video: 10, scroll: 10, morph: 10, container: 10, ios: 16 };
 const LIGHT = new Set(['toolbar', 'appearance']); // these also get a light screenshot
 const MP4_WIDTH = 1180;
 const GIF_WIDTH = 760;
@@ -124,16 +126,22 @@ async function main() {
   for (const id of ids) {
     if (!arg('no-shots')) {
       for (const theme of LIGHT.has(id) ? ['dark', 'light'] : ['dark']) {
-        const file = join(out, theme === 'dark' ? `${id}.png` : `${id}-${theme}.png`);
+        const name = theme === 'dark' ? id : `${id}-${theme}`;
+        const png = join(tmpdir(), `lg-shot-${name}.png`), file = join(out, `${name}.jpg`);
         console.log(`${id}: screenshot (${theme})`);
-        await electron(['demo/main.mjs', `--page=${id}`, `--shot=${file}`, '--wait=1500', `--theme=${theme}`]);
+        await electron(['demo/main.mjs', `--page=${id}`, `--shot=${png}`, '--wait=1500', `--theme=${theme}`]);
+        // a JPEG at high quality: a tenth of the PNG's size, for the README
+        if (existsSync(png)) {
+          await ffmpeg(['-i', png, '-q:v', '3', file]);
+          rmSync(png);
+        }
         if (existsSync(file)) made.push(file);
         else notes.push(`${id}: no ${theme} screenshot`);
       }
     }
     if (arg('no-video')) continue;
 
-    const seconds = Number(arg('seconds', LONG.has(id) ? 10 : 7));
+    const seconds = Number(arg('seconds', LONG[id] ?? 7));
     const tmp = mkdtempSync(join(tmpdir(), `lg-media-${id}-`));
     try {
       console.log(`${id}: recording ${seconds} s (${fast ? 'fast' : 'demo/main.mjs'} recorder)`);
@@ -168,7 +176,7 @@ async function main() {
 // Fast recorder → constant frame rate: output frame k shows the latest frame drawn by k/fps (the first frame before
 // that), piped raw into a lossless intermediate.
 async function recordFast(id, seconds, fps, tmp, cfr) {
-  await electron(['scripts/media.mjs', `--record-child=${tmp}`, `--page=${id}`, `--seconds=${seconds}`, `--fps=${fps}`, '--theme=dark', '--wait=1500']);
+  await electron(['scripts/media.mjs', `--record-child=${tmp}`, `--page=${id}`, `--seconds=${seconds}`, `--fps=${fps}`, `--theme=${arg('theme', 'dark')}`, '--wait=1500']);
   if (!existsSync(join(tmp, 'meta.json'))) return null;
   const meta = JSON.parse(readFileSync(join(tmp, 'meta.json'), 'utf8'));
   const { width, height, times } = meta;
@@ -203,7 +211,7 @@ async function recordFast(id, seconds, fps, tmp, cfr) {
 
 // demo/main.mjs --record → constant frame rate via an ffconcat list whose durations are the gaps between frames.
 async function recordDemo(id, seconds, fps, tmp, cfr) {
-  await electron(['demo/main.mjs', `--page=${id}`, `--record=${tmp}`, `--seconds=${seconds}`, '--theme=dark', '--wait=1500']);
+  await electron(['demo/main.mjs', `--page=${id}`, `--record=${tmp}`, `--seconds=${seconds}`, `--theme=${arg('theme', 'dark')}`, '--wait=1500']);
   if (!existsSync(join(tmp, 'times.json'))) return null;
   const times = JSON.parse(readFileSync(join(tmp, 'times.json'), 'utf8'));
   if (!times.length) return null;

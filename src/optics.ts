@@ -36,6 +36,11 @@ export interface Optics {
   bevel: number;
   /** a dome that magnifies the whole element instead of a pill with a bevelled rim (bevelMode 1) */
   dome: boolean;
+  /**
+   * Apple's lens (bevelMode 2): the rim magnifies toward the middle, most at the edge and fading out over `bevel` px,
+   * and the middle is flat
+   */
+  rim?: boolean;
   /** the slight magnification toward the middle of a pill */
   magnify: boolean;
   /** keep the bevel's slope at its peak (2 px in) all the way to the edge, so the profile only falls inward */
@@ -60,6 +65,14 @@ export function shiftAt(x: number, y: number, f: Field, o: Optics): [number, num
   const depth = smoothstep(0, zR, d);
   if (o.dome) {
     const [tx, ty] = f.toward(x, y), k = o.refraction * depth * 0.35;
+    return [tx * k, ty * k];
+  }
+  if (o.rim) {
+    // (1 - t)²: falling fast near the edge, then slowly, so a line crossing the rim flares out like a trumpet (as
+    // measured from an iPhone's slider); at refraction 1 the edge samples halfway to the middle. Like thick glass, the
+    // outermost pixels fold back: they show what's further in, compressed and mirrored.
+    const t = clamp(d / zR, 0, 1), k = o.refraction * 0.5 * (1 - t) ** 2;
+    const [tx, ty] = f.toward(x, y);
     return [tx * k, ty * k];
   }
   if (o.monotone && d < 2) {

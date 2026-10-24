@@ -7,7 +7,7 @@ import { css, drag, h, icon, photo, ready, sleep, tap } from './lib.js';
 // release the frost comes up first, then the white, so the in-between frames are frosted, as Apple's are.
 
 const SVG = 'http://www.w3.org/2000/svg';
-const KNOB_W = 38; // the resting knob's width (see ios.css)
+const KNOB_W = 77; // the resting knob's width (see ios.css)
 
 /** The up-and-down chevrons of a pop-up button. */
 function chevrons() {
@@ -42,7 +42,7 @@ function slider(value) {
     }
     const r = el.getBoundingClientRect(), span = r.width - KNOB_W;
     // pressed off the knob, it jumps there first
-    if (Math.abs(e.clientX - (r.left + KNOB_W / 2 + (span * value) / 100)) > 28) set(((e.clientX - r.left - KNOB_W / 2) / span) * 100);
+    if (Math.abs(e.clientX - (r.left + KNOB_W / 2 + (span * value) / 100)) > KNOB_W / 2) set(((e.clientX - r.left - KNOB_W / 2) / span) * 100);
     const base = value, x0 = e.clientX;
     el.classList.add('held');
     const move = (m) => set(base + ((m.clientX - x0) / span) * 100);
@@ -139,7 +139,7 @@ export default {
       h('div.ios-card', {}, h('div.ios-label', { text: 'Size' }), h('div.ios-slider-row', {}, h('span', { text: 'Small' }), size.el, h('span', { text: 'Large' }))),
       h('div.ios-card.ios-row', {}, h('span', { text: 'Enabled' }), enabled.el),
       h('div.ios-card', {}, h('div.ios-label', { text: 'Mode' }), mode.el),
-      h('p.ios-note', { text: 'Solid at rest, glass while touched. Each knob is glass whose --glass-strength is 0 until it’s pressed: a CSS transition takes it to 1 while the knob’s own white fades out and it grows; on release the frost comes back first, then the white.' }),
+      h('p.ios-note', { text: 'Solid at rest, glass while touched. Each knob is glass whose --glass-strength is 0 until it’s pressed: a CSS transition takes it to 1 while the knob’s own white fades out and it grows; on release the frost comes back first, then the white. The knobs are Apple’s lens (bevelMode 2): the rim magnifies toward the middle, so the track flares where it enters.' }),
     );
     const right = h('div.ios-col.ios-right', {},
       h('div.ios-card.ios-field', {}, h('div.ios-label', { text: 'Options' }), field),
@@ -150,13 +150,15 @@ export default {
     await ready(img);
 
     // ---- the glass. Strength and frost come from CSS (ios.css) so transitions drive them; the rest is set here.
-    // Knobs are domes (bevelMode 1): the whole knob magnifies, so the track shows through it thicker, as on iOS.
-    const knob = { shape: 'capsule', bevelMode: 1, zRadius: 12, refraction: 0.65, chromAberration: 0.04, edgeHighlight: 0.35, fresnel: 0.9, fill: 'rgb(255 255 255 / 0.06)', shadowOpacity: 0.32, shadowSpread: 6, shadowOffsetY: 2 };
+    // Knobs are Apple's lens (bevelMode 2): the rim magnifies toward the middle, so the track flares out where it
+    // enters the knob, and the middle is flat. No brightening (liquidglass's 6% would turn a light page white) and none
+    // of the glass's own light: the knob's rim and shading are CSS (.ios-knob::after), as measured from an iPhone.
+    const knob = { bevelMode: 2, zRadius: 24, refraction: 1.15, chromAberration: 0, brightness: -0.057, edgeHighlight: 0, fresnel: 0, specular: 0, fill: 'rgb(255 255 255 / 0.05)', shadowOpacity: 0.25, shadowSpread: 8, shadowOffsetY: 3 };
     const handles = [
       glass(size.knob, knob),
-      glass(enabled.knob, { ...knob, zRadius: 13 }),
+      glass(enabled.knob, { ...knob, zRadius: 14 }),
       glass(mode.lens, { shape: 'capsule', zRadius: 12, refraction: 0.6, chromAberration: 0, edgeHighlight: 0.2, fresnel: 0.6, shadowOpacity: 0.45, shadowSpread: 8, shadowOffsetY: 2 }),
-      glass(menu, { variant: 'regular', cornerRadius: 26, blurAmount: 1.6, saturation: 0.6, refraction: 0.55, zRadius: 22, fill: 'rgb(38 38 42 / 0.55)', shadowOpacity: 0.5, shadowSpread: 18, shadowOffsetY: 6 }),
+      glass(menu, { variant: 'regular', cornerRadius: 26, blurAmount: 1.6, saturation: 0.6, refraction: 0.55, zRadius: 22, shadowOpacity: 0.5, shadowSpread: 18, shadowOffsetY: 6 }),
     ];
     const buttonGlass = { shape: 'capsule', zRadius: 12, refraction: 0.8, chromAberration: 0, press: 'bulge', pressBulge: 0.5, shadowOpacity: 0.35, shadowSpread: 8 };
     const tapGlass = glass(tapMe, { ...buttonGlass, blurAmount: 0.12 });

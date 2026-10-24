@@ -37,8 +37,11 @@ export interface GlassOptions {
     elasticity: number;
     /** button: hover brightens, press flattens the bevel and deepens the shadow */
     button: boolean;
-    /** 0 = a pill with a bevelled rim, 1 = a dome that magnifies the whole element */
-    bevelMode: 0 | 1;
+    /**
+     * 0 = a pill with a bevelled rim (liquidglass's), 1 = a dome that magnifies the whole element, 2 = Apple's lens: the
+     * rim magnifies toward the middle, most at the edge and fading out `zRadius` px in, and the middle is flat
+     */
+    bevelMode: 0 | 1 | 2;
     /**
      * how much glass there is, 0..1 (1): bending, fringe, frost, colour, light, fill and shadow together. Cheap to change
      * every frame (no filter is rebuilt), so glass can come and go within an animation; at 0 it costs nothing
