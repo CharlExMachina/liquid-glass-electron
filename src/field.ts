@@ -56,7 +56,8 @@ export interface Member {
 export function union(w: number, h: number, members: Member[], spacing: number): Field {
   const k = Math.max(spacing, 0.01);
   const each = (x: number, y: number) => members.map((m) => rectSdf(x - m.x - m.w / 2, y - m.y - m.h / 2, m.w / 2, m.h / 2, m.radii));
-  // polynomial smooth minimum: exact (the plain minimum) wherever the shapes are more than `spacing` apart
+  // polynomial smooth minimum: the plain minimum wherever the two distances differ by more than `spacing`, so shapes
+  // farther apart than that keep their own edges
   const smin = (a: number, b: number) => {
     const t = clamp((k - Math.abs(a - b)) / k, 0, 1);
     return Math.min(a, b) - (t * t * k) / 4;

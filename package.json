@@ -26,7 +26,7 @@
   "scripts": {
     "build": "node scripts/build.mjs",
     "typecheck": "tsc -p tsconfig.json",
-    "test": "node --test test/unit/",
+    "test": "node --test test/unit/*.test.ts",
     "test:visual": "node scripts/electron.mjs test/visual/run.mjs",
     "demo": "node scripts/build.mjs && node scripts/electron.mjs demo/main.mjs",
     "playground": "node scripts/build.mjs && node scripts/electron.mjs demo/main.mjs --page=playground"
