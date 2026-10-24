@@ -82,6 +82,12 @@ export function installStyles() {
 :where([data-liquid-glass][data-lg-floating][data-lg-dragging]) { cursor: grabbing; }
 `);
   document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
+  // --glass-strength as a number, so CSS transitions and animations interpolate it (the glass follows them)
+  try {
+    CSS.registerProperty({ name: '--glass-strength', syntax: '<number>', inherits: false, initialValue: '1' });
+  } catch {
+    // registered already
+  }
 }
 
 /**

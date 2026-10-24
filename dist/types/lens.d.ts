@@ -35,6 +35,13 @@ export declare class Lens {
     private main;
     private maps;
     private colour;
+    private blurNode;
+    private mixNode;
+    private filterCss;
+    private structure;
+    private unitMaps;
+    private following;
+    private lightUrl;
     private passes;
     private stash;
     private bends;
@@ -46,7 +53,7 @@ export declare class Lens {
     private mapKey;
     private lightKey;
     private settleTimer;
-    private strength;
+    private bulge;
     private tween;
     private hover;
     private pressed;
@@ -55,8 +62,27 @@ export declare class Lens {
     private off;
     private shape;
     constructor(el: HTMLElement, js: Partial<GlassOptions>, host: LensHost, shape?: ShapeSource | null);
-    /** Read the options again (CSS custom properties, data attributes, `js` on top) and rebuild. */
+    private unlisten;
+    /**
+     * Read the options again (CSS custom properties, data attributes, `js` on top). Only a change to the filter's
+     * structure rebuilds it; strength, refraction, fringe, frost, colour, light and shadow are attributes and styles, cheap
+     * enough to change every frame.
+     */
     refresh(js?: Partial<GlassOptions>): void;
+    /** What, in the options, decides which filter nodes there are. */
+    private structureKey;
+    /** A shape the element's own (rounded) box can't clip: the filter masks itself, and light and shadow are an image. */
+    private isFree;
+    /** A free shape's field, for the element's size. */
+    private freeField;
+    /** Apply what changed without rebuilding: matrix, blur, fringe, strength, backdrop, light, shadow, size. */
+    private live;
+    /** The strength, 0..1. */
+    private amount;
+    /** Follow running transitions and animations of --glass-* properties on the element, a frame at a time. */
+    private follow;
+    /** The frost and colour as CSS functions, scaled by the strength (glass that doesn't bend, and other browsers). */
+    private cssBackdrop;
     /** The border-box size, as the ResizeObserver reported it. */
     resize(w: number, h: number): void;
     private measure;
@@ -71,11 +97,21 @@ export declare class Lens {
     /** The corner radii, and whether they're the element's own CSS ones (circular, in px). */
     private cornerRadii;
     private draw;
+    /**
+     * A free shape's light and shadow, as one image stretched over the element and past it (border-image-outset), so
+     * the shadow can fall outside the box. Painted once, like a rounded rectangle's.
+     */
+    private drawFreeLight;
     /** A shape's light, shadow and coverage, as images on the element (and its shadow layer). */
     private drawFieldLight;
     private drawLight;
+    /**
+     * The light at the current strength: the image cross-faded with a transparent one of the same size (so a 9-slice
+     * still lines up), which is only a change of style, every frame if need be.
+     */
+    private applyLight;
     private applyStrength;
-    private tweenStrength;
+    private tweenBulge;
     private setPressed;
     private recolour;
     private bindPointer;

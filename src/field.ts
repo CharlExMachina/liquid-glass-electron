@@ -88,3 +88,102 @@ export function union(w: number, h: number, members: Member[], spacing: number):
     probe: (axis, d) => (axis === 0 ? [first.x + d, first.y + first.h / 2] : [first.x + first.w / 2, first.y + d]),
   };
 }
+
+/**
+ * A rectangle with continuous corners, as Apple draws them (a "squircle"): each corner a superellipse
+ * |x|ⁿ + |y|ⁿ = rⁿ instead of a quarter circle, so the curvature eases in from the straight edges. Its distance is the
+ * superellipse's level set divided by its gradient, exact on the edge and close near it, which is where the glass bends.
+ */
+export function squircle(w: number, h: number, radius: number, n = 5): Field {
+  const hx = w / 2, hy = h / 2, r = Math.max(Math.min(radius * 1.25, hx, hy), 0.01);
+  const level = (x: number, y: number) => {
+    const qx = Math.abs(x - hx) - (hx - r), qy = Math.abs(y - hy) - (hy - r);
+    if (qx <= 0 || qy <= 0) return Math.max(qx, qy) - r;
+    return (qx ** n + qy ** n) ** (1 / n) - r;
+  };
+  const sdf = (x: number, y: number) => {
+    const v = level(x, y), e = 0.01;
+    const gx = (level(x + e, y) - level(x - e, y)) / (2 * e), gy = (level(x, y + e) - level(x, y - e)) / (2 * e);
+    return v / Math.max(Math.hypot(gx, gy), 1e-6);
+  };
+  return {
+    w, h, sdf,
+    pull: (x, y) => [-(x - hx) / Math.max(hx, 1), -(y - hy) / Math.max(hy, 1)],
+    toward: (x, y) => [hx - x, hy - y],
+    shortHalf: Math.min(hx, hy),
+    probe: (axis, d) => (axis === 0 ? [d, hy] : [hx, d]),
+  };
+}
+
+/**
+ * Signed distances from a coverage mask (1 inside, 0 outside), px of the grid: negative inside. Two exact Euclidean
+ * distance transforms (Felzenszwalb and Huttenlocher), one to the outside and one to the inside, meeting at the edge.
+ */
+export function signedDistance(mask: Uint8Array, gw: number, gh: number): Float32Array {
+  const INF = 1e20;
+  const edt = (inside: boolean) => {
+    const f = new Float64Array(gw * gh);
+    for (let i = 0; i < f.length; i++) f[i] = (mask[i] > 0) === inside ? 0 : INF;
+    const line = (get: (i: number) => number, set: (i: number, v: number) => void, n: number) => {
+      const d = new Float64Array(n), v = new Int32Array(n), z = new Float64Array(n + 1), g = new Float64Array(n);
+      for (let q = 0; q < n; q++) g[q] = get(q);
+      let k = 0;
+      v[0] = 0;
+      z[0] = -INF;
+      z[1] = INF;
+      for (let q = 1; q < n; q++) {
+        let s = (g[q] + q * q - (g[v[k]] + v[k] * v[k])) / (2 * q - 2 * v[k]);
+        while (s <= z[k]) {
+          k--;
+          s = (g[q] + q * q - (g[v[k]] + v[k] * v[k])) / (2 * q - 2 * v[k]);
+        }
+        k++;
+        v[k] = q;
+        z[k] = s;
+        z[k + 1] = INF;
+      }
+      k = 0;
+      for (let q = 0; q < n; q++) {
+        while (z[k + 1] < q) k++;
+        d[q] = (q - v[k]) ** 2 + g[v[k]];
+      }
+      for (let q = 0; q < n; q++) set(q, d[q]);
+    };
+    for (let x = 0; x < gw; x++) line((y) => f[y * gw + x], (y, val) => (f[y * gw + x] = val), gh);
+    for (let y = 0; y < gh; y++) line((x) => f[y * gw + x], (x, val) => (f[y * gw + x] = val), gw);
+    return f;
+  };
+  const toOutside = edt(false), toInside = edt(true);
+  const out = new Float32Array(gw * gh);
+  // distance to the nearest pixel of the other kind, less half a pixel: the edge lies between them
+  for (let i = 0; i < out.length; i++) out[i] = mask[i] > 0 ? -(Math.sqrt(toOutside[i]) - 0.5) : Math.sqrt(toInside[i]) - 0.5;
+  return out;
+}
+
+/**
+ * A shape given as a grid of signed distances (from a rasterised path) over a w × h box, `scale` grid pixels per px:
+ * read with bilinear interpolation. The magnification pulls toward the middle of its box.
+ */
+export function gridField(w: number, h: number, grid: Float32Array, gw: number, gh: number, scale: number): Field {
+  const hx = w / 2, hy = h / 2;
+  const at = (x: number, y: number) => {
+    const fx = Math.min(Math.max(x * scale - 0.5, 0), gw - 1), fy = Math.min(Math.max(y * scale - 0.5, 0), gh - 1);
+    const i0 = Math.floor(fx), j0 = Math.floor(fy), i1 = Math.min(i0 + 1, gw - 1), j1 = Math.min(j0 + 1, gh - 1), tx = fx - i0, ty = fy - j0;
+    const g = (i: number, j: number) => grid[j * gw + i];
+    const v = (g(i0, j0) * (1 - tx) + g(i1, j0) * tx) * (1 - ty) + (g(i0, j1) * (1 - tx) + g(i1, j1) * tx) * ty;
+    // past the grid, the distance keeps growing
+    const ox = Math.max(-x, x - w, 0), oy = Math.max(-y, y - h, 0);
+    return v / scale + Math.hypot(ox, oy);
+  };
+  // the widest inscribed half: the deepest point
+  let deepest = 0;
+  for (const v of grid) deepest = Math.max(deepest, -v / scale);
+  return {
+    w, h, sdf: at,
+    pull: (x, y) => [-(x - hx) / Math.max(hx, 1), -(y - hy) / Math.max(hy, 1)],
+    toward: (x, y) => [hx - x, hy - y],
+    shortHalf: Math.max(deepest, 1),
+    // a straight edge for the tables: from the deepest row's left end, as good a guess as any for a free shape
+    probe: (axis, d) => (axis === 0 ? [d, hy] : [hx, d]),
+  };
+}

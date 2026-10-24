@@ -3,3 +3,5 @@ seed/
 lab/
 out/
 *.log
+bench/adapters/lgreact.js
+bench/results/*/shots/

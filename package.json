@@ -3,11 +3,26 @@
   "version": "0.1.0",
   "description": "Liquid glass for Electron: Chromium's compositor bends the real pixels behind an element, with liquidglass's optics and Apple's Liquid Glass knobs. No render loop, no dependencies.",
   "license": "MIT",
-  "author": "Carlos Eduardo Pérez Villanueva <carlos@perezvill.com>",
-  "repository": { "type": "git", "url": "git+https://github.com/CharlExMachina/liquid-glass-electron.git" },
+  "author": {
+    "name": "Carlos Eduardo Pérez Villanueva"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/CharlExMachina/liquid-glass-electron.git"
+  },
   "homepage": "https://github.com/CharlExMachina/liquid-glass-electron#readme",
   "bugs": "https://github.com/CharlExMachina/liquid-glass-electron/issues",
-  "keywords": ["electron", "liquid glass", "glass", "glassmorphism", "backdrop-filter", "refraction", "svg filter", "apple", "ios 26"],
+  "keywords": [
+    "electron",
+    "liquid glass",
+    "glass",
+    "glassmorphism",
+    "backdrop-filter",
+    "refraction",
+    "svg filter",
+    "apple",
+    "ios 26"
+  ],
   "type": "module",
   "main": "./dist/liquid-glass.js",
   "module": "./dist/liquid-glass.js",
@@ -21,7 +36,12 @@
     "./iife": "./dist/liquid-glass.iife.js",
     "./package.json": "./package.json"
   },
-  "files": ["dist", "src", "README.md", "LICENSE"],
+  "files": [
+    "dist",
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
   "sideEffects": false,
   "scripts": {
     "build": "node scripts/build.mjs",
@@ -29,11 +49,21 @@
     "test": "node --test test/unit/*.test.ts",
     "test:visual": "node scripts/electron.mjs test/visual/run.mjs",
     "demo": "node scripts/build.mjs && node scripts/electron.mjs demo/main.mjs",
-    "playground": "node scripts/build.mjs && node scripts/electron.mjs demo/main.mjs --page=playground"
+    "playground": "node scripts/build.mjs && node scripts/electron.mjs demo/main.mjs --page=playground",
+    "bench": "node scripts/bench.mjs",
+    "compare": "node scripts/build.mjs && node scripts/electron.mjs bench/compare/run.mjs"
   },
   "devDependencies": {
+    "@avenra/liquid-glass": "^1.2.0",
+    "@ybouane/liquidglass": "^1.0.3",
+    "apple-liquid-glass-webgl": "^2.6.0",
     "electron": "^44.9.3",
     "esbuild": "^0.28.2",
+    "liquid-gl": "^3.0.0",
+    "liquid-glass-react": "^1.1.1",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "simple-liquid-glass": "^5.4.0",
     "typescript": "^7.0.2"
   }
 }

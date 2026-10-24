@@ -25,6 +25,9 @@ export interface TableMap extends Pixels {
     /** feFuncR / feFuncG tableValues: the map's channel (0..1) to the displacement channel (0..1, 0.5 = none) */
     tableX: number[];
     tableY: number[];
+    /** feFuncB tableValues: the blue channel (the distance to the edge) to coverage, for shapes the element's own
+     * rounded corners can't clip */
+    tableB: number[];
     /** the largest shift, px: the displacement channel's range 0..1 stands for −rimPx..+rimPx */
     rimPx: number;
     /** how far the image reaches past the element on each side, px */
@@ -40,7 +43,7 @@ export interface TableMap extends Pixels {
  * (`monotone`), which changes nothing visible. The image reaches `margin` px past the edge, so the outermost pixels
  * are interpolated rather than clamped.
  */
-export declare function tableMap(f: Field, o: Optics, scale: number, N?: number, fringe?: number): TableMap;
+export declare function tableMap(f: Field, o: Optics, scale: number, N?: number, fringe?: number, profile?: Field): TableMap;
 export interface FieldLight {
     /** the light inside the shape, its shadow outside it, and its coverage (for mask-image), all the same size */
     light: Pixels;

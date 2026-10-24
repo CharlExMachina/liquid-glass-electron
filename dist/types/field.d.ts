@@ -32,3 +32,19 @@ export interface Member {
  * magnification toward its own middle, blended where they meet.
  */
 export declare function union(w: number, h: number, members: Member[], spacing: number): Field;
+/**
+ * A rectangle with continuous corners, as Apple draws them (a "squircle"): each corner a superellipse
+ * |x|ⁿ + |y|ⁿ = rⁿ instead of a quarter circle, so the curvature eases in from the straight edges. Its distance is the
+ * superellipse's level set divided by its gradient, exact on the edge and close near it, which is where the glass bends.
+ */
+export declare function squircle(w: number, h: number, radius: number, n?: number): Field;
+/**
+ * Signed distances from a coverage mask (1 inside, 0 outside), px of the grid: negative inside. Two exact Euclidean
+ * distance transforms (Felzenszwalb and Huttenlocher), one to the outside and one to the inside, meeting at the edge.
+ */
+export declare function signedDistance(mask: Uint8Array, gw: number, gh: number): Float32Array;
+/**
+ * A shape given as a grid of signed distances (from a rasterised path) over a w × h box, `scale` grid pixels per px:
+ * read with bilinear interpolation. The magnification pulls toward the middle of its box.
+ */
+export declare function gridField(w: number, h: number, grid: Float32Array, gw: number, gh: number, scale: number): Field;

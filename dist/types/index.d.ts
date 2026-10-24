@@ -9,8 +9,21 @@ export interface GlassHandle {
     readonly el: HTMLElement;
     /** the options in effect, after the system's settings */
     readonly options: GlassOptions;
-    /** change some options */
+    /**
+     * change some options. Strength, refraction, fringe, frost, colour, light and shadow change without rebuilding the
+     * filter, so this is cheap enough to call every frame
+     */
     update(options: Partial<GlassOptions>): void;
+    /** the same as update() */
+    set(options: Partial<GlassOptions>): void;
+    /**
+     * tween numeric options to `to` over `duration` ms (any of them: strength, refraction, blurAmount, chromAberration…),
+     * with a CSS easing function's shape (cubic-bezier, linear() or a keyword). Resolves when done
+     */
+    animate(to: Partial<GlassOptions>, options?: {
+        duration?: number;
+        easing?: string;
+    }): Promise<void>;
     /** read the CSS custom properties and data attributes again */
     refresh(): void;
     /** take the glass off, restoring the element's own styles */

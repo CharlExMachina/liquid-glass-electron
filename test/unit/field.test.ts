@@ -35,3 +35,26 @@ test('in a union, each shape pulls the magnification toward its own middle', () 
   const [qx] = f.pull(380, 50);
   assert.ok(px > 0.5 && qx < -0.5);
 });
+
+test('signed distances from a mask: exact for a filled disc', async () => {
+  const { signedDistance } = await import('../../src/field.ts');
+  const n = 101, r = 30, mask = new Uint8Array(n * n);
+  for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) mask[y * n + x] = Math.hypot(x - 50, y - 50) <= r ? 1 : 0;
+  const d = signedDistance(mask, n, n);
+  // the centre is about r deep, a point 20 px outside about 20 out, the edge about 0
+  assert.ok(Math.abs(d[50 * n + 50] + r) < 1.2);
+  assert.ok(Math.abs(d[50 * n + 100] - 20) < 1.2);
+  assert.ok(Math.abs(d[50 * n + 80]) < 1);
+});
+
+test('a squircle\'s corners ease in: between a square\'s and a circle\'s', async () => {
+  const { squircle } = await import('../../src/field.ts');
+  const f = squircle(200, 200, 40);
+  assert.ok(Math.abs(f.sdf(0, 100)) < 1e-6, 'straight edges where a rectangle\'s are');
+  // along the corner's diagonal the edge sits further out than a circular corner of the same radius
+  const t = (k: number) => f.sdf(k, k);
+  let edge = 0;
+  for (let k = 0; k < 60; k += 0.1) if (t(k) <= 0) { edge = k; break; }
+  const circle = 40 - 40 / Math.SQRT2;
+  assert.ok(edge < circle + 6 && edge > 2, `corner edge at ${edge.toFixed(2)}`);
+});

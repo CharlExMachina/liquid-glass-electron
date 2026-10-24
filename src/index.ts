@@ -23,8 +23,18 @@ export interface GlassHandle {
   readonly el: HTMLElement;
   /** the options in effect, after the system's settings */
   readonly options: GlassOptions;
-  /** change some options */
+  /**
+   * change some options. Strength, refraction, fringe, frost, colour, light and shadow change without rebuilding the
+   * filter, so this is cheap enough to call every frame
+   */
   update(options: Partial<GlassOptions>): void;
+  /** the same as update() */
+  set(options: Partial<GlassOptions>): void;
+  /**
+   * tween numeric options to `to` over `duration` ms (any of them: strength, refraction, blurAmount, chromAberration…),
+   * with a CSS easing function's shape (cubic-bezier, linear() or a keyword). Resolves when done
+   */
+  animate(to: Partial<GlassOptions>, options?: { duration?: number; easing?: string }): Promise<void>;
   /** read the CSS custom properties and data attributes again */
   refresh(): void;
   /** take the glass off, restoring the element's own styles */
@@ -135,6 +145,8 @@ export function glass(el: HTMLElement, options: Partial<GlassOptions> = {}): Gla
       return l.options;
     },
     update: (o) => l.refresh(o),
+    set: (o) => l.refresh(o),
+    animate: (to, opts = {}) => tween(l, to, opts),
     refresh: () => l.refresh(),
     destroy: () => unglass(el),
   };
@@ -168,6 +180,35 @@ export function uncontainer(el: HTMLElement) {
 function fromContainerData(el: HTMLElement): ContainerOptions {
   const spacing = parseFloat(el.dataset.glassContainer ?? '');
   return Number.isFinite(spacing) ? { spacing } : {};
+}
+
+/**
+ * Numeric options from where they are to `to`, a frame at a time. The easing is sampled through the Web Animations
+ * API, so any CSS easing works (springs with linear(), cubic-bezier, ease-out…).
+ */
+function tween(l: Lens, to: Partial<GlassOptions>, { duration = 300, easing = 'ease' }: { duration?: number; easing?: string }): Promise<void> {
+  const keys = Object.keys(to).filter((k) => typeof to[k as keyof GlassOptions] === 'number') as (keyof GlassOptions)[];
+  const from = Object.fromEntries(keys.map((k) => [k, l.options[k] as number]));
+  if (getEnvironment().reduceMotion) duration = 0;
+  // the easing's progress: a dummy animation on a detached element, read each frame
+  const probe = document.createElement('div').animate([{ opacity: 0 }, { opacity: 1 }], { duration: Math.max(duration, 1), easing, fill: 'forwards' });
+  probe.pause();
+  const t0 = performance.now();
+  return new Promise((done) => {
+    const step = (now: number) => {
+      const p = duration ? Math.min((now - t0) / duration, 1) : 1;
+      probe.currentTime = p * Math.max(duration, 1);
+      const e = Number((probe.effect as KeyframeEffect).getComputedTiming().progress ?? p);
+      const eased = Number.isFinite(e) ? e : p;
+      l.refresh(Object.fromEntries(keys.map((k) => [k, from[k] + ((to[k] as number) - from[k]) * eased])) as Partial<GlassOptions>);
+      if (p < 1) requestAnimationFrame(step);
+      else {
+        l.refresh(Object.fromEntries(keys.map((k) => [k, to[k]])) as Partial<GlassOptions>);
+        done();
+      }
+    };
+    requestAnimationFrame(step);
+  });
 }
 
 /** Take the glass off an element. */

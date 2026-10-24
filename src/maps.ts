@@ -81,6 +81,9 @@ export interface TableMap extends Pixels {
   /** feFuncR / feFuncG tableValues: the map's channel (0..1) to the displacement channel (0..1, 0.5 = none) */
   tableX: number[];
   tableY: number[];
+  /** feFuncB tableValues: the blue channel (the distance to the edge) to coverage, for shapes the element's own
+   * rounded corners can't clip */
+  tableB: number[];
   /** the largest shift, px: the displacement channel's range 0..1 stands for −rimPx..+rimPx */
   rimPx: number;
   /** how far the image reaches past the element on each side, px */
@@ -97,7 +100,7 @@ export interface TableMap extends Pixels {
  * (`monotone`), which changes nothing visible. The image reaches `margin` px past the edge, so the outermost pixels
  * are interpolated rather than clamped.
  */
-export function tableMap(f: Field, o: Optics, scale: number, N = 256, fringe = 0): TableMap {
+export function tableMap(f: Field, o: Optics, scale: number, N = 256, fringe = 0, profile: Field = f): TableMap {
   const opt = { ...o, monotone: true };
   // `fringe` ≠ 0: this channel's map, sampled liquidglass's colour fringe further out (red, > 0) or in (blue, < 0)
   const shift = (x: number, y: number): [number, number] => {
@@ -112,8 +115,8 @@ export function tableMap(f: Field, o: Optics, scale: number, N = 256, fringe = 0
   // Per axis: the shift d px in from a straight edge (left, top), d from the bevel's end to `margin` outside.
   // Outside the element the shift stays what it is at the edge.
   const edgeShift = (axis: 0 | 1, d: number) => {
-    const [x, y] = f.probe(axis, Math.max(d, 0.01));
-    return shift(x, y)[axis];
+    const [x, y] = profile.probe(axis, Math.max(d, 0.01));
+    return (profile === f ? shift(x, y) : shiftAt(x, y, profile, opt))[axis];
   };
   // The table, per axis: w in [0, 1] (the channel's distance from 0.5, doubled) to a shift >= 0.
   // w in [0, W0]: linear up to the shift at the bevel's end (the middle, where only the magnification moves things);
@@ -166,8 +169,16 @@ export function tableMap(f: Field, o: Optics, scale: number, N = 256, fringe = 0
     const v = k / (N - 1), t = Math.sign(2 * v - 1) * tables[axis].forward(Math.abs(2 * v - 1));
     return +Math.min(0.5 + 0.5 * t / rimPx + 1 / 255, 1).toFixed(5);
   });
-  return { width, height, data, tableX: table(0), tableY: table(1), rimPx, margin };
+  return { width, height, data, tableX: table(0), tableY: table(1), tableB: SHAPE_TABLE, rimPx, margin };
 }
+
+/**
+ * The blue channel: the distance in from the edge, 8 levels a px around 128 (so ±16 px), which stretches back up
+ * exactly along straight edges; and the table that turns it into coverage, a 1 px ramp across the edge.
+ */
+const SHAPE_STEPS = 8;
+const shapeByte = (d: number) => Math.round(Math.min(Math.max(128 + SHAPE_STEPS * d, 0), 255));
+const SHAPE_TABLE = Array.from({ length: 256 }, (_, k) => +Math.min(Math.max((k - 128) / SHAPE_STEPS + 0.5, 0), 1).toFixed(4));
 
 /**
  * The map's pixels: the field's box and `margin` px around it, at `scale` pixels per px, red and green from
@@ -180,11 +191,12 @@ function sampleBox(f: Field, scale: number, margin: number, value: (x: number, y
   for (let j = 0; j < height; j++) {
     for (let i = 0; i < width; i++) {
       const x = (i + 0.5) * fx - margin, y = (j + 0.5) * fy - margin;
-      const v = value(x, y, -f.sdf(x, y));
+      const d = -f.sdf(x, y);
+      const v = value(x, y, d);
       const k = (j * width + i) * 4;
       data[k] = byte(v[0]);
       data[k + 1] = byte(v[1]);
-      data[k + 2] = 128;
+      data[k + 2] = shapeByte(d);
       data[k + 3] = 255;
     }
   }
@@ -214,7 +226,7 @@ function smoothMap(f: Field, shift: (x: number, y: number) => [number, number], 
   }, (v) => Math.round(Math.min(Math.max(v, 0), 255)));
   // identity, with the same step as tableMap's (Chromium truncates when it bakes the table)
   const identity = Array.from({ length: N }, (_, k) => +Math.min(k / (N - 1) + 0.5 / 255, 1).toFixed(5));
-  return { width, height, data, tableX: identity, tableY: identity, rimPx, margin };
+  return { width, height, data, tableX: identity, tableY: identity, tableB: SHAPE_TABLE, rimPx, margin };
 }
 
 /** The outward normal of a field's edge at (x, y), from the gradient of its distance. */

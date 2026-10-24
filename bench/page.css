@@ -1,0 +1,14 @@
+/* The benchmark's scene: a photo, text, and glass over them. Everything the glass covers is the same for every library. */
+html, body { margin: 0; font: 600 18px/1.4 system-ui, sans-serif; color: #fff; }
+body { width: 1180px; overflow-x: hidden; }
+body:not(.scrolls) { height: 800px; overflow: hidden; }
+#root { position: relative; width: 1180px; height: 800px; overflow: hidden; }
+.scrolls #root { height: auto; overflow: visible; }
+.bg { position: absolute; left: 0; top: 0; width: 1180px; height: 800px; object-fit: cover; }
+.scrolls .bg { position: relative; display: block; }
+.counter { position: absolute; left: 110px; top: 130px; font-size: 64px; font-weight: 800; text-shadow: 0 2px 6px rgb(0 0 0 / 0.5); }
+.article { position: relative; padding: 30px 60px; background: linear-gradient(#20324a, #3b2a4a); }
+.article p { margin: 0 0 18px; max-width: 900px; font-size: 22px; }
+.article img { display: block; width: 1060px; height: 420px; object-fit: cover; margin: 10px 0 28px; border-radius: 12px; }
+.glass { position: absolute; z-index: 10; }
+.scrolls .glass { position: fixed; }

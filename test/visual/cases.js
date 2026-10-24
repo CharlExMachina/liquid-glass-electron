@@ -64,6 +64,19 @@ const CASES = {
     setEnvironment({ appearance: 'tinted', dark: true });
     glass(box(140, 120, 360, 160, 'tinted'), { cornerRadius: 36 });
   },
+  async shapes() {
+    await photo('ponds');
+    glass(box(30, 90, 180, 180, 'squircle'), { shape: 'squircle', cornerRadius: 50 });
+    glass(box(230, 90, 180, 180, 'star'), { shape: 'path', pathBox: '0 0 100 100', path: 'M50 2 L62 36 L98 37 L69 59 L80 95 L50 74 L20 95 L31 59 L2 37 L38 36 Z', zRadius: 20 });
+    glass(box(430, 90, 180, 180, 'heart'), { shape: 'path', pathBox: '0 0 100 100', path: 'M50 90 C20 70 4 52 6 32 C8 14 30 6 50 26 C70 6 92 14 94 32 C96 52 80 70 50 90 Z', zRadius: 24 });
+  },
+  async strength() {
+    await photo('coast');
+    const hs = [40, 240, 440].map((x, i) => glass(box(x, 110, 160, 180, ['1', '0.5', '0'][i]), { variant: 'regular', cornerRadius: 30, fill: 'rgb(255 255 255 / 0.2)' }));
+    await settle();
+    hs[1].set({ strength: 0.5 });
+    hs[2].set({ strength: 0 });
+  },
   async contrast() {
     await photo('coast');
     setEnvironment({ increaseContrast: true, reduceTransparency: true });

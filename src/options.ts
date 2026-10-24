@@ -4,7 +4,7 @@
 // Transparency, Increase Contrast) are applied on top.
 
 export type Variant = 'regular' | 'clear' | 'identity';
-export type Shape = 'rect' | 'capsule' | 'circle' | 'concentric';
+export type Shape = 'rect' | 'capsule' | 'circle' | 'concentric' | 'squircle' | 'path';
 export type Press = 'flatten' | 'bulge' | 'none';
 
 export interface GlassOptions {
@@ -46,14 +46,26 @@ export interface GlassOptions {
   bevelMode: 0 | 1;
 
   // ---- beyond liquidglass
+  /**
+   * how much glass there is, 0..1 (1): bending, fringe, frost, colour, light, fill and shadow together. Cheap to change
+   * every frame (no filter is rebuilt), so glass can come and go within an animation; at 0 it costs nothing
+   */
+  strength: number;
   /** Apple's Glass.regular / .clear / .identity; null = liquidglass's defaults (close to .clear) */
   variant: Variant | null;
   /** the colour tintStrength mixes toward (multiplied); null = liquidglass's cool glass (0.92, 0.95, 1.05) */
   tint: string | null;
   /** a colour laid over the glass, as Apple's .tint(_:) and tinted buttons are; null = none */
   fill: string | null;
-  /** rect (cornerRadius), capsule, circle, or concentric: the radius of the glass it sits in, less the inset */
+  /**
+   * rect (cornerRadius), capsule, circle, concentric (the radius of the glass it sits in, less the inset), squircle
+   * (Apple's continuous corners, of cornerRadius), or path (any shape: `path`)
+   */
   shape: Shape;
+  /** for shape: 'path', SVG path data: in the element's px, or in `pathBox` units stretched over the element */
+  path: string | null;
+  /** the path's viewBox, "x y width height"; null = the path is in the element's px */
+  pathBox: string | null;
   /** Apple's .interactive(): a press scales the glass up, bends it more and lights it where it's touched */
   interactive: boolean;
   /** what a press does: flatten (button mode's default), bulge (bend more), none */
@@ -88,10 +100,13 @@ export const DEFAULTS: GlassOptions = {
   floating: false,
   button: false,
   bevelMode: 0,
+  strength: 1,
   variant: null,
   tint: null,
   fill: null,
   shape: 'rect',
+  path: null,
+  pathBox: null,
   interactive: false,
   press: null,
   pressBulge: 0.25,
@@ -112,9 +127,9 @@ export const VARIANTS: Record<Variant, Partial<GlassOptions>> = {
 
 const NUMBERS = ['blurAmount', 'refraction', 'chromAberration', 'edgeHighlight', 'specular', 'fresnel', 'distortion', 'cornerRadius',
   'zRadius', 'opacity', 'saturation', 'tintStrength', 'brightness', 'shadowOpacity', 'shadowSpread', 'shadowOffsetY', 'bevelMode',
-  'pressBulge'] as const;
+  'pressBulge', 'strength'] as const;
 const BOOLEANS = ['floating', 'button', 'interactive', 'smooth', 'magnify', 'adaptive'] as const;
-const STRINGS = ['variant', 'tint', 'fill', 'shape', 'press'] as const;
+const STRINGS = ['variant', 'tint', 'fill', 'shape', 'press', 'path', 'pathBox'] as const;
 const ALL: readonly string[] = [...NUMBERS, ...BOOLEANS, ...STRINGS];
 
 // The names Libre Hub's engine used, for its CSS: --glass-bevel and so on.
