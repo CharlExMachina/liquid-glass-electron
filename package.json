@@ -1,0 +1,39 @@
+{
+  "name": "liquid-glass-electron",
+  "version": "0.1.0",
+  "description": "Liquid glass for Electron: Chromium's compositor bends the real pixels behind an element, with liquidglass's optics and Apple's Liquid Glass knobs. No render loop, no dependencies.",
+  "license": "MIT",
+  "author": "Carlos Eduardo Pérez Villanueva <carlos@perezvill.com>",
+  "repository": { "type": "git", "url": "git+https://github.com/CharlExMachina/liquid-glass-electron.git" },
+  "homepage": "https://github.com/CharlExMachina/liquid-glass-electron#readme",
+  "bugs": "https://github.com/CharlExMachina/liquid-glass-electron/issues",
+  "keywords": ["electron", "liquid glass", "glass", "glassmorphism", "backdrop-filter", "refraction", "svg filter", "apple", "ios 26"],
+  "type": "module",
+  "main": "./dist/liquid-glass.js",
+  "module": "./dist/liquid-glass.js",
+  "types": "./dist/liquid-glass.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/liquid-glass.d.ts",
+      "import": "./dist/liquid-glass.js",
+      "default": "./dist/liquid-glass.js"
+    },
+    "./iife": "./dist/liquid-glass.iife.js",
+    "./package.json": "./package.json"
+  },
+  "files": ["dist", "src", "README.md", "LICENSE"],
+  "sideEffects": false,
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "node --test test/unit/",
+    "test:visual": "node scripts/electron.mjs test/visual/run.mjs",
+    "demo": "node scripts/build.mjs && node scripts/electron.mjs demo/main.mjs",
+    "playground": "node scripts/build.mjs && node scripts/electron.mjs demo/main.mjs --page=playground"
+  },
+  "devDependencies": {
+    "electron": "^44.9.3",
+    "esbuild": "^0.28.2",
+    "typescript": "^7.0.2"
+  }
+}
