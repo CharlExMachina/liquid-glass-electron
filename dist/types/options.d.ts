@@ -46,6 +46,11 @@ export interface GlassOptions {
     strength: number;
     /** Apple's Glass.regular / .clear / .identity; null = liquidglass's defaults (close to .clear) */
     variant: Variant | null;
+    /**
+     * CSS filter functions applied to the backdrop before the glass, as written (`blur(2px) saturate(1.4)`): for a look
+     * already written in CSS. blurAmount and saturation do the same inside the glass's own filter, which is cheaper
+     */
+    backdrop: string | null;
     /** the colour tintStrength mixes toward (multiplied); null = liquidglass's cool glass (0.92, 0.95, 1.05) */
     tint: string | null;
     /** a colour laid over the glass, as Apple's .tint(_:) and tinted buttons are; null = none */

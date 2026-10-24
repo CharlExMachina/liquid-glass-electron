@@ -546,6 +546,7 @@ var LiquidGlass = (() => {
     bevelMode: 0,
     strength: 1,
     variant: null,
+    backdrop: null,
     tint: null,
     fill: null,
     shape: "rect",
@@ -589,7 +590,7 @@ var LiquidGlass = (() => {
     "elasticity"
   ];
   var BOOLEANS = ["floating", "button", "interactive", "smooth", "magnify", "adaptive"];
-  var STRINGS = ["variant", "tint", "fill", "shape", "press", "path", "pathBox"];
+  var STRINGS = ["variant", "tint", "fill", "shape", "press", "path", "pathBox", "backdrop"];
   var ALL = [...NUMBERS, ...BOOLEANS, ...STRINGS];
   var ALIASES = {
     bevel: "zRadius",
@@ -607,7 +608,10 @@ var LiquidGlass = (() => {
       const n = parseFloat(v);
       return Number.isFinite(n) ? n : void 0;
     }
-    if (BOOLEANS.includes(key)) return v === "" || v === "true" || v === "1" || v === "yes";
+    if (BOOLEANS.includes(key)) {
+      const n = parseFloat(v);
+      return Number.isFinite(n) ? n > 0 : v === "" || v === "true" || v === "yes";
+    }
     return v === "" || v === "none" || v === "null" ? null : v;
   }
   function fromCss(style) {
@@ -792,7 +796,7 @@ var LiquidGlass = (() => {
     structureKey() {
       const o = this.options;
       const bends = supportsSvgBackdrop() && o.refraction > 0 && o.variant !== "identity";
-      return [bends, o.chromAberration > 0, o.bevelMode, blurSigma(o.blurAmount) >= 0.5, o.smooth, o.distortion > 0, o.opacity < 1, o.variant === "identity", o.magnify, this.isFree()].join();
+      return [bends, o.backdrop, o.chromAberration > 0, o.bevelMode, blurSigma(o.blurAmount) >= 0.5, o.smooth, o.distortion > 0, o.opacity < 1, o.variant === "identity", o.magnify, this.isFree()].join();
     }
     /** A shape the element's own (rounded) box can't clip: the filter masks itself, and light and shadow are an image. */
     isFree() {
@@ -841,7 +845,7 @@ var LiquidGlass = (() => {
     /** The frost and colour as CSS functions, scaled by the strength (glass that doesn't bend, and other browsers). */
     cssBackdrop() {
       const o = this.options, s = this.amount(), sigma = blurSigma(o.blurAmount) * s;
-      return [sigma > 0.01 ? `blur(${sigma.toFixed(2)}px)` : "", `saturate(${1 + o.saturation * s})`, `brightness(${(1 + (1.06 * (1 + o.brightness) - 1) * s).toFixed(3)})`].filter(Boolean).join(" ");
+      return [o.backdrop ?? "", sigma > 0.01 ? `blur(${sigma.toFixed(2)}px)` : "", `saturate(${1 + o.saturation * s})`, `brightness(${(1 + (1.06 * (1 + o.brightness) - 1) * s).toFixed(3)})`].filter(Boolean).join(" ");
     }
     /** The border-box size, as the ResizeObserver reported it. */
     resize(w, h) {
@@ -961,6 +965,7 @@ var LiquidGlass = (() => {
         this.main = first;
         this.filterCss = `url(#${first.id})`;
       }
+      if (o.backdrop) this.filterCss = `${o.backdrop} ${this.filterCss}`;
       this.el.style.setProperty("backdrop-filter", this.amount() > 0 ? this.filterCss : "none");
     }
     /** The colour matrix: saturation, brightness (6% always, as liquidglass's glass is, plus a button's hover) and tint. */

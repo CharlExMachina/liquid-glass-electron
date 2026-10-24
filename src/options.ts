@@ -55,6 +55,11 @@ export interface GlassOptions {
   strength: number;
   /** Apple's Glass.regular / .clear / .identity; null = liquidglass's defaults (close to .clear) */
   variant: Variant | null;
+  /**
+   * CSS filter functions applied to the backdrop before the glass, as written (`blur(2px) saturate(1.4)`): for a look
+   * already written in CSS. blurAmount and saturation do the same inside the glass's own filter, which is cheaper
+   */
+  backdrop: string | null;
   /** the colour tintStrength mixes toward (multiplied); null = liquidglass's cool glass (0.92, 0.95, 1.05) */
   tint: string | null;
   /** a colour laid over the glass, as Apple's .tint(_:) and tinted buttons are; null = none */
@@ -105,6 +110,7 @@ export const DEFAULTS: GlassOptions = {
   bevelMode: 0,
   strength: 1,
   variant: null,
+  backdrop: null,
   tint: null,
   fill: null,
   shape: 'rect',
@@ -132,7 +138,7 @@ const NUMBERS = ['blurAmount', 'refraction', 'chromAberration', 'edgeHighlight',
   'zRadius', 'opacity', 'saturation', 'tintStrength', 'brightness', 'shadowOpacity', 'shadowSpread', 'shadowOffsetY', 'bevelMode',
   'pressBulge', 'strength', 'elasticity'] as const;
 const BOOLEANS = ['floating', 'button', 'interactive', 'smooth', 'magnify', 'adaptive'] as const;
-const STRINGS = ['variant', 'tint', 'fill', 'shape', 'press', 'path', 'pathBox'] as const;
+const STRINGS = ['variant', 'tint', 'fill', 'shape', 'press', 'path', 'pathBox', 'backdrop'] as const;
 const ALL: readonly string[] = [...NUMBERS, ...BOOLEANS, ...STRINGS];
 
 // The names Libre Hub's engine used, for its CSS: --glass-bevel and so on.
@@ -149,7 +155,11 @@ function coerce(key: string, raw: string): unknown {
     const n = parseFloat(v);
     return Number.isFinite(n) ? n : undefined;
   }
-  if ((BOOLEANS as readonly string[]).includes(key)) return v === '' || v === 'true' || v === '1' || v === 'yes';
+  if ((BOOLEANS as readonly string[]).includes(key)) {
+    // a number counts as on above 0 (Libre Hub's --glass-smooth was a blur in px)
+    const n = parseFloat(v);
+    return Number.isFinite(n) ? n > 0 : v === '' || v === 'true' || v === 'yes';
+  }
   return v === '' || v === 'none' || v === 'null' ? null : v;
 }
 

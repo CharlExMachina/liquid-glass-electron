@@ -156,7 +156,7 @@ export class Lens {
   private structureKey() {
     const o = this.options;
     const bends = supportsSvgBackdrop() && o.refraction > 0 && o.variant !== 'identity';
-    return [bends, o.chromAberration > 0, o.bevelMode, blurSigma(o.blurAmount) >= 0.5, o.smooth, o.distortion > 0, o.opacity < 1, o.variant === 'identity', o.magnify, this.isFree()].join();
+    return [bends, o.backdrop, o.chromAberration > 0, o.bevelMode, blurSigma(o.blurAmount) >= 0.5, o.smooth, o.distortion > 0, o.opacity < 1, o.variant === 'identity', o.magnify, this.isFree()].join();
   }
 
   /** A shape the element's own (rounded) box can't clip: the filter masks itself, and light and shadow are an image. */
@@ -211,7 +211,7 @@ export class Lens {
   /** The frost and colour as CSS functions, scaled by the strength (glass that doesn't bend, and other browsers). */
   private cssBackdrop() {
     const o = this.options, s = this.amount(), sigma = blurSigma(o.blurAmount) * s;
-    return [sigma > 0.01 ? `blur(${sigma.toFixed(2)}px)` : '', `saturate(${1 + o.saturation * s})`, `brightness(${(1 + (1.06 * (1 + o.brightness) - 1) * s).toFixed(3)})`].filter(Boolean).join(' ');
+    return [o.backdrop ?? '', sigma > 0.01 ? `blur(${sigma.toFixed(2)}px)` : '', `saturate(${1 + o.saturation * s})`, `brightness(${(1 + (1.06 * (1 + o.brightness) - 1) * s).toFixed(3)})`].filter(Boolean).join(' ');
   }
 
   /** The border-box size, as the ResizeObserver reported it. */
@@ -346,6 +346,7 @@ export class Lens {
       this.main = first;
       this.filterCss = `url(#${first.id})`;
     }
+    if (o.backdrop) this.filterCss = `${o.backdrop} ${this.filterCss}`;
     // at strength 0 there's no filter at all, so glass that's off costs nothing
     this.el.style.setProperty('backdrop-filter', this.amount() > 0 ? this.filterCss : 'none');
   }

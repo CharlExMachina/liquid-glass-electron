@@ -34,6 +34,8 @@ test('Libre Hub\'s short names still work', () => {
   assert.equal(o.chromAberration, 0);
   assert.equal(o.edgeHighlight, 0.3);
   assert.equal(o.bevelMode, 1);
+  assert.equal(resolve([fromCss(css({ '--glass-smooth': '0.6' }))], env).smooth, true);
+  assert.equal(resolve([fromCss(css({ '--glass-smooth': '0' }))], env).smooth, false);
 });
 
 test('data-glass takes a variant or JSON; flags read as booleans', () => {
