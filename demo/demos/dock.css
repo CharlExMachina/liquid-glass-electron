@@ -1,0 +1,8 @@
+.dock-wrap { position: absolute; left: 224px; right: 0; bottom: 18px; display: flex; justify-content: center; }
+.dock { display: flex; align-items: flex-end; gap: 10px; height: 78px; padding: 10px 14px; border-radius: 26px; }
+.app { width: 56px; height: 56px; border-radius: 15px; display: grid; place-items: center; color: #fff; transform-origin: 50% 100%; transition: scale 0.18s ease-out, translate 0.18s ease-out; box-shadow: 0 2px 6px rgb(0 0 0 / 0.25); }
+.app .icon { width: 28px; height: 28px; }
+.dock-sep { width: 1px; align-self: stretch; margin: 6px 4px; background: rgb(255 255 255 / 0.3); }
+.menubar { position: absolute; left: 224px; right: 0; top: 0; height: 30px; display: flex; align-items: center; gap: 18px; padding: 0 18px; font-size: 13px; color: #fff; }
+.menubar b { font-weight: 700; }
+.menubar span:last-child { margin-left: auto; font-variant-numeric: tabular-nums; }

@@ -1,52 +1,11 @@
 // The images the glass is made of, as raw RGBA pixels: no DOM, so they can be tested and drawn anywhere.
-import { fringeAt, lightAt, sdf, shiftAt, type Lighting, type Optics, type Radii, type Shape } from './optics.ts';
+import type { Field } from './field.ts';
+import { boxShadowAlpha, fringeAt, lightAt, shiftAt, type Lighting, type Optics, type Radii } from './optics.ts';
 
 export interface Pixels {
   width: number;
   height: number;
   data: Uint8ClampedArray;
-}
-
-export interface DisplacementMap extends Pixels {
-  /** the largest shift in the map, px: the channel range 0..255 stands for −rimPx..+rimPx */
-  rimPx: number;
-}
-
-/**
- * The displacement map of a whole element at `scale` map pixels per CSS px: red is the x shift, green the y shift
- * (128 = none). Each map pixel is the average of `ss`² samples: the map is stretched back up with bilinear filtering,
- * and an average keeps the steep part of the rim from aliasing into beads where a point sample would miss it.
- */
-export function displacementMap(s: Shape, o: Optics, scale: number, ss = 4): DisplacementMap {
-  const width = Math.max(1, Math.round(s.w * scale)), height = Math.max(1, Math.round(s.h * scale));
-  const fx = s.w / width, fy = s.h / height;
-  const sx = new Float32Array(width * height), sy = new Float32Array(width * height);
-  let rim = 1e-6;
-  for (let j = 0; j < height; j++) {
-    for (let i = 0; i < width; i++) {
-      let ax = 0, ay = 0;
-      for (let v = 0; v < ss; v++) {
-        for (let u = 0; u < ss; u++) {
-          const [x, y] = shiftAt((i + (u + 0.5) / ss) * fx - s.w / 2, (j + (v + 0.5) / ss) * fy - s.h / 2, s, o);
-          ax += x;
-          ay += y;
-        }
-      }
-      ax /= ss * ss;
-      ay /= ss * ss;
-      sx[j * width + i] = ax;
-      sy[j * width + i] = ay;
-      rim = Math.max(rim, Math.abs(ax), Math.abs(ay));
-    }
-  }
-  const data = new Uint8ClampedArray(width * height * 4);
-  for (let n = 0; n < width * height; n++) {
-    data[n * 4] = Math.round(128 + 127 * sx[n] / rim);
-    data[n * 4 + 1] = Math.round(128 + 127 * sy[n] / rim);
-    data[n * 4 + 2] = 128;
-    data[n * 4 + 3] = 255;
-  }
-  return { width, height, data, rimPx: rim };
 }
 
 // The lighting image's middle, which border-image stretches: tall enough for the edge stroke to fade smoothly from
@@ -61,13 +20,14 @@ export interface LightImage extends Pixels {
 }
 
 /**
- * The light for border-image, at `scale` image pixels per CSS px: a box of 2e + LIGHT_MID, whose middle row and
+ * The light of a rounded rectangle, for border-image, at `scale` image pixels per CSS px: a box of 2e + LIGHT_MID, whose middle row and
  * column border-image stretches and whose middle pixel it stretches over the whole middle (so that has to be the flat
  * top's light). Its edges reach as far in as the glow does: e = max(largest corner, bevel, 0.35 × the shorter half).
  * Each corner is drawn with its own radius.
  */
-export function lightImage(radii: Radii, bevel: number, shortHalf: number, o: Lighting, scale: number): LightImage | null {
-  if (o.fresnel <= 0 && o.edge <= 0 && o.specular <= 0) return null;
+export function lightImage(radii: Radii, bevel: number, shortHalf: number, o: Lighting, scale: number, fill: RGBA | null = null): LightImage | null {
+  const lit = o.fresnel > 0 || o.edge > 0 || o.specular > 0;
+  if (!lit && !fill) return null;
   const zR = Math.max(Math.min(bevel, shortHalf), 1);
   const e = Math.ceil(Math.max(...radii, zR, shortHalf * 0.35));
   const size = 2 * e + LIGHT_MID;
@@ -97,14 +57,24 @@ export function lightImage(radii: Radii, bevel: number, shortHalf: number, o: Li
       const hit = lx >= e && ly >= e ? [Infinity, 0, 0] : lx >= e ? [ly, 0, -1] : ly >= e ? [lx, -1, 0] : corner(lx, ly, r);
       if (!hit) continue;
       const [d, nx, ny] = hit;
-      const a = lightAt(d, right ? -nx : nx, bottom ? -ny : ny, top(y), shortHalf, zR, o);
+      const a = lit ? lightAt(d, right ? -nx : nx, bottom ? -ny : ny, top(y), shortHalf, zR, o) : 0;
       const cover = Math.min(Math.max(d * scale + 0.5, 0), 1);
-      const k = (j * px + i) * 4;
-      data[k] = data[k + 1] = data[k + 2] = 255;
-      data[k + 3] = Math.round(255 * cover * a);
+      paint(data, (j * px + i) * 4, cover, a, fill);
     }
   }
   return { width: px, height: px, data, slice: Math.round(e * scale), edge: e };
+}
+
+/** A colour, 0..255, with its alpha 0..1. */
+export type RGBA = [number, number, number, number];
+
+/** White light of strength `a` over the fill colour, both covering `cover` of the pixel, into an RGBA pixel. */
+function paint(data: Uint8ClampedArray, k: number, cover: number, a: number, fill: RGBA | null) {
+  const fa = fill ? fill[3] * cover : 0, la = a * cover;
+  const A = la + fa * (1 - la);
+  if (A <= 0) return;
+  for (let c = 0; c < 3; c++) data[k + c] = Math.round((255 * la + (fill ? fill[c] : 0) * fa * (1 - la)) / A);
+  data[k + 3] = Math.round(255 * A);
 }
 
 export interface TableMap extends Pixels {
@@ -127,42 +97,43 @@ export interface TableMap extends Pixels {
  * (`monotone`), which changes nothing visible. The image reaches `margin` px past the edge, so the outermost pixels
  * are interpolated rather than clamped.
  */
-export function tableMap(s: Shape, o: Optics, scale: number, N = 256, fringe = 0): TableMap {
+export function tableMap(f: Field, o: Optics, scale: number, N = 256, fringe = 0): TableMap {
   const opt = { ...o, monotone: true };
   // `fringe` ≠ 0: this channel's map, sampled liquidglass's colour fringe further out (red, > 0) or in (blue, < 0)
-  const shift = (px: number, py: number): [number, number] => {
-    const [x, y] = shiftAt(px, py, s, opt);
-    if (!fringe) return [x, y];
-    const [fx, fy] = fringeAt(px, py, s, o.bevel, Math.abs(fringe));
-    return [x + Math.sign(fringe) * fx, y + Math.sign(fringe) * fy];
+  const shift = (x: number, y: number): [number, number] => {
+    const [sx, sy] = shiftAt(x, y, f, opt);
+    if (!fringe) return [sx, sy];
+    const [fx, fy] = fringeAt(x, y, f, o.bevel, Math.abs(fringe));
+    return [sx + Math.sign(fringe) * fx, sy + Math.sign(fringe) * fy];
   };
-  const hx = s.w / 2, hy = s.h / 2;
-  const zR = Math.min(Math.max(o.bevel, 1), hx, hy);
+  const zR = Math.min(Math.max(o.bevel, 1), f.shortHalf);
   const margin = Math.ceil(2 / scale);
-  if (o.dome) return smoothMap(s, shift, scale, margin, N);
-  // Per axis: the shift along the middle of the left (top) edge, d px in, d from the bevel's end to `margin` outside.
+  if (o.dome) return smoothMap(f, shift, scale, margin, N);
+  // Per axis: the shift d px in from a straight edge (left, top), d from the bevel's end to `margin` outside.
   // Outside the element the shift stays what it is at the edge.
   const edgeShift = (axis: 0 | 1, d: number) => {
-    const dd = Math.max(d, 0.01);
-    return axis === 0 ? shift(dd - hx, 0)[0] : shift(0, dd - hy)[1];
+    const [x, y] = f.probe(axis, Math.max(d, 0.01));
+    return shift(x, y)[axis];
   };
   // The table, per axis: w in [0, 1] (the channel's distance from 0.5, doubled) to a shift >= 0.
   // w in [0, W0]: linear up to the shift at the bevel's end (the middle, where only the magnification moves things);
   // w in [W0, 1]: the edge's profile, linear in d from the bevel's end (zR) to `margin` px outside.
-  const W0 = 0.12, K = 2048;
+  const K = 2048;
   const tables = ([0, 1] as const).map((axis) => {
     const prof = new Float64Array(K + 1);
     for (let i = 0; i <= K; i++) prof[i] = edgeShift(axis, zR - (zR + margin) * (i / K));
     // strictly rising, so it can be inverted (the flat top gets the slightest slope)
     for (let i = 1; i <= K; i++) prof[i] = Math.max(prof[i], prof[i - 1] + 1e-6 * (prof[K] + 1));
-    const start = Math.max(prof[0], 1e-6);
+    // Where the bevel's end is the middle (a capsule's long axis), nothing is left for the middle's segment: the
+    // profile starts from no shift, and takes the whole range.
+    const start = Math.max(prof[0], 1e-6), W0 = start > 0.25 ? 0.12 : 0;
     const forward = (w: number) => {
-      if (w <= W0) return (w / W0) * start;
-      const f = ((w - W0) / (1 - W0)) * K, i = Math.min(Math.floor(f), K - 1);
-      return prof[i] + (prof[i + 1] - prof[i]) * (f - i);
+      if (w <= W0) return W0 ? (w / W0) * start : 0;
+      const t = ((w - W0) / (1 - W0)) * K, i = Math.min(Math.floor(t), K - 1);
+      return prof[i] + (prof[i + 1] - prof[i]) * (t - i);
     };
     const inverse = (t: number) => {
-      if (t <= start) return (t / start) * W0;
+      if (W0 && t <= start) return (t / start) * W0;
       if (t >= prof[K]) return 1;
       let lo = 0, hi = K;
       while (hi - lo > 1) {
@@ -176,34 +147,19 @@ export function tableMap(s: Shape, o: Optics, scale: number, N = 256, fringe = 0
   });
   const rimPx = Math.max(tables[0].top, tables[1].top, 1e-6);
   const encode = (axis: 0 | 1, t: number) => 0.5 + 0.5 * Math.sign(t) * tables[axis].inverse(Math.abs(t));
-  // The map: inside, the value that gives the shift there; outside, the inside values carried on in a straight line.
-  const width = Math.max(2, Math.round((s.w + 2 * margin) * scale)), height = Math.max(2, Math.round((s.h + 2 * margin) * scale));
-  const fx = (s.w + 2 * margin) / width, fy = (s.h + 2 * margin) / height;
-  const valueAt = (px: number, py: number): [number, number] => {
-    const [x, y] = shift(px, py);
-    return [encode(0, x), encode(1, y)];
+  const valueAt = (x: number, y: number): [number, number] => {
+    const [sx, sy] = shift(x, y);
+    return [encode(0, sx), encode(1, sy)];
   };
-  const data = new Uint8ClampedArray(width * height * 4);
-  for (let j = 0; j < height; j++) {
-    for (let i = 0; i < width; i++) {
-      const px = (i + 0.5) * fx - margin - hx, py = (j + 0.5) * fy - margin - hy;
-      const d = -sdf(px, py, hx, hy, s.radii);
-      let v: [number, number];
-      if (d >= 0.5) v = valueAt(px, py);
-      else {
-        // step in along the inward normal to 0.5 and 1.5 px, and carry the line on
-        const n = normal(px, py, hx, hy, s.radii);
-        const a = valueAt(px - n[0] * (0.5 - d), py - n[1] * (0.5 - d));
-        const b = valueAt(px - n[0] * (1.5 - d), py - n[1] * (1.5 - d));
-        v = [a[0] + (a[0] - b[0]) * (0.5 - d), a[1] + (a[1] - b[1]) * (0.5 - d)];
-      }
-      const k = (j * width + i) * 4;
-      data[k] = Math.round(Math.min(Math.max(v[0], 0), 1) * 255);
-      data[k + 1] = Math.round(Math.min(Math.max(v[1], 0), 1) * 255);
-      data[k + 2] = 128;
-      data[k + 3] = 255;
-    }
-  }
+  // The map: inside, the value that gives the shift there; outside, the inside values carried on in a straight line.
+  const { width, height, data } = sampleBox(f, scale, margin, (x, y, d) => {
+    if (d >= 0.5) return valueAt(x, y);
+    // step in along the inward normal to 0.5 and 1.5 px, and carry the line on
+    const n = normal(f, x, y);
+    const a = valueAt(x - n[0] * (0.5 - d), y - n[1] * (0.5 - d));
+    const b = valueAt(x - n[0] * (1.5 - d), y - n[1] * (1.5 - d));
+    return [a[0] + (a[0] - b[0]) * (0.5 - d), a[1] + (a[1] - b[1]) * (0.5 - d)];
+  }, (v) => Math.round(Math.min(Math.max(v, 0), 1) * 255));
   // Chromium bakes the table into bytes by truncating, so each value carries a step more: it rounds instead, and no
   // shift comes out as 128, as in a map without a table.
   const table = (axis: 0 | 1) => Array.from({ length: N }, (_, k) => {
@@ -214,44 +170,106 @@ export function tableMap(s: Shape, o: Optics, scale: number, N = 256, fringe = 0
 }
 
 /**
+ * The map's pixels: the field's box and `margin` px around it, at `scale` pixels per px, red and green from
+ * `value(x, y, d)` (d: distance in from the edge), blue 128, opaque.
+ */
+function sampleBox(f: Field, scale: number, margin: number, value: (x: number, y: number, d: number) => [number, number], byte: (v: number) => number): Pixels {
+  const width = Math.max(2, Math.round((f.w + 2 * margin) * scale)), height = Math.max(2, Math.round((f.h + 2 * margin) * scale));
+  const fx = (f.w + 2 * margin) / width, fy = (f.h + 2 * margin) / height;
+  const data = new Uint8ClampedArray(width * height * 4);
+  for (let j = 0; j < height; j++) {
+    for (let i = 0; i < width; i++) {
+      const x = (i + 0.5) * fx - margin, y = (j + 0.5) * fy - margin;
+      const v = value(x, y, -f.sdf(x, y));
+      const k = (j * width + i) * 4;
+      data[k] = byte(v[0]);
+      data[k + 1] = byte(v[1]);
+      data[k + 2] = 128;
+      data[k + 3] = 255;
+    }
+  }
+  return { width, height, data };
+}
+
+/**
  * A dome's shift has no steep rim, so its map stores the shift as it is (with tables that change nothing), and
  * carries it on past the edge.
  */
-function smoothMap(s: Shape, shift: (px: number, py: number) => [number, number], scale: number, margin: number, N: number): TableMap {
-  const hx = s.w / 2, hy = s.h / 2;
-  const width = Math.max(2, Math.round((s.w + 2 * margin) * scale)), height = Math.max(2, Math.round((s.h + 2 * margin) * scale));
-  const fx = (s.w + 2 * margin) / width, fy = (s.h + 2 * margin) / height;
-  const values = new Float32Array(width * height * 2);
+function smoothMap(f: Field, shift: (x: number, y: number) => [number, number], scale: number, margin: number, N: number): TableMap {
+  // outside, the value at the edge
+  const at = (x: number, y: number, d: number): [number, number] => {
+    if (d >= 0.5) return shift(x, y);
+    const n = normal(f, x, y);
+    return shift(x - n[0] * (0.5 - d), y - n[1] * (0.5 - d));
+  };
   let rimPx = 1e-6;
-  for (let j = 0; j < height; j++) {
-    for (let i = 0; i < width; i++) {
-      const px = (i + 0.5) * fx - margin - hx, py = (j + 0.5) * fy - margin - hy;
-      const d = -sdf(px, py, hx, hy, s.radii);
-      // outside, the value at the edge
-      const n = d < 0.5 ? normal(px, py, hx, hy, s.radii) : [0, 0];
-      const [x, y] = shift(px - n[0] * Math.max(0.5 - d, 0), py - n[1] * Math.max(0.5 - d, 0));
-      values[(j * width + i) * 2] = x;
-      values[(j * width + i) * 2 + 1] = y;
-      rimPx = Math.max(rimPx, Math.abs(x), Math.abs(y));
-    }
-  }
-  const data = new Uint8ClampedArray(width * height * 4);
-  for (let k = 0; k < width * height; k++) {
-    data[k * 4] = Math.round(128 + 127 * values[k * 2] / rimPx);
-    data[k * 4 + 1] = Math.round(128 + 127 * values[k * 2 + 1] / rimPx);
-    data[k * 4 + 2] = 128;
-    data[k * 4 + 3] = 255;
-  }
-  // identity, with the same half step as tableMap's (Chromium truncates when it bakes the table)
+  sampleBox(f, scale, margin, (x, y, d) => {
+    const [sx, sy] = at(x, y, d);
+    rimPx = Math.max(rimPx, Math.abs(sx), Math.abs(sy));
+    return [0, 0];
+  }, () => 0);
+  const { width, height, data } = sampleBox(f, scale, margin, (x, y, d) => {
+    const [sx, sy] = at(x, y, d);
+    return [128 + 127 * sx / rimPx, 128 + 127 * sy / rimPx];
+  }, (v) => Math.round(Math.min(Math.max(v, 0), 255)));
+  // identity, with the same step as tableMap's (Chromium truncates when it bakes the table)
   const identity = Array.from({ length: N }, (_, k) => +Math.min(k / (N - 1) + 0.5 / 255, 1).toFixed(5));
   return { width, height, data, tableX: identity, tableY: identity, rimPx, margin };
 }
 
-/** The outward normal of a rounded rectangle at (px, py), from the gradient of its distance. */
-function normal(px: number, py: number, hx: number, hy: number, radii: Radii): [number, number] {
+/** The outward normal of a field's edge at (x, y), from the gradient of its distance. */
+function normal(f: Field, x: number, y: number): [number, number] {
   const e = 0.05;
-  const gx = sdf(px + e, py, hx, hy, radii) - sdf(px - e, py, hx, hy, radii);
-  const gy = sdf(px, py + e, hx, hy, radii) - sdf(px, py - e, hx, hy, radii);
+  const gx = f.sdf(x + e, y) - f.sdf(x - e, y);
+  const gy = f.sdf(x, y + e) - f.sdf(x, y - e);
   const l = Math.hypot(gx, gy) || 1;
   return [gx / l, gy / l];
+}
+
+export interface FieldLight {
+  /** the light inside the shape, its shadow outside it, and its coverage (for mask-image), all the same size */
+  light: Pixels;
+  shadow: Pixels;
+  mask: Pixels;
+  /** how far the images reach past the box on each side, px (for the shadow) */
+  pad: number;
+}
+
+/**
+ * The light of any shape (a container's merged glass), its shadow, and its coverage: whole images over the box and
+ * `pad` px around it, at `scale` pixels per px. Light is worked out only near the edge, where it changes; the middle
+ * is the flat top's light. A 9-slice border-image can't do a shape like this, so these are background and mask
+ * images, drawn again when the shape changes.
+ */
+export function fieldLight(f: Field, bevel: number, o: Lighting, shadow: { opacity: number; spread: number; offsetY: number }, scale: number, pad: number, fill: RGBA | null = null): FieldLight {
+  const zR = Math.max(Math.min(bevel, f.shortHalf), 1);
+  const reach = Math.max(zR, f.shortHalf * 0.35) + 2;
+  const width = Math.max(1, Math.round((f.w + 2 * pad) * scale)), height = Math.max(1, Math.round((f.h + 2 * pad) * scale));
+  const light = new Uint8ClampedArray(width * height * 4), shade = new Uint8ClampedArray(width * height * 4), mask = new Uint8ClampedArray(width * height * 4);
+  const flat = lightAt(Infinity, 0, 0, 0.5, f.shortHalf, zR, o);
+  const lit = o.fresnel > 0 || o.edge > 0 || o.specular > 0;
+  for (let j = 0; j < height; j++) {
+    for (let i = 0; i < width; i++) {
+      const x = (i + 0.5) / scale - pad, y = (j + 0.5) / scale - pad;
+      const d = -f.sdf(x, y);
+      const k = (j * width + i) * 4;
+      const cover = Math.min(Math.max(d * scale + 0.5, 0), 1);
+      if (cover > 0) {
+        mask[k + 3] = Math.round(255 * cover);
+        if (lit || fill) {
+          let a = lit ? flat : 0;
+          if (lit && d < reach) {
+            const [nx, ny] = normal(f, x, y);
+            a = lightAt(Math.max(d, 0), nx, ny, 1 - Math.min(Math.max(y / f.h, 0), 1), f.shortHalf, zR, o);
+          }
+          paint(light, k, cover, a, fill);
+        }
+      }
+      if (cover < 1 && shadow.opacity > 0) {
+        // the shadow, from the shape moved down by its offset, under what the shape doesn't cover
+        shade[k + 3] = Math.round(255 * (1 - cover) * boxShadowAlpha(-f.sdf(x, y - shadow.offsetY), shadow.opacity, shadow.spread));
+      }
+    }
+  }
+  return { light: { width, height, data: light }, shadow: { width, height, data: shade }, mask: { width, height, data: mask }, pad };
 }

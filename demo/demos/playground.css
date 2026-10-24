@@ -1,0 +1,16 @@
+.pg { position: absolute; left: 224px; right: 0; top: 0; bottom: 0; }
+.pg-stage { position: absolute; left: 0; right: 330px; top: 0; bottom: 0; overflow: hidden; }
+.pg-stage .photo, .pg-stage video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.pg-text { position: absolute; inset: 0; padding: 30px; font: 700 34px/1.25 system-ui, sans-serif; color: #fff; background: linear-gradient(135deg, #1d2b64, #f8cdda); overflow: hidden; }
+.pg-text p { margin: 0 0 18px; }
+.pg-glass { position: absolute; left: 120px; top: 150px; width: 340px; height: 200px; display: grid; place-items: center; color: #fff; font-weight: 700; font-size: 18px; text-shadow: 0 1px 3px rgb(0 0 0 / 0.4); }
+.pg-panel { position: absolute; right: 0; top: 0; bottom: 0; width: 330px; overflow-y: auto; padding: 14px 16px 20px; background: var(--page); border-left: 1px solid rgb(127 127 127 / 0.2); scrollbar-width: thin; }
+.pg-panel h4 { margin: 14px 0 6px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+.pg-row { display: grid; grid-template-columns: 112px 1fr 44px; align-items: center; gap: 8px; font-size: 12px; margin: 4px 0; }
+.pg-row input[type=range] { width: 100%; accent-color: var(--accent); }
+.pg-row output { text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); }
+.pg-row select, .pg-row input[type=text] { grid-column: 2 / 4; font: inherit; background: rgb(127 127 127 / 0.15); color: inherit; border: 0; border-radius: 6px; padding: 4px 6px; }
+.pg-row input[type=checkbox] { justify-self: start; }
+.pg-code { margin-top: 14px; padding: 10px 12px; border-radius: 10px; background: rgb(127 127 127 / 0.12); font: 12px/1.5 ui-monospace, 'SF Mono', monospace; white-space: pre-wrap; word-break: break-word; user-select: all; }
+.pg-actions { display: flex; gap: 8px; margin-top: 8px; }
+.pg-actions button { padding: 6px 10px; border-radius: 8px; background: rgb(127 127 127 / 0.18); font-size: 12px; }

@@ -1,0 +1,63 @@
+/* The gallery. Glass is applied by the library (data-glass / glass()); this sheet only lays things out and colours
+   the text. */
+:root {
+  color-scheme: light;
+  --text: #0b0b0f;
+  --muted: rgb(20 20 30 / 0.6);
+  --accent: #0a84ff;
+  --glass-accent: #0a84ff;
+  --page: #e9ecf2;
+  font: 500 14px/1.4 system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --text: #f4f5f8;
+  --muted: rgb(235 235 245 / 0.62);
+  --page: #0c0d10;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; overflow: hidden; background: var(--page); color: var(--text); }
+button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
+
+#app { position: relative; height: 100%; }
+#stage { position: absolute; inset: 0; overflow: hidden; outline: none; }
+
+/* ------------------------------------------------------------ sidebar */
+#sidebar {
+  position: absolute; z-index: 10; left: 14px; top: 14px; bottom: 14px; width: 196px;
+  border-radius: 26px; padding: 18px 10px 12px; display: flex; flex-direction: column; gap: 2px;
+  color: var(--text);
+}
+.brand { display: flex; align-items: center; gap: 9px; padding: 0 8px 12px; font-weight: 700; font-size: 15px; letter-spacing: -0.01em; }
+.logo { width: 20px; height: 20px; border-radius: 7px; background: conic-gradient(from 210deg, #64d2ff, #5e5ce6, #ff375f, #ffd60a, #64d2ff); box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.5); }
+#nav { flex: 1; overflow: auto; }
+#nav h2 { margin: 10px 10px 3px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+#nav a { display: block; padding: 5px 10px; border-radius: 10px; color: inherit; text-decoration: none; }
+#nav a:hover { background: rgb(127 127 127 / 0.14); }
+#nav a[aria-current] { background: var(--accent); color: #fff; }
+.settings { border-top: 1px solid rgb(127 127 127 / 0.25); padding: 10px 8px 0; display: grid; gap: 8px; }
+.row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+
+/* a native checkbox, drawn as a switch */
+.switch { appearance: none; width: 38px; height: 22px; border-radius: 11px; background: rgb(127 127 127 / 0.35); position: relative; margin: 0; cursor: pointer; transition: background 0.2s; }
+.switch::after { content: ''; position: absolute; left: 2px; top: 2px; width: 18px; height: 18px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgb(0 0 0 / 0.3); transition: translate 0.25s cubic-bezier(0.3, 1.5, 0.5, 1); }
+.switch:checked { background: #34c759; }
+.switch:checked::after { translate: 16px 0; }
+
+/* ------------------------------------------------------------ scenes */
+.scene { position: absolute; inset: 0; }
+.photo { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.fill { position: absolute; inset: 0; }
+.caption {
+  position: absolute; right: 22px; bottom: 18px; max-width: 360px; padding: 12px 16px; border-radius: 16px;
+  color: #fff; font-size: 13px; line-height: 1.45; text-shadow: 0 1px 2px rgb(0 0 0 / 0.4);
+}
+.caption b { display: block; font-size: 14px; margin-bottom: 2px; }
+.on-photo { color: #fff; text-shadow: 0 1px 2px rgb(0 0 0 / 0.35); }
+.icon { width: 20px; height: 20px; display: block; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+
+/* the stage's own area, right of the sidebar */
+.area { position: absolute; left: 224px; right: 0; top: 0; bottom: 0; }
+#nav::-webkit-scrollbar { width: 6px; }
+#nav::-webkit-scrollbar-thumb { background: rgb(127 127 127 / 0.35); border-radius: 3px; }
+#nav::-webkit-scrollbar-track { background: transparent; }

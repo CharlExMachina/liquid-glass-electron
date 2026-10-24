@@ -1,0 +1,7 @@
+.ap-grid { position: absolute; left: 248px; right: 24px; top: 24px; bottom: 24px; display: grid; grid-template-columns: repeat(3, 1fr); grid-template-rows: auto 1fr 1fr; gap: 16px; }
+.ap-head { grid-column: 1 / -1; display: flex; gap: 12px; flex-wrap: wrap; align-items: center; padding: 10px 14px; border-radius: 22px; color: var(--text); }
+.ap-head label { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+.ap-cell { position: relative; border-radius: 26px; overflow: hidden; }
+.ap-cell .photo { position: absolute; inset: 0; }
+.ap-cell h5 { position: absolute; left: 14px; top: 10px; margin: 0; color: #fff; font-size: 13px; text-shadow: 0 1px 3px rgb(0 0 0 / 0.6); }
+.ap-bar { position: absolute; left: 50%; bottom: 18px; translate: -50% 0; height: 52px; padding: 0 18px; border-radius: 26px; display: flex; align-items: center; gap: 16px; color: var(--text); font-weight: 600; white-space: nowrap; }

@@ -8,13 +8,16 @@
 //   import { autoGlass } from 'liquid-glass-electron';
 //   autoGlass();   // <nav data-glass="regular" data-glass-floating>
 import { installStyles } from './dom.ts';
+import { GlassContainer, type ContainerOptions } from './container.ts';
 import { Lens } from './lens.ts';
+import { hooks } from './morph.ts';
 import type { Environment, GlassOptions } from './options.ts';
 
 export { DEFAULTS, VARIANTS } from './options.ts';
 export type { Environment, GlassOptions, Press, Shape, Variant } from './options.ts';
-export { morph, type MorphOptions } from './morph.ts';
-export { GlassContainer, container, type ContainerOptions } from './container.ts';
+export { morph, materialize, type MorphOptions, type Transition } from './morph.ts';
+export { scrollEdge, type ScrollEdgeOptions } from './edges.ts';
+export { GlassContainer, type ContainerOptions } from './container.ts';
 
 export interface GlassHandle {
   readonly el: HTMLElement;
@@ -29,6 +32,7 @@ export interface GlassHandle {
 }
 
 const lenses = new Map<HTMLElement, Lens>();
+const containers = new Map<HTMLElement, GlassContainer>();
 let sizes: ResizeObserver | null = null;
 let attrs: MutationObserver | null = null;
 let pending = new Set<Lens>();
@@ -76,6 +80,7 @@ const host = { env: getEnvironment };
 /** Read every glass's options again: after changing CSS custom properties, the theme or the appearance. */
 export function refreshAll() {
   for (const lens of lenses.values()) lens.refresh();
+  for (const c of containers.values()) c.set({});
 }
 
 let watching = false;
@@ -135,6 +140,36 @@ export function glass(el: HTMLElement, options: Partial<GlassOptions> = {}): Gla
   };
 }
 
+/**
+ * Apple's GlassEffectContainer: the glass shapes inside `el` (elements with data-glass or data-glass-member) become
+ * one piece of glass, flowing into each other where they come within `spacing` px, and morphing as they move.
+ * Declaratively: <div data-glass-container="16"> with autoGlass().
+ */
+export function container(el: HTMLElement, options: ContainerOptions = {}): GlassContainer {
+  installStyles();
+  watchEnvironment();
+  for (const member of el.querySelectorAll<HTMLElement>('[data-glass], [data-glass-member]')) unglass(member);
+  const existing = containers.get(el);
+  if (existing) {
+    existing.set(options);
+    return existing;
+  }
+  const c = new GlassContainer(el, { ...fromContainerData(el), ...options }, host);
+  containers.set(el, c);
+  return c;
+}
+
+/** Take a container's glass off; its members go back to plain elements. */
+export function uncontainer(el: HTMLElement) {
+  containers.get(el)?.destroy();
+  containers.delete(el);
+}
+
+function fromContainerData(el: HTMLElement): ContainerOptions {
+  const spacing = parseFloat(el.dataset.glassContainer ?? '');
+  return Number.isFinite(spacing) ? { spacing } : {};
+}
+
 /** Take the glass off an element. */
 export function unglass(el: HTMLElement) {
   const lens = lenses.get(el);
@@ -157,8 +192,10 @@ export function autoGlass(selector = '[data-glass]', options: Partial<GlassOptio
   const add = (node: Node) => {
     if (node.nodeType !== 1) return;
     const el = node as HTMLElement;
-    const found = el.matches(selector) ? [el, ...el.querySelectorAll<HTMLElement>(selector)] : [...el.querySelectorAll<HTMLElement>(selector)];
-    for (const f of found) if (!lenses.has(f)) glass(f, options);
+    const all = (sel: string) => (el.matches(sel) ? [el, ...el.querySelectorAll<HTMLElement>(sel)] : [...el.querySelectorAll<HTMLElement>(sel)]);
+    for (const c of all('[data-glass-container]')) if (!containers.has(c)) container(c, options);
+    // a container's members are part of its glass, not glass of their own
+    for (const f of all(selector)) if (!lenses.has(f) && !f.closest('[data-glass-container]')) glass(f, options);
   };
   const mo = new MutationObserver((records) => {
     let removed = false;
@@ -171,13 +208,55 @@ export function autoGlass(selector = '[data-glass]', options: Partial<GlassOptio
         else if (lenses.has(el)) unglass(el);
       }
     }
-    if (removed) for (const el of [...lenses.keys()]) if (!el.isConnected) unglass(el);
+    if (removed) {
+      for (const el of [...lenses.keys()]) if (!el.isConnected) unglass(el);
+      for (const el of [...containers.keys()]) if (!el.isConnected) uncontainer(el);
+    }
   });
-  mo.observe(root, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'data-glass'] });
+  mo.observe(root, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'data-glass', 'data-glass-container'] });
   add(root as Node);
   return {
     stop() {
       mo.disconnect();
     },
   };
+}
+
+// morph() needs containers and elements' options
+hooks.container = (el, options) => container(el, options);
+hooks.uncontainer = uncontainer;
+hooks.optionsOf = (el) => lenses.get(el)?.options;
+hooks.reduceMotion = () => getEnvironment().reduceMotion;
+
+/**
+ * Apple's glassEffectUnion: separate elements drawn as one piece of glass, joined however far apart they are. Their
+ * parent becomes a container whose spacing reaches across the widest gap between them.
+ */
+export function union(elements: HTMLElement[], options: ContainerOptions = {}): GlassContainer {
+  const parent = elements[0]?.parentElement;
+  if (!parent) throw new Error('union: the elements need a parent');
+  const rects = elements.map((e) => e.getBoundingClientRect());
+  let gap = 0;
+  rects.forEach((r, i) => {
+    const near = Math.min(...rects.filter((_, j) => j !== i).map((q) => Math.max(q.left - r.right, r.left - q.right, q.top - r.bottom, r.top - q.bottom, 0)));
+    if (Number.isFinite(near)) gap = Math.max(gap, near);
+  });
+  for (const e of elements) e.dataset.glassMember = '';
+  return container(parent, { members: '[data-glass-member]', spacing: Math.max(gap * 2.5, 16), ...options });
+}
+
+export type ButtonStyle = 'glass' | 'prominent';
+
+/**
+ * Apple's .glass and .glassProminent button styles: a capsule of regular glass that responds to the pointer;
+ * prominent is tinted with the accent colour (options.fill, or the CSS variable --glass-accent).
+ */
+export function glassButton(el: HTMLElement, style: ButtonStyle = 'glass', options: Partial<GlassOptions> = {}): GlassHandle {
+  const accent = getComputedStyle(el).getPropertyValue('--glass-accent').trim() || 'rgb(0 122 255)';
+  const base: Partial<GlassOptions> = { variant: 'regular', shape: 'capsule', interactive: true, zRadius: 24 };
+  if (style === 'prominent') {
+    Object.assign(base, { fill: `color-mix(in srgb, ${accent} 82%, transparent)`, saturation: 0.6, chromAberration: 0 });
+    el.style.color ||= '#fff';
+  }
+  return glass(el, { ...base, ...options });
 }

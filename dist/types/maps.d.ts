@@ -1,19 +1,10 @@
-import { type Lighting, type Optics, type Radii, type Shape } from './optics.js';
+import type { Field } from './field.js';
+import { type Lighting, type Optics, type Radii } from './optics.js';
 export interface Pixels {
     width: number;
     height: number;
     data: Uint8ClampedArray;
 }
-export interface DisplacementMap extends Pixels {
-    /** the largest shift in the map, px: the channel range 0..255 stands for −rimPx..+rimPx */
-    rimPx: number;
-}
-/**
- * The displacement map of a whole element at `scale` map pixels per CSS px: red is the x shift, green the y shift
- * (128 = none). Each map pixel is the average of `ss`² samples: the map is stretched back up with bilinear filtering,
- * and an average keeps the steep part of the rim from aliasing into beads where a point sample would miss it.
- */
-export declare function displacementMap(s: Shape, o: Optics, scale: number, ss?: number): DisplacementMap;
 export declare const LIGHT_MID = 32;
 export interface LightImage extends Pixels {
     /** border-image-slice, in image pixels */
@@ -22,12 +13,14 @@ export interface LightImage extends Pixels {
     edge: number;
 }
 /**
- * The light for border-image, at `scale` image pixels per CSS px: a box of 2e + LIGHT_MID, whose middle row and
+ * The light of a rounded rectangle, for border-image, at `scale` image pixels per CSS px: a box of 2e + LIGHT_MID, whose middle row and
  * column border-image stretches and whose middle pixel it stretches over the whole middle (so that has to be the flat
  * top's light). Its edges reach as far in as the glow does: e = max(largest corner, bevel, 0.35 × the shorter half).
  * Each corner is drawn with its own radius.
  */
-export declare function lightImage(radii: Radii, bevel: number, shortHalf: number, o: Lighting, scale: number): LightImage | null;
+export declare function lightImage(radii: Radii, bevel: number, shortHalf: number, o: Lighting, scale: number, fill?: RGBA | null): LightImage | null;
+/** A colour, 0..255, with its alpha 0..1. */
+export type RGBA = [number, number, number, number];
 export interface TableMap extends Pixels {
     /** feFuncR / feFuncG tableValues: the map's channel (0..1) to the displacement channel (0..1, 0.5 = none) */
     tableX: number[];
@@ -47,4 +40,23 @@ export interface TableMap extends Pixels {
  * (`monotone`), which changes nothing visible. The image reaches `margin` px past the edge, so the outermost pixels
  * are interpolated rather than clamped.
  */
-export declare function tableMap(s: Shape, o: Optics, scale: number, N?: number, fringe?: number): TableMap;
+export declare function tableMap(f: Field, o: Optics, scale: number, N?: number, fringe?: number): TableMap;
+export interface FieldLight {
+    /** the light inside the shape, its shadow outside it, and its coverage (for mask-image), all the same size */
+    light: Pixels;
+    shadow: Pixels;
+    mask: Pixels;
+    /** how far the images reach past the box on each side, px (for the shadow) */
+    pad: number;
+}
+/**
+ * The light of any shape (a container's merged glass), its shadow, and its coverage: whole images over the box and
+ * `pad` px around it, at `scale` pixels per px. Light is worked out only near the edge, where it changes; the middle
+ * is the flat top's light. A 9-slice border-image can't do a shape like this, so these are background and mask
+ * images, drawn again when the shape changes.
+ */
+export declare function fieldLight(f: Field, bevel: number, o: Lighting, shadow: {
+    opacity: number;
+    spread: number;
+    offsetY: number;
+}, scale: number, pad: number, fill?: RGBA | null): FieldLight;

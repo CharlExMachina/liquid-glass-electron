@@ -68,14 +68,14 @@ export async function predecode(url: string): Promise<void> {
 let sheet: CSSStyleSheet | null = null;
 
 /**
- * The library's own rules, at zero specificity (:where), so any rule of the page wins: the glass's fill and shadow
- * come from custom properties set on each element, and the page can still give it its own background or shadow.
+ * The library's own rules, at zero specificity (:where), so any rule of the page wins: the glass's shadow comes from a
+ * custom property set on each element, and the page can still give it a shadow of its own.
  */
 export function installStyles() {
   if (sheet) return;
   sheet = new CSSStyleSheet();
   sheet.replaceSync(`
-:where([data-liquid-glass]) { background-color: var(--lg-fill, transparent); box-shadow: var(--lg-shadow, none); }
+:where([data-liquid-glass]) { box-shadow: var(--lg-shadow, none); }
 :where([data-liquid-glass][data-lg-pressable]) { cursor: pointer; -webkit-tap-highlight-color: transparent; transition: scale 0.32s cubic-bezier(0.3, 1.6, 0.5, 1); }
 :where([data-liquid-glass][data-lg-interactive]) { background-image: radial-gradient(circle at var(--lg-x, 50%) var(--lg-y, 50%), rgb(255 255 255 / var(--lg-glow, 0)), transparent 70%); }
 :where([data-liquid-glass][data-lg-floating]) { touch-action: none; cursor: grab; user-select: none; }

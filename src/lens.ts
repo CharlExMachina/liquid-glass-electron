@@ -15,14 +15,16 @@
 // which stretching reproduces exactly, and a lookup table (feComponentTransfer) that turns it into the bevel's steep
 // shift (see tableMap). It's drawn again when the element's size settles; while it's changing, the old one stretches.
 // Light doesn't bend: Fresnel, specular and edge light are a border-image, painted once and kept.
-import { lightImage, tableMap } from './maps.ts';
+import { roundedRect, type Field } from './field.ts';
+import { fieldLight, lightImage, tableMap, type RGBA } from './maps.ts';
 import { ABERRATION, blurSigma, boxShadow, clampRadii, colorMatrix, tintGains, type Radii } from './optics.ts';
 import { filterDefs, predecode, setAttrs, supportsSvgBackdrop, svgEl, toDataURL } from './dom.ts';
 import { fromCss, fromData, resolve, type Environment, type GlassOptions } from './options.ts';
 
-// Map pixels per CSS px, and at most this many pixels in a map: per-frame cost follows the map's bytes.
-const MAP_SCALE = 0.2;
-const MAP_BUDGET = 6144;
+// Map pixels per CSS px: about this many pixels in a map (per-frame cost follows its bytes), between 0.08 and 0.5 per
+// px. Small glass gets a finer map, which is cheap, and its corners are most of it.
+const MAP_PIXELS = 4096;
+const mapScale = (w: number, h: number, moving: boolean) => Math.min(Math.max(Math.sqrt(MAP_PIXELS / (w * h)), 0.08), 0.5) / (moving ? 2 : 1);
 // How long a size has to hold before the map and light are drawn for it, ms.
 const SETTLE = 120;
 // Keeps the green channel only, and so on: the fringe's three passes are added up.
@@ -40,6 +42,24 @@ const remember = <K, V>(m: Map<K, V>, k: K, v: V) => {
 
 export interface LensHost {
   env(): Environment;
+}
+
+/**
+ * A shape other than the element's own rounded rectangle (a container's merged glass): the field for the element's
+ * size, a key that changes when the shape does, and where its shadow goes. Its light and coverage are images.
+ */
+export interface ShapeSource {
+  field(w: number, h: number): Field;
+  key(): string;
+  shadowEl: HTMLElement;
+  /** how far the element reaches past the shape's box on each side, px (room for the shadow) */
+  pad: number;
+  /** while the shape moves: cheaper maps and light, drawn every frame */
+  moving(): boolean;
+  /** the part of the box the shape is in (the map covers only that), px */
+  bounds(): { x: number; y: number; w: number; h: number };
+  /** how many elements' worth of map pixels the shape gets (a container is one filter for all its members) */
+  detail(): number;
 }
 
 export class Lens {
@@ -62,6 +82,7 @@ export class Lens {
   private h = 0;
   private radii: Radii = [0, 0, 0, 0];
   private margin = 0;
+  private region = { x: 0, y: 0, w: 0, h: 0 };
   private mapKey = '';
   private lightKey = '';
   private settleTimer = 0;
@@ -74,10 +95,13 @@ export class Lens {
   private saved: Record<string, string> = {};
   private off: (() => void)[] = [];
 
-  constructor(el: HTMLElement, js: Partial<GlassOptions>, host: LensHost) {
+  private shape: ShapeSource | null;
+
+  constructor(el: HTMLElement, js: Partial<GlassOptions>, host: LensHost, shape: ShapeSource | null = null) {
     this.el = el;
     this.js = js;
     this.host = host;
+    this.shape = shape;
     el.dataset.liquidGlass = this.id;
     for (const p of ['backdrop-filter', 'border-image', 'border-style', 'border-width', 'border-radius', 'scale', 'translate']) this.saved[p] = el.style.getPropertyValue(p);
     this.refresh();
@@ -226,20 +250,25 @@ export class Lens {
 
   // ---------------------------------------------------------------- size, map and light
 
+  /** The shape changed (a container's members moved): draw it again now. */
+  reshape() {
+    this.measure();
+  }
+
   private layout(now: boolean) {
     const { w, h } = this;
     if (!w || !h) return;
     const o = this.options;
-    const [radii, own] = this.cornerRadii();
-    this.radii = radii;
-    // The corners are set on the element unless they're its own CSS ones already, so the page can still change those.
-    const radiusCss = own ? this.saved['border-radius'] : radii.map((r) => `${+r.toFixed(2)}px`).join(' ');
-    if (this.el.style.borderRadius !== radiusCss) this.el.style.borderRadius = radiusCss;
+    if (!this.shape) {
+      const [radii, own] = this.cornerRadii();
+      this.radii = radii;
+      // The corners are set on the element unless they're its own CSS ones already, so the page can still change those.
+      const radiusCss = own ? this.saved['border-radius'] : radii.map((r) => `${+r.toFixed(2)}px`).join(' ');
+      if (this.el.style.borderRadius !== radiusCss) this.el.style.borderRadius = radiusCss;
+      const deeper = this.pressed && o.press === 'flatten' ? 1.2 : 1;
+      this.el.style.setProperty('--lg-shadow', boxShadow(o.shadowOpacity * o.opacity, o.shadowSpread * deeper, o.shadowOffsetY));
+    }
     this.place();
-    const deeper = this.pressed && o.press === 'flatten' ? 1.2 : 1;
-    this.el.style.setProperty('--lg-shadow', boxShadow(o.shadowOpacity * o.opacity, o.shadowSpread * deeper, o.shadowOffsetY));
-    if (o.fill) this.el.style.setProperty('--lg-fill', o.fill);
-    else this.el.style.removeProperty('--lg-fill');
     // The map and light are drawn for the settled size; meanwhile the old ones stretch.
     clearTimeout(this.settleTimer);
     if (now || !this.mapKey) this.draw();
@@ -252,9 +281,10 @@ export class Lens {
     for (const f of [this.pre, this.main]) if (f) setAttrs(f, { x: 0, y: 0, width: w, height: h });
     if (!this.maps.length) return;
     const stashed = !!this.pre, slot = Math.ceil(w + m) + 32;
+    const r = this.region.w ? this.region : { x: 0, y: 0, w, h };
     this.maps.forEach((map, i) => {
       const side = stashed ? slot * (i + 1) : 0;
-      setAttrs(map.image, { x: side - m, y: -m, width: w + 2 * m, height: h + 2 * m });
+      setAttrs(map.image, { x: side + r.x - m, y: r.y - m, width: r.w + 2 * m, height: r.h + 2 * m });
       if (map.shift) setAttrs(map.shift, { dx: -side });
     });
     // An image's rectangle is also its region, which Chromium clips to the filter's before fitting the image in it:
@@ -284,16 +314,22 @@ export class Lens {
   private draw() {
     const o = this.options;
     const { w, h, radii } = this;
-    const zR = Math.min(o.zRadius * (this.flat ? 0.8 : 1), Math.min(w, h) / 2);
+    const field = this.shape ? this.shape.field(w, h) : roundedRect(w, h, radii);
+    const moving = !!this.shape?.moving();
+    const zR = Math.min(o.zRadius * (this.flat ? 0.8 : 1), field.shortHalf);
+    // the map covers the shape's part of the box (all of it, for a rounded rectangle)
+    const region = this.shape?.bounds() ?? { x: 0, y: 0, w, h };
+    const sub = region.x || region.y || region.w !== w || region.h !== h ? within(field, region) : field;
     if (this.bends && this.maps.length) {
-      const scale = Math.min(MAP_SCALE, Math.sqrt(MAP_BUDGET / (w * h)));
-      const key = [w, h, ...radii, zR, o.refraction, o.bevelMode, +o.magnify, scale, ...this.maps.map((m) => m.fringe)].map((v) => Math.round(v * 400) / 400).join(':');
+      const scale = mapScale(region.w / Math.sqrt(this.shape?.detail() ?? 1), region.h, moving);
+      const key = [w, h, ...radii, zR, o.refraction, o.bevelMode, +o.magnify, scale, ...this.maps.map((m) => m.fringe)].map((v) => Math.round(v * 400) / 400).join(':')
+        + (this.shape ? `|${this.shape.key()}` : '');
       if (key !== this.mapKey) {
         this.mapKey = key;
         const entries = this.maps.map((map) => {
           const k = `${key}|${map.fringe}`;
           return mapCache.get(k) ?? remember(mapCache, k, (() => {
-            const m = tableMap({ w, h, radii }, { refraction: o.refraction, bevel: zR, dome: o.bevelMode === 1, magnify: o.magnify }, scale, 256, map.fringe);
+            const m = tableMap(sub, { refraction: o.refraction, bevel: zR, dome: o.bevelMode === 1, magnify: o.magnify }, scale, moving ? 64 : 256, map.fringe);
             return { url: toDataURL(m), rimPx: m.rimPx, margin: m.margin, tables: [m.tableX.join(' '), m.tableY.join(' ')] as [string, string] };
           })());
         });
@@ -307,12 +343,34 @@ export class Lens {
             maps[i].rimPx = e.rimPx;
           });
           this.margin = entries[0].margin;
+          this.region = region;
           this.place();
           this.applyStrength();
         });
       }
     }
-    this.drawLight(zR);
+    if (this.shape) this.drawFieldLight(field, zR, moving);
+    else this.drawLight(zR);
+  }
+
+  /** A shape's light, shadow and coverage, as images on the element (and its shadow layer). */
+  private drawFieldLight(field: Field, zR: number, moving: boolean) {
+    const o = this.options, shape = this.shape!;
+    const scale = moving ? 1 : Math.min(2, Math.ceil(devicePixelRatio || 1));
+    const fill = o.fill ? parseColour(o.fill, o.opacity) : null;
+    const key = `${shape.key()}|${zR}|${o.fresnel}|${o.edgeHighlight}|${o.specular}|${o.shadowOpacity}|${o.shadowSpread}|${o.shadowOffsetY}|${o.opacity}|${scale}|${fill}`;
+    if (key === this.lightKey) return;
+    this.lightKey = key;
+    const img = fieldLight(field, zR, { fresnel: o.fresnel, edge: o.edgeHighlight, specular: o.specular },
+      { opacity: o.shadowOpacity * o.opacity, spread: o.shadowSpread, offsetY: o.shadowOffsetY }, scale, 0, fill);
+    if (o.opacity < 1) for (let i = 3; i < img.light.data.length; i += 4) img.light.data[i] *= o.opacity;
+    const urls = [img.light, img.shadow, img.mask].map(toDataURL);
+    Promise.all(urls.map(predecode)).then(() => {
+      if (this.lightKey !== key) return;
+      this.el.style.setProperty('background-image', `url(${urls[0]})`);
+      this.el.style.setProperty('mask-image', `url(${urls[2]})`);
+      shape.shadowEl.style.setProperty('background-image', `url(${urls[1]})`);
+    });
   }
 
   private drawLight(zR: number) {
@@ -321,13 +379,14 @@ export class Lens {
     const shortHalf = Math.min(w, h) / 2;
     const scale = Math.min(2, Math.ceil(devicePixelRatio || 1));
     const lighting = { fresnel: o.fresnel, edge: o.edgeHighlight, specular: o.specular };
+    const fill = o.fill ? parseColour(o.fill, o.opacity) : null;
     const key = [...radii, zR, shortHalf, lighting.fresnel, lighting.edge, lighting.specular, scale, o.opacity, o.variant === 'identity' ? 1 : 0]
-      .map((v) => Math.round(v * 4) / 4).join(':');
+      .map((v) => Math.round(v * 4) / 4).join(':') + `|${fill}`;
     if (key === this.lightKey) return;
     this.lightKey = key;
     let hit = lightCache.get(key);
     if (hit === undefined) {
-      const img = o.variant === 'identity' ? null : lightImage(radii, zR, shortHalf, lighting, scale);
+      const img = o.variant === 'identity' ? null : lightImage(radii, zR, shortHalf, lighting, scale, fill);
       if (img && o.opacity < 1) for (let i = 3; i < img.data.length; i += 4) img.data[i] *= o.opacity;
       hit = remember(lightCache, key, img ? { url: toDataURL(img), slice: img.slice, edge: img.edge } : null);
     }
@@ -407,7 +466,7 @@ export class Lens {
     el.toggleAttribute('data-lg-floating', o.floating);
     if (o.button || o.interactive || (o.press !== null && o.press !== 'none')) {
       // A knob or lens doesn't take the pointer itself; the control around it does.
-      const target = o.button || o.interactive ? el : (el.closest('button, label, [role="button"]') as HTMLElement | null) ?? el;
+      const target = o.button || o.interactive ? el : (el.closest('button, label, [role="button"], [role="slider"], [role="switch"]') as HTMLElement | null) ?? el;
       on(target, 'pointerenter', () => {
         this.hover = true;
         if (o.interactive) el.style.setProperty('--lg-glow', '0.12');
@@ -471,10 +530,37 @@ export class Lens {
       if (v) this.el.style.setProperty(p, v);
       else this.el.style.removeProperty(p);
     }
-    for (const p of ['--lg-shadow', '--lg-fill', '--lg-x', '--lg-y', '--lg-glow']) this.el.style.removeProperty(p);
+    for (const p of ['--lg-shadow', '--lg-x', '--lg-y', '--lg-glow']) this.el.style.removeProperty(p);
     delete this.el.dataset.liquidGlass;
     for (const a of ['data-lg-pressable', 'data-lg-interactive', 'data-lg-floating', 'data-lg-dragging']) this.el.removeAttribute(a);
   }
+}
+
+/** The part of a field in `r`, as a field of its own (for a map that covers only that). */
+function within(f: Field, r: { x: number; y: number; w: number; h: number }): Field {
+  return {
+    w: r.w, h: r.h, shortHalf: f.shortHalf,
+    sdf: (x, y) => f.sdf(x + r.x, y + r.y),
+    pull: (x, y) => f.pull(x + r.x, y + r.y),
+    toward: (x, y) => f.toward(x + r.x, y + r.y),
+    probe: (axis, d) => {
+      const [x, y] = f.probe(axis, d);
+      return [x - r.x, y - r.y];
+    },
+  };
+}
+
+/**
+ * A CSS colour as [r, g, b] 0..255 and alpha 0..1 (times `opacity`): the fill is painted into the light's image, so
+ * a page's CSS reset (button { background: none }) can't take it away.
+ */
+function parseColour(colour: string, opacity = 1): RGBA {
+  const ctx = document.createElement('canvas').getContext('2d')!;
+  ctx.fillStyle = '#000';
+  ctx.fillStyle = colour;
+  ctx.fillRect(0, 0, 1, 1);
+  const [r, g, b, a] = ctx.getImageData(0, 0, 1, 1).data;
+  return [r, g, b, (a / 255) * opacity];
 }
 
 /** A CSS colour as RGB gains, scaled so its luma is 1 (a tint shouldn't darken or brighten the glass). */

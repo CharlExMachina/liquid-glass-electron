@@ -1,0 +1,11 @@
+.live { position: absolute; left: 224px; right: 0; top: 0; bottom: 0; overflow: hidden; background: linear-gradient(120deg, #0f2027, #203a43, #2c5364); }
+.ticker { position: absolute; left: 0; right: 0; font: 800 64px/1.15 system-ui, sans-serif; white-space: nowrap; color: rgb(255 255 255 / 0.9); animation: tick 18s linear infinite; }
+.ticker.b { animation-duration: 26s; animation-direction: reverse; color: rgb(255 214 10 / 0.9); }
+.ticker.c { animation-duration: 22s; color: rgb(100 210 255 / 0.9); }
+@keyframes tick { from { translate: 0 0; } to { translate: -50% 0; } }
+.orb { position: absolute; width: 220px; height: 220px; border-radius: 50%; filter: blur(20px); opacity: 0.85; animation: orb 9s ease-in-out infinite alternate; }
+@keyframes orb { to { translate: 260px 120px; } }
+.float { position: absolute; width: 240px; height: 150px; border-radius: 32px; color: #fff; padding: 18px 20px; display: grid; align-content: space-between; }
+.float b { font-size: 16px; }
+.float small { opacity: 0.85; }
+.float.round { width: 150px; height: 150px; border-radius: 75px; place-items: center; text-align: center; }

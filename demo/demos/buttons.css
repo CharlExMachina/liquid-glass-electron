@@ -1,0 +1,10 @@
+.btn-grid { position: absolute; left: 260px; right: 30px; top: 40px; display: grid; grid-template-columns: repeat(2, 1fr); gap: 22px; }
+.btn-cell { padding: 20px 22px 22px; border-radius: 28px; color: #fff; display: grid; gap: 14px; align-content: start; text-shadow: 0 1px 3px rgb(0 0 0 / 0.55); }
+.btn-cell h4 { margin: 0; font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; opacity: 0.8; }
+.btn-row { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
+.gbtn { height: 46px; padding: 0 22px; border-radius: 23px; font-weight: 600; font-size: 15px; color: #fff; display: inline-flex; align-items: center; gap: 8px; text-shadow: 0 1px 2px rgb(0 0 0 / 0.3); }
+.gbtn.round { width: 54px; height: 54px; padding: 0; justify-content: center; border-radius: 27px; }
+.gbtn.square { width: 64px; height: 64px; padding: 0; justify-content: center; border-radius: 18px; }
+.btn-note { font-size: 12px; opacity: 0.75; margin: 0; }
+.concentric-box { position: relative; width: 210px; height: 120px; border-radius: 32px; padding: 10px; display: flex; align-items: flex-end; gap: 10px; }
+.concentric-box .gbtn { flex: 1; padding: 0; justify-content: center; }

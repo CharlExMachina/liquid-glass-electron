@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<!-- As strict as an Electron app should be: no inline scripts or styles, images only from the app or data: URLs
+     (the glass's maps and light are data: URLs). -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; media-src 'self'; font-src 'self'">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>liquid-glass-electron</title>
+<link rel="stylesheet" href="app.css">
+<script type="module" src="app.js"></script>
+</head>
+<body>
+<div id="app">
+  <nav id="sidebar" data-glass="regular" data-glass-shape="rect" aria-label="Demos">
+    <header class="brand"><span class="logo" aria-hidden="true"></span><span>liquid glass</span></header>
+    <div id="nav"></div>
+    <footer class="settings">
+      <label class="row"><span>Dark</span><input type="checkbox" id="dark" class="switch"></label>
+      <label class="row"><span>Tinted glass</span><input type="checkbox" id="tinted" class="switch"></label>
+    </footer>
+  </nav>
+  <main id="stage" tabindex="-1"></main>
+</div>
+</body>
+</html>

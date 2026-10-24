@@ -1,0 +1,11 @@
+.morph-root { position: absolute; left: 224px; right: 0; top: 0; bottom: 0; }
+.fab { position: absolute; right: 40px; bottom: 40px; width: 60px; height: 60px; border-radius: 30px; display: grid; place-items: center; color: #fff; }
+.menu { position: absolute; right: 40px; bottom: 40px; width: 260px; padding: 10px; border-radius: 30px; color: #fff; display: grid; gap: 2px; visibility: hidden; }
+.menu button { display: flex; align-items: center; gap: 12px; height: 44px; padding: 0 14px; border-radius: 22px; font-size: 15px; font-weight: 500; text-align: left; }
+.menu button:hover { background: rgb(255 255 255 / 0.14); }
+.pill-btn { position: absolute; left: 60px; top: 60px; height: 48px; padding: 0 22px; border-radius: 24px; display: flex; align-items: center; gap: 8px; color: #fff; font-weight: 600; }
+.sheet { position: absolute; left: 60px; top: 60px; width: 420px; height: 260px; padding: 22px 24px; border-radius: 36px; color: #fff; visibility: hidden; }
+.sheet h3 { margin: 0 0 8px; font-size: 20px; }
+.sheet p { margin: 0 0 16px; opacity: 0.85; }
+.sheet .close { position: absolute; right: 14px; top: 14px; width: 36px; height: 36px; border-radius: 18px; display: grid; place-items: center; }
+.morph-note { position: absolute; left: 60px; bottom: 40px; max-width: 360px; color: #fff; text-shadow: 0 1px 3px rgb(0 0 0 / 0.5); }

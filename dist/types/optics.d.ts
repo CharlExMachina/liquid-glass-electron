@@ -1,3 +1,4 @@
+import type { Field } from './field.js';
 export declare const IOR = 1.5;
 export declare const ABERRATION = 1.7;
 export declare const clamp: (v: number, lo: number, hi: number) => number;
@@ -8,18 +9,6 @@ export declare const height: (d: number, zR: number) => number;
 export declare const slope: (d: number, zR: number) => number;
 /** Corner radii in CSS order: top-left, top-right, bottom-right, bottom-left. */
 export type Radii = [number, number, number, number];
-/**
- * Signed distance from a rounded rectangle centred on the origin (half sizes hx, hy, a radius per corner); < 0 inside.
- * Each quadrant uses its own corner's radius, as CSS draws them.
- */
-export declare function sdf(px: number, py: number, hx: number, hy: number, radii: Radii): number;
-export interface Shape {
-    /** width and height, px */
-    w: number;
-    h: number;
-    /** corner radii, px, each at most half the shorter side */
-    radii: Radii;
-}
 /** Radii clamped to half the shorter side, as a glass's corners are circular. */
 export declare const clampRadii: (radii: number[], w: number, h: number) => Radii;
 export interface Optics {
@@ -35,15 +24,15 @@ export interface Optics {
     monotone?: boolean;
 }
 /**
- * Where the backdrop is sampled from, relative to the point, for a point (px, py) measured from the element's centre
- * (y down): the bevel's refraction plus the magnification, as liquidglass's shader computes them.
+ * Where the backdrop is sampled from, relative to the point (x, y) of the field's box: the bevel's refraction plus
+ * the magnification, as liquidglass's shader computes them.
  */
-export declare function shiftAt(px: number, py: number, s: Shape, o: Optics): [number, number];
+export declare function shiftAt(x: number, y: number, f: Field, o: Optics): [number, number];
 /**
  * liquidglass's colour fringe at a point: how far red is sampled from green (blue the same amount the other way), px,
  * along the surface normal: chromAberration × 36 × (0.3 + 0.7 × edge) × |N.xy|, outward. Nothing in the flat middle.
  */
-export declare function fringeAt(px: number, py: number, s: Shape, bevel: number, chroma: number): [number, number];
+export declare function fringeAt(x: number, y: number, f: Field, bevel: number, chroma: number): [number, number];
 export interface Lighting {
     fresnel: number;
     edge: number;
@@ -71,6 +60,8 @@ export declare function tintGains(strength: number, rgb?: [number, number, numbe
  * brightness (× 1 + brightness) and the tint gains, in that order.
  */
 export declare function colorMatrix(saturation: number, brightness: number, gains: [number, number, number]): number[];
+/** liquidglass's shadow's opacity `-d` px outside the shape (d is the distance in, so negative outside). */
+export declare function boxShadowAlpha(d: number, opacity: number, spread: number): number;
 /**
  * liquidglass's shadow: 0.65 exp(−d²/s²) + 0.35 exp(−2d/s) from 1 px outside the shape (s = shadowSpread), times
  * shadowOpacity; then squared, as its canvas blends alpha with itself (SRC_ALPHA on a non-premultiplied canvas). As

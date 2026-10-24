@@ -2,6 +2,8 @@
 // per fragment, so the same settings give the same look. Pure functions, no DOM: the maps and the lighting are
 // drawn from these, and the unit tests check them.
 
+import type { Field } from './field.ts';
+
 export const IOR = 1.5;
 // liquidglass fringes by chromAberration × 18 × 2 px at the rim, where the bevel shifts by about 43 px (at its
 // defaults). Here each channel is bent by its own share of the bevel's shift, red further and blue less: 1.7 per
@@ -23,24 +25,6 @@ export const slope = (d: number, zR: number) => (height(d + 2, zR) - height(d - 
 /** Corner radii in CSS order: top-left, top-right, bottom-right, bottom-left. */
 export type Radii = [number, number, number, number];
 
-/**
- * Signed distance from a rounded rectangle centred on the origin (half sizes hx, hy, a radius per corner); < 0 inside.
- * Each quadrant uses its own corner's radius, as CSS draws them.
- */
-export function sdf(px: number, py: number, hx: number, hy: number, radii: Radii) {
-  const r = py < 0 ? (px < 0 ? radii[0] : radii[1]) : px < 0 ? radii[3] : radii[2];
-  const qx = Math.abs(px) - hx + r, qy = Math.abs(py) - hy + r;
-  return Math.min(Math.max(qx, qy), 0) + Math.hypot(Math.max(qx, 0), Math.max(qy, 0)) - r;
-}
-
-export interface Shape {
-  /** width and height, px */
-  w: number;
-  h: number;
-  /** corner radii, px, each at most half the shorter side */
-  radii: Radii;
-}
-
 /** Radii clamped to half the shorter side, as a glass's corners are circular. */
 export const clampRadii = (radii: number[], w: number, h: number): Radii =>
   radii.map((r) => clamp(r, 0, Math.min(w, h) / 2)) as Radii;
@@ -58,23 +42,26 @@ export interface Optics {
   monotone?: boolean;
 }
 
+/** The bevel's height gradient at (x, y), over ±2 px as liquidglass's shader takes it (inward), and the depth there. */
+function gradient(f: Field, x: number, y: number, zR: number): [number, number, number] {
+  const e = 2;
+  const gx = (height(-f.sdf(x + e, y), zR) - height(-f.sdf(x - e, y), zR)) / (2 * e);
+  const gy = (height(-f.sdf(x, y + e), zR) - height(-f.sdf(x, y - e), zR)) / (2 * e);
+  return [gx, gy, -f.sdf(x, y)];
+}
+
 /**
- * Where the backdrop is sampled from, relative to the point, for a point (px, py) measured from the element's centre
- * (y down): the bevel's refraction plus the magnification, as liquidglass's shader computes them.
+ * Where the backdrop is sampled from, relative to the point (x, y) of the field's box: the bevel's refraction plus
+ * the magnification, as liquidglass's shader computes them.
  */
-export function shiftAt(px: number, py: number, s: Shape, o: Optics): [number, number] {
-  const hx = s.w / 2, hy = s.h / 2;
-  const r = s.radii;
+export function shiftAt(x: number, y: number, f: Field, o: Optics): [number, number] {
   const zR = Math.max(o.bevel, 1);
-  const d = -sdf(px, py, hx, hy, r);
+  let [gx, gy, d] = gradient(f, x, y, zR);
   const depth = smoothstep(0, zR, d);
   if (o.dome) {
-    const k = o.refraction * depth * 0.35;
-    return [-px * k, -py * k];
+    const [tx, ty] = f.toward(x, y), k = o.refraction * depth * 0.35;
+    return [tx * k, ty * k];
   }
-  const e = 2;
-  let gx = (height(-sdf(px + e, py, hx, hy, r), zR) - height(-sdf(px - e, py, hx, hy, r), zR)) / (2 * e);
-  let gy = (height(-sdf(px, py + e, hx, hy, r), zR) - height(-sdf(px, py - e, hx, hy, r), zR)) / (2 * e);
   if (o.monotone && d < 2) {
     // the gradient's direction, at the peak's magnitude, rising 2% a px on toward the edge (so it keeps rising)
     const g = Math.hypot(gx, gy) || 1, peak = slope(2, zR) * (1 + 0.02 * (2 - d));
@@ -84,20 +71,18 @@ export function shiftAt(px: number, py: number, s: Shape, o: Optics): [number, n
   // Biconvex: light bends where it enters and where it leaves, a little more the thicker the glass.
   const k = (1 - 1 / IOR) * (2 + 0.5 * height(o.monotone ? Math.max(d, 2) : d, zR) / zR) * o.refraction * 30;
   const m = o.magnify ? o.refraction * 4 * depth : 0;
-  return [gx * k - (px / Math.max(hx, 1)) * m, gy * k - (py / Math.max(hy, 1)) * m];
+  const [px, py] = f.pull(x, y);
+  return [gx * k + px * m, gy * k + py * m];
 }
 
 /**
  * liquidglass's colour fringe at a point: how far red is sampled from green (blue the same amount the other way), px,
  * along the surface normal: chromAberration × 36 × (0.3 + 0.7 × edge) × |N.xy|, outward. Nothing in the flat middle.
  */
-export function fringeAt(px: number, py: number, s: Shape, bevel: number, chroma: number): [number, number] {
-  const hx = s.w / 2, hy = s.h / 2, r = s.radii, zR = Math.max(bevel, 1), e = 2;
-  const d = -sdf(px, py, hx, hy, r);
-  const gx = (height(-sdf(px + e, py, hx, hy, r), zR) - height(-sdf(px - e, py, hx, hy, r), zR)) / (2 * e);
-  const gy = (height(-sdf(px, py + e, hx, hy, r), zR) - height(-sdf(px, py - e, hx, hy, r), zR)) / (2 * e);
+export function fringeAt(x: number, y: number, f: Field, bevel: number, chroma: number): [number, number] {
+  const [gx, gy, d] = gradient(f, x, y, Math.max(bevel, 1));
   const n = Math.hypot(gx, gy, 1);
-  const edge = smoothstep(Math.min(hx, hy) * 0.35, 0, d);
+  const edge = smoothstep(f.shortHalf * 0.35, 0, d);
   const k = chroma * 36 * (0.3 + 0.7 * edge);
   // N.xy = −grad / |(−grad, 1)|: outward
   return [(-gx / n) * k, (-gy / n) * k];
@@ -172,6 +157,13 @@ export function colorMatrix(saturation: number, brightness: number, gains: [numb
   rows.forEach((row, i) => m.push(...row.map((v) => v * b * gains[i]), 0, 0));
   m.push(0, 0, 0, 1, 0);
   return m;
+}
+
+/** liquidglass's shadow's opacity `-d` px outside the shape (d is the distance in, so negative outside). */
+export function boxShadowAlpha(d: number, opacity: number, spread: number): number {
+  const s = Math.max(spread, 1), out = Math.max(-d - 1, 0) / s;
+  const a = (0.65 * Math.exp(-out * out) + 0.35 * Math.exp(-2 * out)) * opacity;
+  return a * a;
 }
 
 /**

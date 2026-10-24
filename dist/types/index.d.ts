@@ -1,8 +1,10 @@
+import { GlassContainer, type ContainerOptions } from './container.js';
 import type { Environment, GlassOptions } from './options.js';
 export { DEFAULTS, VARIANTS } from './options.js';
 export type { Environment, GlassOptions, Press, Shape, Variant } from './options.js';
-export { morph, type MorphOptions } from './morph.js';
-export { GlassContainer, container, type ContainerOptions } from './container.js';
+export { morph, materialize, type MorphOptions, type Transition } from './morph.js';
+export { scrollEdge, type ScrollEdgeOptions } from './edges.js';
+export { GlassContainer, type ContainerOptions } from './container.js';
 export interface GlassHandle {
     readonly el: HTMLElement;
     /** the options in effect, after the system's settings */
@@ -29,6 +31,14 @@ export declare function setEnvironment(env: Partial<Environment>): void;
 export declare function refreshAll(): void;
 /** Make an element glass. Calling it again on the same element updates its options. */
 export declare function glass(el: HTMLElement, options?: Partial<GlassOptions>): GlassHandle;
+/**
+ * Apple's GlassEffectContainer: the glass shapes inside `el` (elements with data-glass or data-glass-member) become
+ * one piece of glass, flowing into each other where they come within `spacing` px, and morphing as they move.
+ * Declaratively: <div data-glass-container="16"> with autoGlass().
+ */
+export declare function container(el: HTMLElement, options?: ContainerOptions): GlassContainer;
+/** Take a container's glass off; its members go back to plain elements. */
+export declare function uncontainer(el: HTMLElement): void;
 /** Take the glass off an element. */
 export declare function unglass(el: HTMLElement): void;
 /** The glass handle of an element, if it has one. */
@@ -40,3 +50,14 @@ export declare function glassOf(el: HTMLElement): GlassHandle | undefined;
 export declare function autoGlass(selector?: string, options?: Partial<GlassOptions>, root?: ParentNode): {
     stop(): void;
 };
+/**
+ * Apple's glassEffectUnion: separate elements drawn as one piece of glass, joined however far apart they are. Their
+ * parent becomes a container whose spacing reaches across the widest gap between them.
+ */
+export declare function union(elements: HTMLElement[], options?: ContainerOptions): GlassContainer;
+export type ButtonStyle = 'glass' | 'prominent';
+/**
+ * Apple's .glass and .glassProminent button styles: a capsule of regular glass that responds to the pointer;
+ * prominent is tinted with the accent colour (options.fill, or the CSS variable --glass-accent).
+ */
+export declare function glassButton(el: HTMLElement, style?: ButtonStyle, options?: Partial<GlassOptions>): GlassHandle;

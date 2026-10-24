@@ -1,0 +1,6 @@
+.cmp { position: absolute; left: 224px; right: 0; top: 0; bottom: 0; }
+.cmp-card { position: absolute; top: 120px; width: 280px; height: 190px; border-radius: 34px; padding: 18px 22px; color: #fff; text-shadow: 0 1px 2px rgb(0 0 0 / 0.4); }
+.cmp-card b { font-size: 17px; display: block; }
+.cmp-card small { opacity: 0.9; }
+.cmp-card.css { backdrop-filter: blur(14px) saturate(1.6) brightness(1.06); background: rgb(255 255 255 / 0.12); border: 1px solid rgb(255 255 255 / 0.35); box-shadow: 0 8px 30px rgb(0 0 0 / 0.25); }
+.cmp-strip { position: absolute; left: 0; right: 0; top: 230px; height: 26px; background: repeating-linear-gradient(90deg, #fff 0 12px, #111 12px 24px); }

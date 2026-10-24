@@ -12,8 +12,8 @@ export declare function toDataURL(p: Pixels): string;
  */
 export declare function predecode(url: string): Promise<void>;
 /**
- * The library's own rules, at zero specificity (:where), so any rule of the page wins: the glass's fill and shadow
- * come from custom properties set on each element, and the page can still give it its own background or shadow.
+ * The library's own rules, at zero specificity (:where), so any rule of the page wins: the glass's shadow comes from a
+ * custom property set on each element, and the page can still give it a shadow of its own.
  */
 export declare function installStyles(): void;
 /**

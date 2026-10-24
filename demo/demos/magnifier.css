@@ -1,0 +1,4 @@
+.mag-scene { position: absolute; left: 224px; right: 0; top: 0; bottom: 0; overflow: hidden; cursor: none; }
+.mag { position: absolute; left: 0; top: 0; width: 190px; height: 190px; border-radius: 95px; pointer-events: none; }
+.mag-text { position: absolute; left: 40px; right: 40px; bottom: 40px; padding: 18px 22px; border-radius: 18px; background: rgb(0 0 0 / 0.55); color: #fff; font-size: 13px; line-height: 1.6; }
+.mag-text b { font-size: 15px; }
