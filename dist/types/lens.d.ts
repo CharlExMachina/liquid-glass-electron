@@ -49,6 +49,7 @@ export declare class Lens {
     private h;
     private radii;
     private margin;
+    private reach;
     private region;
     private mapKey;
     private lightKey;

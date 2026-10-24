@@ -233,13 +233,23 @@ export function glassOf(el: HTMLElement): GlassHandle | undefined {
  * Options come from their data attributes and CSS custom properties (and `options`, for all of them).
  */
 export function autoGlass(selector = '[data-glass]', options: Partial<GlassOptions> = {}, root: ParentNode = document.body) {
+  // only glass this made is taken off again: glass() on an element is the page's to remove
+  const made = new Set<HTMLElement>();
   const add = (node: Node) => {
     if (node.nodeType !== 1) return;
     const el = node as HTMLElement;
     const all = (sel: string) => (el.matches(sel) ? [el, ...el.querySelectorAll<HTMLElement>(sel)] : [...el.querySelectorAll<HTMLElement>(sel)]);
     for (const c of all('[data-glass-container]')) if (!containers.has(c)) container(c, options);
     // a container's members are part of its glass, not glass of their own
-    for (const f of all(selector)) if (!lenses.has(f) && !f.closest('[data-glass-container]')) glass(f, options);
+    for (const f of all(selector)) {
+      if (lenses.has(f) || f.closest('[data-glass-container]')) continue;
+      glass(f, options);
+      made.add(f);
+    }
+  };
+  const drop = (el: HTMLElement) => {
+    unglass(el);
+    made.delete(el);
   };
   const mo = new MutationObserver((records) => {
     let removed = false;
@@ -249,11 +259,11 @@ export function autoGlass(selector = '[data-glass]', options: Partial<GlassOptio
       if (r.type === 'attributes') {
         const el = r.target as HTMLElement;
         if (el.matches(selector)) add(el);
-        else if (lenses.has(el)) unglass(el);
+        else if (made.has(el)) drop(el);
       }
     }
     if (removed) {
-      for (const el of [...lenses.keys()]) if (!el.isConnected) unglass(el);
+      for (const el of [...made]) if (!el.isConnected) drop(el);
       for (const el of [...containers.keys()]) if (!el.isConnected) uncontainer(el);
     }
   });

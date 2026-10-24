@@ -756,6 +756,8 @@ var LiquidGlass = (() => {
     h = 0;
     radii = [0, 0, 0, 0];
     margin = 0;
+    // how far past the edge the rim samples the backdrop, px: the filters reach that far
+    reach = 0;
     region = { x: 0, y: 0, w: 0, h: 0 };
     mapKey = "";
     lightKey = "";
@@ -887,6 +889,7 @@ var LiquidGlass = (() => {
       this.pre = this.main = this.colour = this.blurNode = this.mixNode = null;
       this.maps = [];
       this.passes = [];
+      this.reach = 0;
       this.mapKey = "";
       this.bends = supportsSvgBackdrop() && o.refraction > 0 && o.variant !== "identity";
       const sigma = blurSigma(o.blurAmount);
@@ -1026,14 +1029,16 @@ var LiquidGlass = (() => {
       const { w, h } = this, m = this.margin;
       for (const f of [this.pre, this.main]) if (f) setAttrs(f, { x: 0, y: 0, width: w, height: h });
       if (!this.maps.length) return;
-      const stashed = !!this.pre, slot = Math.ceil(w + m) + 32;
+      const e = Math.max(m, this.reach);
+      if (this.pre) setAttrs(this.main, { x: -e, y: -e, width: w + 2 * e, height: h + 2 * e });
+      const stashed = !!this.pre, slot = Math.ceil(w + m + e) + 8;
       const r = this.region.w ? this.region : { x: 0, y: 0, w, h };
       this.maps.forEach((map, i) => {
         const side = stashed ? slot * (i + 1) : 0;
         setAttrs(map.image, { x: side + r.x - m, y: r.y - m, width: r.w + 2 * m, height: r.h + 2 * m });
         if (map.shift) setAttrs(map.shift, { dx: -side });
       });
-      setAttrs(this.pre ?? this.main, { x: -m, y: -m, width: (stashed ? slot * this.maps.length : 0) + w + 2 * m, height: h + 2 * m });
+      setAttrs(this.pre ?? this.main, { x: -e, y: -e, width: (stashed ? slot * this.maps.length : 0) + w + m + e, height: h + 2 * e });
     }
     /** The corner radii, and whether they're the element's own CSS ones (circular, in px). */
     cornerRadii() {
@@ -1224,7 +1229,17 @@ var LiquidGlass = (() => {
     // ---------------------------------------------------------------- strength, hover, press, drag
     applyStrength() {
       const k = this.bulge * this.amount() * (this.unitMaps ? this.options.refraction : 1);
-      for (const { node, spread, map } of this.passes) node.setAttribute("scale", String(+(2 * (this.maps[map]?.rimPx ?? 0) * spread * k).toFixed(3)));
+      let most = 0;
+      for (const { node, spread, map } of this.passes) {
+        const scale = 2 * (this.maps[map]?.rimPx ?? 0) * spread * k;
+        node.setAttribute("scale", String(+scale.toFixed(3)));
+        most = Math.max(most, Math.abs(scale) / 2);
+      }
+      const reach = Math.ceil((most + 1) / 4) * 4;
+      if (this.pre && reach > this.reach) {
+        this.reach = reach;
+        this.place();
+      }
     }
     tweenBulge(to) {
       cancelAnimationFrame(this.tween);
@@ -1822,12 +1837,21 @@ var LiquidGlass = (() => {
     return lenses.has(el) ? glass(el) : void 0;
   }
   function autoGlass(selector = "[data-glass]", options = {}, root = document.body) {
+    const made = /* @__PURE__ */ new Set();
     const add = (node) => {
       if (node.nodeType !== 1) return;
       const el = node;
       const all = (sel) => el.matches(sel) ? [el, ...el.querySelectorAll(sel)] : [...el.querySelectorAll(sel)];
       for (const c of all("[data-glass-container]")) if (!containers.has(c)) container(c, options);
-      for (const f of all(selector)) if (!lenses.has(f) && !f.closest("[data-glass-container]")) glass(f, options);
+      for (const f of all(selector)) {
+        if (lenses.has(f) || f.closest("[data-glass-container]")) continue;
+        glass(f, options);
+        made.add(f);
+      }
+    };
+    const drop = (el) => {
+      unglass(el);
+      made.delete(el);
     };
     const mo = new MutationObserver((records) => {
       let removed = false;
@@ -1837,11 +1861,11 @@ var LiquidGlass = (() => {
         if (r.type === "attributes") {
           const el = r.target;
           if (el.matches(selector)) add(el);
-          else if (lenses.has(el)) unglass(el);
+          else if (made.has(el)) drop(el);
         }
       }
       if (removed) {
-        for (const el of [...lenses.keys()]) if (!el.isConnected) unglass(el);
+        for (const el of [...made]) if (!el.isConnected) drop(el);
         for (const el of [...containers.keys()]) if (!el.isConnected) uncontainer(el);
       }
     });

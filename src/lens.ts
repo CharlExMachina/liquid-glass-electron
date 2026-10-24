@@ -91,6 +91,8 @@ export class Lens {
   private h = 0;
   private radii: Radii = [0, 0, 0, 0];
   private margin = 0;
+  // how far past the edge the rim samples the backdrop, px: the filters reach that far
+  private reach = 0;
   private region = { x: 0, y: 0, w: 0, h: 0 };
   private mapKey = '';
   private lightKey = '';
@@ -239,6 +241,7 @@ export class Lens {
     this.pre = this.main = this.colour = this.blurNode = this.mixNode = null;
     this.maps = [];
     this.passes = [];
+    this.reach = 0;
     this.mapKey = '';
     this.bends = supportsSvgBackdrop() && o.refraction > 0 && o.variant !== 'identity';
     const sigma = blurSigma(o.blurAmount);
@@ -397,7 +400,11 @@ export class Lens {
     const { w, h } = this, m = this.margin;
     for (const f of [this.pre, this.main]) if (f) setAttrs(f, { x: 0, y: 0, width: w, height: h });
     if (!this.maps.length) return;
-    const stashed = !!this.pre, slot = Math.ceil(w + m) + 32;
+    // The rim samples the backdrop up to `reach` px past the edge. Filter 2 reads filter 1's output, which is cropped
+    // to filter 1's region (transparent past it): both reach that far, and the stashed maps sit beyond.
+    const e = Math.max(m, this.reach);
+    if (this.pre) setAttrs(this.main!, { x: -e, y: -e, width: w + 2 * e, height: h + 2 * e });
+    const stashed = !!this.pre, slot = Math.ceil(w + m + e) + 8;
     const r = this.region.w ? this.region : { x: 0, y: 0, w, h };
     this.maps.forEach((map, i) => {
       const side = stashed ? slot * (i + 1) : 0;
@@ -406,7 +413,7 @@ export class Lens {
     });
     // An image's rectangle is also its region, which Chromium clips to the filter's before fitting the image in it:
     // the filter that draws the maps reaches past the element by the margin too.
-    setAttrs((this.pre ?? this.main)!, { x: -m, y: -m, width: (stashed ? slot * this.maps.length : 0) + w + 2 * m, height: h + 2 * m });
+    setAttrs((this.pre ?? this.main)!, { x: -e, y: -e, width: (stashed ? slot * this.maps.length : 0) + w + m + e, height: h + 2 * e });
   }
 
   /** The corner radii, and whether they're the element's own CSS ones (circular, in px). */
@@ -604,7 +611,18 @@ export class Lens {
 
   private applyStrength() {
     const k = this.bulge * this.amount() * (this.unitMaps ? this.options.refraction : 1);
-    for (const { node, spread, map } of this.passes) node.setAttribute('scale', String(+(2 * (this.maps[map]?.rimPx ?? 0) * spread * k).toFixed(3)));
+    let most = 0;
+    for (const { node, spread, map } of this.passes) {
+      const scale = 2 * (this.maps[map]?.rimPx ?? 0) * spread * k;
+      node.setAttribute('scale', String(+scale.toFixed(3)));
+      most = Math.max(most, Math.abs(scale) / 2);
+    }
+    // the filters' regions follow the farthest shift (in steps, so they aren't reset every frame of a tween)
+    const reach = Math.ceil((most + 1) / 4) * 4;
+    if (this.pre && reach > this.reach) {
+      this.reach = reach;
+      this.place();
+    }
   }
 
   private tweenBulge(to: number) {

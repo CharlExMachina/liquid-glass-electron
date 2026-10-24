@@ -27,6 +27,13 @@ const CASES = {
     await photo('ponds');
     glass(box(170, 150, 300, 80, 'capsule'), { shape: 'capsule' });
   },
+  async thinrim() {
+    // a thin capsule bent hard, with fringing: its rim samples further past the edge than the map's margin
+    await photo('coast');
+    glass(box(120, 120, 180, 44, 'z22'), { shape: 'capsule', zRadius: 22, variant: 'regular' });
+    glass(box(340, 120, 180, 44, 'r1.2'), { shape: 'capsule', zRadius: 16, refraction: 1.2, variant: 'regular' });
+    glass(box(230, 230, 180, 44, 'z40'), { shape: 'capsule', zRadius: 40 });
+  },
   async dome() {
     await photo('ponds');
     glass(box(220, 100, 200, 200), { shape: 'circle', bevelMode: 1, refraction: 1.4 });
