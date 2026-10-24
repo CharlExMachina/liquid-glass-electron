@@ -47,4 +47,4 @@ export interface TableMap extends Pixels {
  * (`monotone`), which changes nothing visible. The image reaches `margin` px past the edge, so the outermost pixels
  * are interpolated rather than clamped.
  */
-export declare function tableMap(s: Shape, o: Optics, scale: number, N?: number): TableMap;
+export declare function tableMap(s: Shape, o: Optics, scale: number, N?: number, fringe?: number): TableMap;

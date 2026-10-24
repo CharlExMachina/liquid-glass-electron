@@ -51,18 +51,16 @@ export class Lens {
   // the filters and the nodes that change
   private pre: SVGFilterElement | null = null;
   private main: SVGFilterElement | null = null;
-  private mapImage: SVGFEImageElement | null = null;
-  private mapTable: SVGFEComponentTransferElement | null = null;
-  private mapShift: SVGFEOffsetElement | null = null;
+  // One map, or with a dome's fringe three (red, green, blue: liquidglass's fringe doesn't follow the dome's shift)
+  private maps: { image: SVGFEImageElement; table: SVGFEComponentTransferElement; shift: SVGFEOffsetElement | null; fringe: number; rimPx: number }[] = [];
   private colour: SVGFEColorMatrixElement | null = null;
-  private passes: { node: SVGFEDisplacementMapElement; spread: number }[] = [];
+  private passes: { node: SVGFEDisplacementMapElement; spread: number; map: number }[] = [];
   private stash = false;
   private bends = false;
   // geometry and the current map
   private w = 0;
   private h = 0;
   private radii: Radii = [0, 0, 0, 0];
-  private rimPx = 0;
   private margin = 0;
   private mapKey = '';
   private lightKey = '';
@@ -116,7 +114,8 @@ export class Lens {
     const o = this.options;
     this.pre?.remove();
     this.main?.remove();
-    this.pre = this.main = this.mapImage = this.mapTable = this.mapShift = this.colour = null;
+    this.pre = this.main = this.colour = null;
+    this.maps = [];
     this.passes = [];
     this.mapKey = '';
     this.bends = supportsSvgBackdrop() && o.refraction > 0 && o.variant !== 'identity';
@@ -149,43 +148,55 @@ export class Lens {
       src = 'smooth';
     }
     if (o.distortion > 0) {
-      // each sample moved by up to ±2 × distortion px at random, as liquidglass's hash does
+      // each sample moved by up to ±2 × distortion px at random, as liquidglass's hash does: noise fine enough to
+      // differ from pixel to pixel, and strong enough that its spread matches
       first.append(
-        svgEl('feTurbulence', { type: 'fractalNoise', baseFrequency: 0.9, numOctaves: 1, seed: 7, result: 'noise0' }),
+        svgEl('feTurbulence', { type: 'fractalNoise', baseFrequency: 1.6, numOctaves: 1, seed: 7, result: 'noise0' }),
         svgEl('feColorMatrix', { in: 'noise0', type: 'matrix', values: '1 0 0 0 0  0 1 0 0 0  0 0 0 0 0.5  0 0 0 0 1', result: 'noise' }),
-        svgEl('feDisplacementMap', { in: src, in2: 'noise', scale: (o.distortion * 8).toFixed(2), xChannelSelector: 'R', yChannelSelector: 'G', result: 'grain' }),
+        svgEl('feDisplacementMap', { in: src, in2: 'noise', scale: (o.distortion * 14).toFixed(2), xChannelSelector: 'R', yChannelSelector: 'G', result: 'grain' }),
       );
       src = 'grain';
     }
 
-    // The map: the image and its lookup tables.
-    this.mapImage = svgEl('feImage', { preserveAspectRatio: 'none', x: 0, y: 0, width: 1, height: 1, result: 'map0' });
-    this.mapTable = svgEl('feComponentTransfer', { in: 'map0', result: fringe ? 'side' : 'map' },
-      svgEl('feFuncR', { type: 'table', tableValues: '0 1' }), svgEl('feFuncG', { type: 'table', tableValues: '0 1' }));
-    first.append(this.mapImage, this.mapTable);
+    // The map: the image and its lookup tables; with fringing, beside the element in filter 1's output, which
+    // filter 2 reads from there.
+    const perChannel = fringe && o.bevelMode === 1;
+    const fringes = perChannel ? [1, 0, -1].map((k) => k * o.chromAberration) : [0];
+    const mergeNodes = [svgEl('feMergeNode', { in: src })];
+    fringes.forEach((f, i) => {
+      const image = svgEl('feImage', { preserveAspectRatio: 'none', x: 0, y: 0, width: 1, height: 1, result: `map${i}raw` });
+      const table = svgEl('feComponentTransfer', { in: `map${i}raw`, result: fringe ? `side${i}` : `map${i}` },
+        svgEl('feFuncR', { type: 'table', tableValues: '0 1' }), svgEl('feFuncG', { type: 'table', tableValues: '0 1' }));
+      first.append(image, table);
+      let shift: SVGFEOffsetElement | null = null;
+      if (fringe) {
+        mergeNodes.push(svgEl('feMergeNode', { in: `side${i}` }));
+        shift = svgEl('feOffset', { in: 'SourceGraphic', dx: 0, dy: 0, result: `map${i}` });
+        second.append(shift);
+      }
+      this.maps.push({ image, table, shift, fringe: f, rimPx: 0 });
+    });
     if (fringe) {
-      // beside the element, in filter 1's output; filter 2 reads it from there
-      first.append(svgEl('feMerge', {}, svgEl('feMergeNode', { in: src }), svgEl('feMergeNode', { in: 'side' })));
-      this.mapShift = svgEl('feOffset', { in: 'SourceGraphic', dx: 0, dy: 0, result: 'map' });
-      second.append(this.mapShift);
+      first.append(svgEl('feMerge', {}, ...mergeNodes));
       src = 'SourceGraphic';
     }
 
-    const pass = (result: string, spread: number) => {
-      const node = svgEl('feDisplacementMap', { in: src, in2: 'map', xChannelSelector: 'R', yChannelSelector: 'G', result });
-      this.passes.push({ node, spread });
+    const pass = (result: string, spread: number, map: number) => {
+      const node = svgEl('feDisplacementMap', { in: src, in2: `map${map}`, xChannelSelector: 'R', yChannelSelector: 'G', result });
+      this.passes.push({ node, spread, map });
       return node;
     };
     if (fringe) {
-      // Real glass bends blue further than red: each channel is bent by its own share of the shift, then they're
-      // added up (an additive blend, the cheapest way Chromium has to add two images).
-      const a = o.chromAberration * ABERRATION;
-      ['r', 'g', 'b'].forEach((ch, k) => second.append(pass(`${ch}0`, 1 + (k - 1) * a),
+      // Real glass bends blue further than red: each channel is bent by its own amount, then they're added up (an
+      // additive blend, the cheapest way Chromium has to add two images). A pill's channels share one map, bent by
+      // its own share of the shift each; a dome's have a map each, with liquidglass's fringe in it.
+      const a = perChannel ? 0 : o.chromAberration * ABERRATION;
+      ['r', 'g', 'b'].forEach((ch, k) => second.append(pass(`${ch}0`, 1 + (k - 1) * a, perChannel ? k : 0),
         svgEl('feColorMatrix', { in: `${ch}0`, type: 'matrix', values: KEEP[k], result: ch })));
       second.append(svgEl('feComposite', { in: 'r', in2: 'g', operator: 'lighter', result: 'rg' }),
         svgEl('feComposite', { in: 'rg', in2: 'b', operator: 'lighter', result: 'bent' }));
     } else {
-      second.append(pass('bent', 1));
+      second.append(pass('bent', 1, 0));
     }
     if (o.opacity < 1) {
       // less glass: a mix with the (smoothed, coloured) backdrop
@@ -210,7 +221,7 @@ export class Lens {
     const o = this.options;
     const gains = tintGains(o.tintStrength, o.tint ? tintRgb(o.tint) : undefined);
     const hover = this.hover && o.button && !this.pressed ? 0.2 : 0;
-    return colorMatrix(o.saturation, 0.06 + o.brightness + hover, gains).map((v) => +v.toFixed(4));
+    return colorMatrix(o.saturation, (1 + o.brightness + hover) * 1.06 - 1, gains).map((v) => +v.toFixed(4));
   }
 
   // ---------------------------------------------------------------- size, map and light
@@ -235,18 +246,20 @@ export class Lens {
     else this.settleTimer = window.setTimeout(() => this.draw(), SETTLE);
   }
 
-  /** Size the filters, and put the map where it goes: past the element by its margin, and beside it when stashed. */
+  /** Size the filters, and put the maps where they go: past the element by their margin, and beside it when stashed. */
   private place() {
     const { w, h } = this, m = this.margin;
     for (const f of [this.pre, this.main]) if (f) setAttrs(f, { x: 0, y: 0, width: w, height: h });
-    if (!this.mapImage) return;
-    const side = this.stash ? Math.ceil(w + m) + 32 : 0;
-    setAttrs(this.mapImage, { x: side - m, y: -m, width: w + 2 * m, height: h + 2 * m });
-    // The image's rectangle is also its region, which Chromium clips to the filter's before fitting the image in it:
-    // the filter that draws it reaches past the element by the margin too.
-    const holder = this.stash ? this.pre : this.main;
-    if (holder) setAttrs(holder, { x: -m, y: -m, width: side + w + 2 * m, height: h + 2 * m });
-    if (this.mapShift) setAttrs(this.mapShift, { dx: -side });
+    if (!this.maps.length) return;
+    const stashed = !!this.pre, slot = Math.ceil(w + m) + 32;
+    this.maps.forEach((map, i) => {
+      const side = stashed ? slot * (i + 1) : 0;
+      setAttrs(map.image, { x: side - m, y: -m, width: w + 2 * m, height: h + 2 * m });
+      if (map.shift) setAttrs(map.shift, { dx: -side });
+    });
+    // An image's rectangle is also its region, which Chromium clips to the filter's before fitting the image in it:
+    // the filter that draws the maps reaches past the element by the margin too.
+    setAttrs((this.pre ?? this.main)!, { x: -m, y: -m, width: (stashed ? slot * this.maps.length : 0) + w + 2 * m, height: h + 2 * m });
   }
 
   /** The corner radii, and whether they're the element's own CSS ones (circular, in px). */
@@ -272,23 +285,28 @@ export class Lens {
     const o = this.options;
     const { w, h, radii } = this;
     const zR = Math.min(o.zRadius * (this.flat ? 0.8 : 1), Math.min(w, h) / 2);
-    if (this.bends && this.mapImage) {
+    if (this.bends && this.maps.length) {
       const scale = Math.min(MAP_SCALE, Math.sqrt(MAP_BUDGET / (w * h)));
-      const key = [w, h, ...radii, zR, o.refraction, o.bevelMode, +o.magnify, scale].map((v) => Math.round(v * 4) / 4).join(':');
+      const key = [w, h, ...radii, zR, o.refraction, o.bevelMode, +o.magnify, scale, ...this.maps.map((m) => m.fringe)].map((v) => Math.round(v * 400) / 400).join(':');
       if (key !== this.mapKey) {
         this.mapKey = key;
-        const hit = mapCache.get(key) ?? remember(mapCache, key, (() => {
-          const m = tableMap({ w, h, radii }, { refraction: o.refraction, bevel: zR, dome: o.bevelMode === 1, magnify: o.magnify }, scale);
-          return { url: toDataURL(m), rimPx: m.rimPx, margin: m.margin, tables: [m.tableX.join(' '), m.tableY.join(' ')] as [string, string] };
-        })());
-        const image = this.mapImage, table = this.mapTable;
-        predecode(hit.url).then(() => {
-          if (this.mapKey !== key) return;
-          image.setAttribute('href', hit.url);
-          table?.children[0].setAttribute('tableValues', hit.tables[0]);
-          table?.children[1].setAttribute('tableValues', hit.tables[1]);
-          this.rimPx = hit.rimPx;
-          this.margin = hit.margin;
+        const entries = this.maps.map((map) => {
+          const k = `${key}|${map.fringe}`;
+          return mapCache.get(k) ?? remember(mapCache, k, (() => {
+            const m = tableMap({ w, h, radii }, { refraction: o.refraction, bevel: zR, dome: o.bevelMode === 1, magnify: o.magnify }, scale, 256, map.fringe);
+            return { url: toDataURL(m), rimPx: m.rimPx, margin: m.margin, tables: [m.tableX.join(' '), m.tableY.join(' ')] as [string, string] };
+          })());
+        });
+        const maps = this.maps;
+        Promise.all(entries.map((e) => predecode(e.url))).then(() => {
+          if (this.mapKey !== key || this.maps !== maps) return;
+          entries.forEach((e, i) => {
+            maps[i].image.setAttribute('href', e.url);
+            maps[i].table.children[0].setAttribute('tableValues', e.tables[0]);
+            maps[i].table.children[1].setAttribute('tableValues', e.tables[1]);
+            maps[i].rimPx = e.rimPx;
+          });
+          this.margin = entries[0].margin;
           this.place();
           this.applyStrength();
         });
@@ -335,7 +353,7 @@ export class Lens {
   // ---------------------------------------------------------------- strength, hover, press, drag
 
   private applyStrength() {
-    for (const { node, spread } of this.passes) node.setAttribute('scale', String(+(2 * this.rimPx * spread * this.strength).toFixed(3)));
+    for (const { node, spread, map } of this.passes) node.setAttribute('scale', String(+(2 * (this.maps[map]?.rimPx ?? 0) * spread * this.strength).toFixed(3)));
   }
 
   private tweenStrength(to: number) {

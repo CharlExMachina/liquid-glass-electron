@@ -1,5 +1,5 @@
 // The images the glass is made of, as raw RGBA pixels: no DOM, so they can be tested and drawn anywhere.
-import { lightAt, sdf, shiftAt, type Lighting, type Optics, type Radii, type Shape } from './optics.ts';
+import { fringeAt, lightAt, sdf, shiftAt, type Lighting, type Optics, type Radii, type Shape } from './optics.ts';
 
 export interface Pixels {
   width: number;
@@ -127,16 +127,24 @@ export interface TableMap extends Pixels {
  * (`monotone`), which changes nothing visible. The image reaches `margin` px past the edge, so the outermost pixels
  * are interpolated rather than clamped.
  */
-export function tableMap(s: Shape, o: Optics, scale: number, N = 256): TableMap {
+export function tableMap(s: Shape, o: Optics, scale: number, N = 256, fringe = 0): TableMap {
   const opt = { ...o, monotone: true };
+  // `fringe` ≠ 0: this channel's map, sampled liquidglass's colour fringe further out (red, > 0) or in (blue, < 0)
+  const shift = (px: number, py: number): [number, number] => {
+    const [x, y] = shiftAt(px, py, s, opt);
+    if (!fringe) return [x, y];
+    const [fx, fy] = fringeAt(px, py, s, o.bevel, Math.abs(fringe));
+    return [x + Math.sign(fringe) * fx, y + Math.sign(fringe) * fy];
+  };
   const hx = s.w / 2, hy = s.h / 2;
   const zR = Math.min(Math.max(o.bevel, 1), hx, hy);
   const margin = Math.ceil(2 / scale);
+  if (o.dome) return smoothMap(s, shift, scale, margin, N);
   // Per axis: the shift along the middle of the left (top) edge, d px in, d from the bevel's end to `margin` outside.
   // Outside the element the shift stays what it is at the edge.
   const edgeShift = (axis: 0 | 1, d: number) => {
     const dd = Math.max(d, 0.01);
-    return axis === 0 ? shiftAt(dd - hx, 0, s, opt)[0] : shiftAt(0, dd - hy, s, opt)[1];
+    return axis === 0 ? shift(dd - hx, 0)[0] : shift(0, dd - hy)[1];
   };
   // The table, per axis: w in [0, 1] (the channel's distance from 0.5, doubled) to a shift >= 0.
   // w in [0, W0]: linear up to the shift at the bevel's end (the middle, where only the magnification moves things);
@@ -172,7 +180,7 @@ export function tableMap(s: Shape, o: Optics, scale: number, N = 256): TableMap 
   const width = Math.max(2, Math.round((s.w + 2 * margin) * scale)), height = Math.max(2, Math.round((s.h + 2 * margin) * scale));
   const fx = (s.w + 2 * margin) / width, fy = (s.h + 2 * margin) / height;
   const valueAt = (px: number, py: number): [number, number] => {
-    const [x, y] = shiftAt(px, py, s, opt);
+    const [x, y] = shift(px, py);
     return [encode(0, x), encode(1, y)];
   };
   const data = new Uint8ClampedArray(width * height * 4);
@@ -203,6 +211,40 @@ export function tableMap(s: Shape, o: Optics, scale: number, N = 256): TableMap 
     return +Math.min(0.5 + 0.5 * t / rimPx + 1 / 255, 1).toFixed(5);
   });
   return { width, height, data, tableX: table(0), tableY: table(1), rimPx, margin };
+}
+
+/**
+ * A dome's shift has no steep rim, so its map stores the shift as it is (with tables that change nothing), and
+ * carries it on past the edge.
+ */
+function smoothMap(s: Shape, shift: (px: number, py: number) => [number, number], scale: number, margin: number, N: number): TableMap {
+  const hx = s.w / 2, hy = s.h / 2;
+  const width = Math.max(2, Math.round((s.w + 2 * margin) * scale)), height = Math.max(2, Math.round((s.h + 2 * margin) * scale));
+  const fx = (s.w + 2 * margin) / width, fy = (s.h + 2 * margin) / height;
+  const values = new Float32Array(width * height * 2);
+  let rimPx = 1e-6;
+  for (let j = 0; j < height; j++) {
+    for (let i = 0; i < width; i++) {
+      const px = (i + 0.5) * fx - margin - hx, py = (j + 0.5) * fy - margin - hy;
+      const d = -sdf(px, py, hx, hy, s.radii);
+      // outside, the value at the edge
+      const n = d < 0.5 ? normal(px, py, hx, hy, s.radii) : [0, 0];
+      const [x, y] = shift(px - n[0] * Math.max(0.5 - d, 0), py - n[1] * Math.max(0.5 - d, 0));
+      values[(j * width + i) * 2] = x;
+      values[(j * width + i) * 2 + 1] = y;
+      rimPx = Math.max(rimPx, Math.abs(x), Math.abs(y));
+    }
+  }
+  const data = new Uint8ClampedArray(width * height * 4);
+  for (let k = 0; k < width * height; k++) {
+    data[k * 4] = Math.round(128 + 127 * values[k * 2] / rimPx);
+    data[k * 4 + 1] = Math.round(128 + 127 * values[k * 2 + 1] / rimPx);
+    data[k * 4 + 2] = 128;
+    data[k * 4 + 3] = 255;
+  }
+  // identity, with the same half step as tableMap's (Chromium truncates when it bakes the table)
+  const identity = Array.from({ length: N }, (_, k) => +Math.min(k / (N - 1) + 0.5 / 255, 1).toFixed(5));
+  return { width, height, data, tableX: identity, tableY: identity, rimPx, margin };
 }
 
 /** The outward normal of a rounded rectangle at (px, py), from the gradient of its distance. */

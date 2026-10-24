@@ -87,6 +87,22 @@ export function shiftAt(px: number, py: number, s: Shape, o: Optics): [number, n
   return [gx * k - (px / Math.max(hx, 1)) * m, gy * k - (py / Math.max(hy, 1)) * m];
 }
 
+/**
+ * liquidglass's colour fringe at a point: how far red is sampled from green (blue the same amount the other way), px,
+ * along the surface normal: chromAberration × 36 × (0.3 + 0.7 × edge) × |N.xy|, outward. Nothing in the flat middle.
+ */
+export function fringeAt(px: number, py: number, s: Shape, bevel: number, chroma: number): [number, number] {
+  const hx = s.w / 2, hy = s.h / 2, r = s.radii, zR = Math.max(bevel, 1), e = 2;
+  const d = -sdf(px, py, hx, hy, r);
+  const gx = (height(-sdf(px + e, py, hx, hy, r), zR) - height(-sdf(px - e, py, hx, hy, r), zR)) / (2 * e);
+  const gy = (height(-sdf(px, py + e, hx, hy, r), zR) - height(-sdf(px, py - e, hx, hy, r), zR)) / (2 * e);
+  const n = Math.hypot(gx, gy, 1);
+  const edge = smoothstep(Math.min(hx, hy) * 0.35, 0, d);
+  const k = chroma * 36 * (0.3 + 0.7 * edge);
+  // N.xy = −grad / |(−grad, 1)|: outward
+  return [(-gx / n) * k, (-gy / n) * k];
+}
+
 // ---------------------------------------------------------------- lighting
 
 export interface Lighting {
@@ -159,12 +175,14 @@ export function colorMatrix(saturation: number, brightness: number, gains: [numb
 }
 
 /**
- * liquidglass's shadow, as two CSS box-shadows: a Gaussian falloff exp(−d²/spread²) at 0.65 (CSS blur radius = 2σ,
- * σ = spread/√2) and an exponential contact shadow exp(−2d/spread) at 0.35, approximated by a tight blur.
+ * liquidglass's shadow: 0.65 exp(−d²/s²) + 0.35 exp(−2d/s) from 1 px outside the shape (s = shadowSpread), times
+ * shadowOpacity; then squared, as its canvas blends alpha with itself (SRC_ALPHA on a non-premultiplied canvas). As
+ * two CSS box-shadows, a least-squares fit of their blurred edges to that falloff (mean error 0.0002).
  */
 export function boxShadow(opacity: number, spread: number, offsetY: number): string {
   if (opacity <= 0) return 'none';
   const s = Math.max(spread, 1);
-  const a = (k: number) => +(k * opacity).toFixed(3);
-  return `0 ${offsetY}px ${+(s * Math.SQRT2).toFixed(2)}px rgb(0 0 0 / ${a(0.65)}), 0 ${offsetY}px ${+(s * 0.35).toFixed(2)}px rgb(0 0 0 / ${a(0.35)})`;
+  const px = (v: number) => `${+v.toFixed(2)}px`;
+  const a = (k: number) => +Math.min(k * opacity * opacity, 1).toFixed(3);
+  return `0 ${px(offsetY)} ${px(0.9 * s)} ${px(1 + 0.4 * s)} rgb(0 0 0 / ${a(0.666)}), 0 ${px(offsetY)} ${px(1.3 * s)} ${px(1 - 0.5 * s)} rgb(0 0 0 / ${a(2.066)})`;
 }

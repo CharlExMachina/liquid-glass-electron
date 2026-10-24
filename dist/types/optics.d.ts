@@ -39,6 +39,11 @@ export interface Optics {
  * (y down): the bevel's refraction plus the magnification, as liquidglass's shader computes them.
  */
 export declare function shiftAt(px: number, py: number, s: Shape, o: Optics): [number, number];
+/**
+ * liquidglass's colour fringe at a point: how far red is sampled from green (blue the same amount the other way), px,
+ * along the surface normal: chromAberration × 36 × (0.3 + 0.7 × edge) × |N.xy|, outward. Nothing in the flat middle.
+ */
+export declare function fringeAt(px: number, py: number, s: Shape, bevel: number, chroma: number): [number, number];
 export interface Lighting {
     fresnel: number;
     edge: number;
@@ -67,7 +72,8 @@ export declare function tintGains(strength: number, rgb?: [number, number, numbe
  */
 export declare function colorMatrix(saturation: number, brightness: number, gains: [number, number, number]): number[];
 /**
- * liquidglass's shadow, as two CSS box-shadows: a Gaussian falloff exp(−d²/spread²) at 0.65 (CSS blur radius = 2σ,
- * σ = spread/√2) and an exponential contact shadow exp(−2d/spread) at 0.35, approximated by a tight blur.
+ * liquidglass's shadow: 0.65 exp(−d²/s²) + 0.35 exp(−2d/s) from 1 px outside the shape (s = shadowSpread), times
+ * shadowOpacity; then squared, as its canvas blends alpha with itself (SRC_ALPHA on a non-premultiplied canvas). As
+ * two CSS box-shadows, a least-squares fit of their blurred edges to that falloff (mean error 0.0002).
  */
 export declare function boxShadow(opacity: number, spread: number, offsetY: number): string;

@@ -141,6 +141,16 @@ var LiquidGlass = (() => {
     const m = o.magnify ? o.refraction * 4 * depth : 0;
     return [gx * k - px / Math.max(hx, 1) * m, gy * k - py / Math.max(hy, 1) * m];
   }
+  function fringeAt(px, py, s, bevel, chroma) {
+    const hx = s.w / 2, hy = s.h / 2, r = s.radii, zR = Math.max(bevel, 1), e = 2;
+    const d = -sdf(px, py, hx, hy, r);
+    const gx = (height(-sdf(px + e, py, hx, hy, r), zR) - height(-sdf(px - e, py, hx, hy, r), zR)) / (2 * e);
+    const gy = (height(-sdf(px, py + e, hx, hy, r), zR) - height(-sdf(px, py - e, hx, hy, r), zR)) / (2 * e);
+    const n = Math.hypot(gx, gy, 1);
+    const edge = smoothstep(Math.min(hx, hy) * 0.35, 0, d);
+    const k = chroma * 36 * (0.3 + 0.7 * edge);
+    return [-gx / n * k, -gy / n * k];
+  }
   var unit = (x, y, z) => {
     const l = Math.hypot(x, y, z);
     return [x / l, y / l, z / l];
@@ -183,8 +193,9 @@ var LiquidGlass = (() => {
   function boxShadow(opacity, spread, offsetY) {
     if (opacity <= 0) return "none";
     const s = Math.max(spread, 1);
-    const a = (k) => +(k * opacity).toFixed(3);
-    return `0 ${offsetY}px ${+(s * Math.SQRT2).toFixed(2)}px rgb(0 0 0 / ${a(0.65)}), 0 ${offsetY}px ${+(s * 0.35).toFixed(2)}px rgb(0 0 0 / ${a(0.35)})`;
+    const px = (v) => `${+v.toFixed(2)}px`;
+    const a = (k) => +Math.min(k * opacity * opacity, 1).toFixed(3);
+    return `0 ${px(offsetY)} ${px(0.9 * s)} ${px(1 + 0.4 * s)} rgb(0 0 0 / ${a(0.666)}), 0 ${px(offsetY)} ${px(1.3 * s)} ${px(1 - 0.5 * s)} rgb(0 0 0 / ${a(2.066)})`;
   }
 
   // src/maps.ts
@@ -223,14 +234,21 @@ var LiquidGlass = (() => {
     }
     return { width: px, height: px, data, slice: Math.round(e * scale), edge: e };
   }
-  function tableMap(s, o, scale, N = 256) {
+  function tableMap(s, o, scale, N = 256, fringe = 0) {
     const opt = { ...o, monotone: true };
+    const shift = (px, py) => {
+      const [x, y] = shiftAt(px, py, s, opt);
+      if (!fringe) return [x, y];
+      const [fx2, fy2] = fringeAt(px, py, s, o.bevel, Math.abs(fringe));
+      return [x + Math.sign(fringe) * fx2, y + Math.sign(fringe) * fy2];
+    };
     const hx = s.w / 2, hy = s.h / 2;
     const zR = Math.min(Math.max(o.bevel, 1), hx, hy);
     const margin = Math.ceil(2 / scale);
+    if (o.dome) return smoothMap(s, shift, scale, margin, N);
     const edgeShift = (axis, d) => {
       const dd = Math.max(d, 0.01);
-      return axis === 0 ? shiftAt(dd - hx, 0, s, opt)[0] : shiftAt(0, dd - hy, s, opt)[1];
+      return axis === 0 ? shift(dd - hx, 0)[0] : shift(0, dd - hy)[1];
     };
     const W0 = 0.12, K = 2048;
     const tables = [0, 1].map((axis) => {
@@ -261,7 +279,7 @@ var LiquidGlass = (() => {
     const width = Math.max(2, Math.round((s.w + 2 * margin) * scale)), height2 = Math.max(2, Math.round((s.h + 2 * margin) * scale));
     const fx = (s.w + 2 * margin) / width, fy = (s.h + 2 * margin) / height2;
     const valueAt = (px, py) => {
-      const [x, y] = shiftAt(px, py, s, opt);
+      const [x, y] = shift(px, py);
       return [encode(0, x), encode(1, y)];
     };
     const data = new Uint8ClampedArray(width * height2 * 4);
@@ -289,6 +307,33 @@ var LiquidGlass = (() => {
       return +Math.min(0.5 + 0.5 * t / rimPx + 1 / 255, 1).toFixed(5);
     });
     return { width, height: height2, data, tableX: table(0), tableY: table(1), rimPx, margin };
+  }
+  function smoothMap(s, shift, scale, margin, N) {
+    const hx = s.w / 2, hy = s.h / 2;
+    const width = Math.max(2, Math.round((s.w + 2 * margin) * scale)), height2 = Math.max(2, Math.round((s.h + 2 * margin) * scale));
+    const fx = (s.w + 2 * margin) / width, fy = (s.h + 2 * margin) / height2;
+    const values = new Float32Array(width * height2 * 2);
+    let rimPx = 1e-6;
+    for (let j = 0; j < height2; j++) {
+      for (let i = 0; i < width; i++) {
+        const px = (i + 0.5) * fx - margin - hx, py = (j + 0.5) * fy - margin - hy;
+        const d = -sdf(px, py, hx, hy, s.radii);
+        const n = d < 0.5 ? normal(px, py, hx, hy, s.radii) : [0, 0];
+        const [x, y] = shift(px - n[0] * Math.max(0.5 - d, 0), py - n[1] * Math.max(0.5 - d, 0));
+        values[(j * width + i) * 2] = x;
+        values[(j * width + i) * 2 + 1] = y;
+        rimPx = Math.max(rimPx, Math.abs(x), Math.abs(y));
+      }
+    }
+    const data = new Uint8ClampedArray(width * height2 * 4);
+    for (let k = 0; k < width * height2; k++) {
+      data[k * 4] = Math.round(128 + 127 * values[k * 2] / rimPx);
+      data[k * 4 + 1] = Math.round(128 + 127 * values[k * 2 + 1] / rimPx);
+      data[k * 4 + 2] = 128;
+      data[k * 4 + 3] = 255;
+    }
+    const identity = Array.from({ length: N }, (_, k) => +Math.min(k / (N - 1) + 0.5 / 255, 1).toFixed(5));
+    return { width, height: height2, data, tableX: identity, tableY: identity, rimPx, margin };
   }
   function normal(px, py, hx, hy, radii) {
     const e = 0.05;
@@ -483,9 +528,8 @@ var LiquidGlass = (() => {
     // the filters and the nodes that change
     pre = null;
     main = null;
-    mapImage = null;
-    mapTable = null;
-    mapShift = null;
+    // One map, or with a dome's fringe three (red, green, blue: liquidglass's fringe doesn't follow the dome's shift)
+    maps = [];
     colour = null;
     passes = [];
     stash = false;
@@ -494,7 +538,6 @@ var LiquidGlass = (() => {
     w = 0;
     h = 0;
     radii = [0, 0, 0, 0];
-    rimPx = 0;
     margin = 0;
     mapKey = "";
     lightKey = "";
@@ -541,7 +584,8 @@ var LiquidGlass = (() => {
       const o = this.options;
       this.pre?.remove();
       this.main?.remove();
-      this.pre = this.main = this.mapImage = this.mapTable = this.mapShift = this.colour = null;
+      this.pre = this.main = this.colour = null;
+      this.maps = [];
       this.passes = [];
       this.mapKey = "";
       this.bends = supportsSvgBackdrop() && o.refraction > 0 && o.variant !== "identity";
@@ -568,35 +612,45 @@ var LiquidGlass = (() => {
       }
       if (o.distortion > 0) {
         first.append(
-          svgEl("feTurbulence", { type: "fractalNoise", baseFrequency: 0.9, numOctaves: 1, seed: 7, result: "noise0" }),
+          svgEl("feTurbulence", { type: "fractalNoise", baseFrequency: 1.6, numOctaves: 1, seed: 7, result: "noise0" }),
           svgEl("feColorMatrix", { in: "noise0", type: "matrix", values: "1 0 0 0 0  0 1 0 0 0  0 0 0 0 0.5  0 0 0 0 1", result: "noise" }),
-          svgEl("feDisplacementMap", { in: src, in2: "noise", scale: (o.distortion * 8).toFixed(2), xChannelSelector: "R", yChannelSelector: "G", result: "grain" })
+          svgEl("feDisplacementMap", { in: src, in2: "noise", scale: (o.distortion * 14).toFixed(2), xChannelSelector: "R", yChannelSelector: "G", result: "grain" })
         );
         src = "grain";
       }
-      this.mapImage = svgEl("feImage", { preserveAspectRatio: "none", x: 0, y: 0, width: 1, height: 1, result: "map0" });
-      this.mapTable = svgEl(
-        "feComponentTransfer",
-        { in: "map0", result: fringe ? "side" : "map" },
-        svgEl("feFuncR", { type: "table", tableValues: "0 1" }),
-        svgEl("feFuncG", { type: "table", tableValues: "0 1" })
-      );
-      first.append(this.mapImage, this.mapTable);
+      const perChannel = fringe && o.bevelMode === 1;
+      const fringes = perChannel ? [1, 0, -1].map((k) => k * o.chromAberration) : [0];
+      const mergeNodes = [svgEl("feMergeNode", { in: src })];
+      fringes.forEach((f, i) => {
+        const image = svgEl("feImage", { preserveAspectRatio: "none", x: 0, y: 0, width: 1, height: 1, result: `map${i}raw` });
+        const table = svgEl(
+          "feComponentTransfer",
+          { in: `map${i}raw`, result: fringe ? `side${i}` : `map${i}` },
+          svgEl("feFuncR", { type: "table", tableValues: "0 1" }),
+          svgEl("feFuncG", { type: "table", tableValues: "0 1" })
+        );
+        first.append(image, table);
+        let shift = null;
+        if (fringe) {
+          mergeNodes.push(svgEl("feMergeNode", { in: `side${i}` }));
+          shift = svgEl("feOffset", { in: "SourceGraphic", dx: 0, dy: 0, result: `map${i}` });
+          second.append(shift);
+        }
+        this.maps.push({ image, table, shift, fringe: f, rimPx: 0 });
+      });
       if (fringe) {
-        first.append(svgEl("feMerge", {}, svgEl("feMergeNode", { in: src }), svgEl("feMergeNode", { in: "side" })));
-        this.mapShift = svgEl("feOffset", { in: "SourceGraphic", dx: 0, dy: 0, result: "map" });
-        second.append(this.mapShift);
+        first.append(svgEl("feMerge", {}, ...mergeNodes));
         src = "SourceGraphic";
       }
-      const pass = (result, spread) => {
-        const node = svgEl("feDisplacementMap", { in: src, in2: "map", xChannelSelector: "R", yChannelSelector: "G", result });
-        this.passes.push({ node, spread });
+      const pass = (result, spread, map) => {
+        const node = svgEl("feDisplacementMap", { in: src, in2: `map${map}`, xChannelSelector: "R", yChannelSelector: "G", result });
+        this.passes.push({ node, spread, map });
         return node;
       };
       if (fringe) {
-        const a = o.chromAberration * ABERRATION;
+        const a = perChannel ? 0 : o.chromAberration * ABERRATION;
         ["r", "g", "b"].forEach((ch, k) => second.append(
-          pass(`${ch}0`, 1 + (k - 1) * a),
+          pass(`${ch}0`, 1 + (k - 1) * a, perChannel ? k : 0),
           svgEl("feColorMatrix", { in: `${ch}0`, type: "matrix", values: KEEP[k], result: ch })
         ));
         second.append(
@@ -604,7 +658,7 @@ var LiquidGlass = (() => {
           svgEl("feComposite", { in: "rg", in2: "b", operator: "lighter", result: "bent" })
         );
       } else {
-        second.append(pass("bent", 1));
+        second.append(pass("bent", 1, 0));
       }
       if (o.opacity < 1) {
         second.append(svgEl("feComposite", { in: "bent", in2: src, operator: "arithmetic", k2: o.opacity, k3: 1 - o.opacity }));
@@ -626,7 +680,7 @@ var LiquidGlass = (() => {
       const o = this.options;
       const gains = tintGains(o.tintStrength, o.tint ? tintRgb(o.tint) : void 0);
       const hover = this.hover && o.button && !this.pressed ? 0.2 : 0;
-      return colorMatrix(o.saturation, 0.06 + o.brightness + hover, gains).map((v) => +v.toFixed(4));
+      return colorMatrix(o.saturation, (1 + o.brightness + hover) * 1.06 - 1, gains).map((v) => +v.toFixed(4));
     }
     // ---------------------------------------------------------------- size, map and light
     layout(now) {
@@ -646,16 +700,18 @@ var LiquidGlass = (() => {
       if (now || !this.mapKey) this.draw();
       else this.settleTimer = window.setTimeout(() => this.draw(), SETTLE);
     }
-    /** Size the filters, and put the map where it goes: past the element by its margin, and beside it when stashed. */
+    /** Size the filters, and put the maps where they go: past the element by their margin, and beside it when stashed. */
     place() {
       const { w, h } = this, m = this.margin;
       for (const f of [this.pre, this.main]) if (f) setAttrs(f, { x: 0, y: 0, width: w, height: h });
-      if (!this.mapImage) return;
-      const side = this.stash ? Math.ceil(w + m) + 32 : 0;
-      setAttrs(this.mapImage, { x: side - m, y: -m, width: w + 2 * m, height: h + 2 * m });
-      const holder = this.stash ? this.pre : this.main;
-      if (holder) setAttrs(holder, { x: -m, y: -m, width: side + w + 2 * m, height: h + 2 * m });
-      if (this.mapShift) setAttrs(this.mapShift, { dx: -side });
+      if (!this.maps.length) return;
+      const stashed = !!this.pre, slot = Math.ceil(w + m) + 32;
+      this.maps.forEach((map, i) => {
+        const side = stashed ? slot * (i + 1) : 0;
+        setAttrs(map.image, { x: side - m, y: -m, width: w + 2 * m, height: h + 2 * m });
+        if (map.shift) setAttrs(map.shift, { dx: -side });
+      });
+      setAttrs(this.pre ?? this.main, { x: -m, y: -m, width: (stashed ? slot * this.maps.length : 0) + w + 2 * m, height: h + 2 * m });
     }
     /** The corner radii, and whether they're the element's own CSS ones (circular, in px). */
     cornerRadii() {
@@ -678,23 +734,28 @@ var LiquidGlass = (() => {
       const o = this.options;
       const { w, h, radii } = this;
       const zR = Math.min(o.zRadius * (this.flat ? 0.8 : 1), Math.min(w, h) / 2);
-      if (this.bends && this.mapImage) {
+      if (this.bends && this.maps.length) {
         const scale = Math.min(MAP_SCALE, Math.sqrt(MAP_BUDGET / (w * h)));
-        const key = [w, h, ...radii, zR, o.refraction, o.bevelMode, +o.magnify, scale].map((v) => Math.round(v * 4) / 4).join(":");
+        const key = [w, h, ...radii, zR, o.refraction, o.bevelMode, +o.magnify, scale, ...this.maps.map((m) => m.fringe)].map((v) => Math.round(v * 400) / 400).join(":");
         if (key !== this.mapKey) {
           this.mapKey = key;
-          const hit = mapCache.get(key) ?? remember(mapCache, key, (() => {
-            const m = tableMap({ w, h, radii }, { refraction: o.refraction, bevel: zR, dome: o.bevelMode === 1, magnify: o.magnify }, scale);
-            return { url: toDataURL(m), rimPx: m.rimPx, margin: m.margin, tables: [m.tableX.join(" "), m.tableY.join(" ")] };
-          })());
-          const image = this.mapImage, table = this.mapTable;
-          predecode(hit.url).then(() => {
-            if (this.mapKey !== key) return;
-            image.setAttribute("href", hit.url);
-            table?.children[0].setAttribute("tableValues", hit.tables[0]);
-            table?.children[1].setAttribute("tableValues", hit.tables[1]);
-            this.rimPx = hit.rimPx;
-            this.margin = hit.margin;
+          const entries = this.maps.map((map) => {
+            const k = `${key}|${map.fringe}`;
+            return mapCache.get(k) ?? remember(mapCache, k, (() => {
+              const m = tableMap({ w, h, radii }, { refraction: o.refraction, bevel: zR, dome: o.bevelMode === 1, magnify: o.magnify }, scale, 256, map.fringe);
+              return { url: toDataURL(m), rimPx: m.rimPx, margin: m.margin, tables: [m.tableX.join(" "), m.tableY.join(" ")] };
+            })());
+          });
+          const maps = this.maps;
+          Promise.all(entries.map((e) => predecode(e.url))).then(() => {
+            if (this.mapKey !== key || this.maps !== maps) return;
+            entries.forEach((e, i) => {
+              maps[i].image.setAttribute("href", e.url);
+              maps[i].table.children[0].setAttribute("tableValues", e.tables[0]);
+              maps[i].table.children[1].setAttribute("tableValues", e.tables[1]);
+              maps[i].rimPx = e.rimPx;
+            });
+            this.margin = entries[0].margin;
             this.place();
             this.applyStrength();
           });
@@ -735,7 +796,7 @@ var LiquidGlass = (() => {
     }
     // ---------------------------------------------------------------- strength, hover, press, drag
     applyStrength() {
-      for (const { node, spread } of this.passes) node.setAttribute("scale", String(+(2 * this.rimPx * spread * this.strength).toFixed(3)));
+      for (const { node, spread, map } of this.passes) node.setAttribute("scale", String(+(2 * (this.maps[map]?.rimPx ?? 0) * spread * this.strength).toFixed(3)));
     }
     tweenStrength(to) {
       cancelAnimationFrame(this.tween);

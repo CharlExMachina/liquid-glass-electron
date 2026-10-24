@@ -10,9 +10,7 @@ export declare class Lens {
     private host;
     private pre;
     private main;
-    private mapImage;
-    private mapTable;
-    private mapShift;
+    private maps;
     private colour;
     private passes;
     private stash;
@@ -20,7 +18,6 @@ export declare class Lens {
     private w;
     private h;
     private radii;
-    private rimPx;
     private margin;
     private mapKey;
     private lightKey;
@@ -42,7 +39,7 @@ export declare class Lens {
     /** The colour matrix: saturation, brightness (6% always, as liquidglass's glass is, plus a button's hover) and tint. */
     private matrix;
     private layout;
-    /** Size the filters, and put the map where it goes: past the element by its margin, and beside it when stashed. */
+    /** Size the filters, and put the maps where they go: past the element by their margin, and beside it when stashed. */
     private place;
     /** The corner radii, and whether they're the element's own CSS ones (circular, in px). */
     private cornerRadii;
