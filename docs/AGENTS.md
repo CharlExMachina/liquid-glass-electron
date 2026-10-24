@@ -3,6 +3,8 @@
 You can build whatever you want with this library. It's a primitive, not a set of widgets: any element can be glass;
 the glass can have any shape, come and go within an animation, flow into other glass, and every visual parameter can
 change every frame. The demos are working reference code for all of it; read them before inventing your own approach.
+They're in the repository, not the npm package: https://github.com/CharlExMachina/liquid-glass-electron/tree/main/demo/demos
+(clone it and `npm run demo` to see them; `npm run playground` for every option).
 
 ## The whole API
 
