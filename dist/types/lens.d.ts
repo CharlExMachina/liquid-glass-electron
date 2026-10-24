@@ -96,6 +96,9 @@ export declare class Lens {
     private place;
     /** The corner radii, and whether they're the element's own CSS ones (circular, in px). */
     private cornerRadii;
+    /** Resolves once the map and light asked for so far are on screen. */
+    whenDrawn(): Promise<void>;
+    private drawing;
     private draw;
     /**
      * A free shape's light and shadow, as one image stretched over the element and past it (border-image-outset), so

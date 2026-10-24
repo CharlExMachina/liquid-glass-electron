@@ -37,6 +37,8 @@ export interface GlassHandle {
   animate(to: Partial<GlassOptions>, options?: { duration?: number; easing?: string }): Promise<void>;
   /** read the CSS custom properties and data attributes again */
   refresh(): void;
+  /** resolves once the glass's map and light are on screen (they're drawn asynchronously after a change of size or shape) */
+  drawn(): Promise<void>;
   /** take the glass off, restoring the element's own styles */
   destroy(): void;
 }
@@ -148,6 +150,7 @@ export function glass(el: HTMLElement, options: Partial<GlassOptions> = {}): Gla
     set: (o) => l.refresh(o),
     animate: (to, opts = {}) => tween(l, to, opts),
     refresh: () => l.refresh(),
+    drawn: () => l.whenDrawn(),
     destroy: () => unglass(el),
   };
 }
@@ -263,9 +266,8 @@ export function autoGlass(selector = '[data-glass]', options: Partial<GlassOptio
   };
 }
 
-// morph() needs containers and elements' options
-hooks.container = (el, options) => container(el, options);
-hooks.uncontainer = uncontainer;
+// morph() needs glass and elements' options
+hooks.glass = (el, options) => glass(el, options);
 hooks.optionsOf = (el) => lenses.get(el)?.options;
 hooks.reduceMotion = () => getEnvironment().reduceMotion;
 

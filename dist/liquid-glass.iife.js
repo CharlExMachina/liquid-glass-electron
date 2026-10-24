@@ -1033,7 +1033,13 @@ var LiquidGlass = (() => {
       };
       return [clampRadii([cs.borderTopLeftRadius, cs.borderTopRightRadius, cs.borderBottomRightRadius, cs.borderBottomLeftRadius].map(corner), w, h), own];
     }
+    /** Resolves once the map and light asked for so far are on screen. */
+    whenDrawn() {
+      return Promise.all(this.drawing).then(() => void 0);
+    }
+    drawing = [];
     draw() {
+      this.drawing = [];
       const o = this.options;
       const { w, h, radii } = this;
       const free = this.isFree();
@@ -1057,7 +1063,7 @@ var LiquidGlass = (() => {
             })());
           });
           const maps = this.maps;
-          Promise.all(entries.map((e) => predecode(e.url))).then(() => {
+          this.drawing.push(Promise.all(entries.map((e) => predecode(e.url))).then(() => {
             if (this.mapKey !== key || this.maps !== maps) return;
             entries.forEach((e, i) => {
               maps[i].image.setAttribute("href", e.url);
@@ -1070,7 +1076,7 @@ var LiquidGlass = (() => {
             this.region = region;
             this.place();
             this.applyStrength();
-          });
+          }));
         }
       }
       if (this.shape) this.drawFieldLight(field, zR, moving);
@@ -1108,11 +1114,11 @@ var LiquidGlass = (() => {
       }
       const url = toDataURL(img.shadow);
       const empty = emptyImage(img.shadow.width, img.shadow.height);
-      predecode(url).then(() => {
+      this.drawing.push(predecode(url).then(() => {
         if (this.lightKey !== key) return;
         this.lightUrl = { url, empty, free: pad };
         this.applyLight();
-      });
+      }));
     }
     /** A shape's light, shadow and coverage, as images on the element (and its shadow layer). */
     drawFieldLight(field, zR, moving) {
@@ -1134,12 +1140,12 @@ var LiquidGlass = (() => {
       if (o.opacity < 1) for (let i = 3; i < img.light.data.length; i += 4) img.light.data[i] *= o.opacity;
       const urls = [img.light, img.shadow, img.mask].map(toDataURL);
       const empty = emptyImage(img.light.width, img.light.height);
-      Promise.all(urls.map(predecode)).then(() => {
+      this.drawing.push(Promise.all(urls.map(predecode)).then(() => {
         if (this.lightKey !== key) return;
         this.lightUrl = { url: urls[0], shadow: urls[1], empty, field: true };
         this.el.style.setProperty("mask-image", `url(${urls[2]})`);
         this.applyLight();
-      });
+      }));
     }
     drawLight(zR) {
       const o = this.options;
@@ -1163,7 +1169,7 @@ var LiquidGlass = (() => {
         this.lightUrl = light;
         this.applyLight();
       };
-      if (light) predecode(light.url).then(apply);
+      if (light) this.drawing.push(predecode(light.url).then(apply));
       else apply();
     }
     /**
@@ -1557,8 +1563,7 @@ var LiquidGlass = (() => {
   // src/morph.ts
   var SPRING = "linear(0, 0.14 6%, 0.52 18%, 0.82 30%, 0.98 42%, 1.04 52%, 1.04 62%, 1.01 76%, 1)";
   var hooks = {
-    container: null,
-    uncontainer: null,
+    glass: null,
     optionsOf: (_el) => void 0,
     reduceMotion: () => false
   };
@@ -1569,38 +1574,30 @@ var LiquidGlass = (() => {
   async function morph(from, to, options = {}) {
     const duration = hooks.reduceMotion() ? 0 : options.duration ?? 420;
     const a = from.getBoundingClientRect(), b = to.getBoundingClientRect();
-    const glassOptions = options.glass ?? hooks.optionsOf(to) ?? hooks.optionsOf(from) ?? {};
-    const fade = (el, to2, ms, delay = 0) => el.animate([{ opacity: getComputedStyle(el).opacity }, { opacity: to2 }], { duration: ms, delay, fill: "forwards", easing: "ease" }).finished;
-    const pad = 80;
-    const left = Math.min(a.left, b.left) - pad, top = Math.min(a.top, b.top) - pad;
-    const overlay = document.createElement("div");
-    overlay.setAttribute("aria-hidden", "true");
-    overlay.style.cssText = `position:fixed;left:${left}px;top:${top}px;width:${Math.max(a.right, b.right) - left + pad}px;height:${Math.max(a.bottom, b.bottom) - top + pad}px;pointer-events:none;z-index:2147483000;`;
+    const glassOptions = { ...options.glass ?? hooks.optionsOf(to) ?? hooks.optionsOf(from) ?? {}, floating: false, interactive: false, button: false, strength: 1 };
     const proxy = document.createElement("div");
-    proxy.dataset.glassMember = "";
-    const box = (r) => ({ left: `${r.left - left}px`, top: `${r.top - top}px`, width: `${r.width}px`, height: `${r.height}px` });
-    proxy.style.cssText = "position:absolute;";
-    Object.assign(proxy.style, box(a), { borderRadius: radiiOf(from) });
-    overlay.append(proxy);
-    document.body.append(overlay);
-    const glass2 = hooks.container(overlay, { spacing: 0, ...glassOptions });
-    const fromVisibility = from.style.visibility, toVisibility = to.style.visibility;
-    to.style.visibility = "hidden";
+    proxy.setAttribute("aria-hidden", "true");
+    proxy.style.cssText = `position:fixed;left:${b.left}px;top:${b.top}px;width:${b.width}px;height:${b.height}px;margin:0;pointer-events:none;z-index:2147483000;transform-origin:0 0;`;
+    proxy.style.borderRadius = radiiOf(to);
+    document.body.append(proxy);
+    const g = hooks.glass(proxy, glassOptions);
+    const start = `translate(${a.left - b.left}px, ${a.top - b.top}px) scale(${a.width / b.width}, ${a.height / b.height})`;
+    proxy.style.transform = start;
+    await g.drawn();
+    const fromVisibility = from.style.visibility;
     from.style.visibility = "hidden";
+    to.style.visibility = "hidden";
     if (duration > 0) {
-      glass2.animate(duration + 100);
-      await proxy.animate([{ ...box(a), borderRadius: radiiOf(from) }, { ...box(b), borderRadius: radiiOf(to) }], { duration, easing: options.easing ?? SPRING, fill: "forwards" }).finished;
+      await proxy.animate([{ transform: start }, { transform: "none" }], { duration, easing: options.easing ?? SPRING, fill: "forwards" }).finished;
     }
     const content = [...to.children].filter((c) => c instanceof HTMLElement && !c.dataset.lgLayer);
     for (const c of content) c.style.opacity = "0";
-    to.style.visibility = toVisibility;
-    from.style.visibility = fromVisibility === "hidden" ? fromVisibility : "hidden";
-    hooks.uncontainer(overlay);
-    overlay.remove();
-    await Promise.all(content.map((c) => fade(c, 1, duration ? 160 : 0).then(() => {
-      c.getAnimations().forEach((x) => x.cancel());
-      c.style.removeProperty("opacity");
-    })));
+    to.style.visibility = "visible";
+    from.style.visibility = fromVisibility === "visible" || !fromVisibility ? "hidden" : fromVisibility;
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    g.destroy();
+    proxy.remove();
+    await Promise.all(content.map((c) => c.animate([{ opacity: 0 }, { opacity: 1 }], { duration: duration ? 160 : 0, easing: "ease" }).finished.then(() => c.style.removeProperty("opacity"))));
   }
   async function materialize(el, direction, options = {}) {
     const duration = hooks.reduceMotion() || options.transition === "identity" ? 0 : options.duration ?? 320;
@@ -1717,6 +1714,7 @@ var LiquidGlass = (() => {
       set: (o) => l.refresh(o),
       animate: (to, opts = {}) => tween(l, to, opts),
       refresh: () => l.refresh(),
+      drawn: () => l.whenDrawn(),
       destroy: () => unglass(el)
     };
   }
@@ -1806,8 +1804,7 @@ var LiquidGlass = (() => {
       }
     };
   }
-  hooks.container = (el, options) => container(el, options);
-  hooks.uncontainer = uncontainer;
+  hooks.glass = (el, options) => glass(el, options);
   hooks.optionsOf = (el) => lenses.get(el)?.options;
   hooks.reduceMotion = () => getEnvironment().reduceMotion;
   function union2(elements, options = {}) {

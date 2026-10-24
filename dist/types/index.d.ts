@@ -26,6 +26,8 @@ export interface GlassHandle {
     }): Promise<void>;
     /** read the CSS custom properties and data attributes again */
     refresh(): void;
+    /** resolves once the glass's map and light are on screen (they're drawn asynchronously after a change of size or shape) */
+    drawn(): Promise<void>;
     /** take the glass off, restoring the element's own styles */
     destroy(): void;
 }

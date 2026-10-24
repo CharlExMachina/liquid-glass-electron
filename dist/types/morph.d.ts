@@ -1,4 +1,3 @@
-import type { GlassContainer } from './container.js';
 import type { GlassOptions } from './options.js';
 export interface MorphOptions {
     /** ms (420) */
@@ -8,19 +7,23 @@ export interface MorphOptions {
     /** the glass's options during the morph (by default, those of the element it arrives at, if it's glass) */
     glass?: Partial<GlassOptions>;
 }
-/** Bridges to the library's internals, set by index.ts (morph needs a container and an element's options). */
+/** Bridges to the library's internals, set by index.ts. */
 export declare const hooks: {
-    container: (el: HTMLElement, options: Partial<GlassOptions> & {
-        spacing?: number;
-    }) => GlassContainer;
-    uncontainer: (el: HTMLElement) => void;
+    glass: (el: HTMLElement, options: Partial<GlassOptions>) => {
+        drawn(): Promise<void>;
+        destroy(): void;
+    };
     optionsOf: (_el: HTMLElement) => Partial<GlassOptions> | undefined;
     reduceMotion: () => boolean;
 };
 /**
  * Flow the glass of `from` into `to` (Apple's matchedGeometry transition between two views with the same
  * glassEffectID). `to` must be laid out (it can be visibility: hidden). Resolves when `to` is showing; `from` is left
- * hidden, for the caller to remove.
+ * hidden, for the caller to remove or keep.
+ *
+ * One piece of glass, the shape of `to`, is drawn once where `to` is, then moved there from `from`'s box with a
+ * transform and a spring: the compositor bends in the element's own space, so the glass scales with it and nothing is
+ * drawn again while it moves. `from`'s content fades as it leaves, `to`'s as it arrives.
  */
 export declare function morph(from: HTMLElement, to: HTMLElement, options?: MorphOptions): Promise<void>;
 export type Transition = 'materialize' | 'matchedGeometry' | 'identity';

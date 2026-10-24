@@ -54,7 +54,8 @@
     "demo": "node scripts/build.mjs && node scripts/electron.mjs demo/main.mjs",
     "playground": "node scripts/build.mjs && node scripts/electron.mjs demo/main.mjs --page=playground",
     "bench": "node scripts/bench.mjs",
-    "compare": "node scripts/build.mjs && node scripts/electron.mjs bench/compare/run.mjs"
+    "compare": "node scripts/build.mjs && node scripts/electron.mjs bench/compare/run.mjs",
+    "media": "node scripts/media.mjs"
   },
   "devDependencies": {
     "@avenra/liquid-glass": "^1.2.0",

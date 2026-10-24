@@ -428,7 +428,15 @@ export class Lens {
     return [clampRadii([cs.borderTopLeftRadius, cs.borderTopRightRadius, cs.borderBottomRightRadius, cs.borderBottomLeftRadius].map(corner), w, h), own];
   }
 
+  /** Resolves once the map and light asked for so far are on screen. */
+  whenDrawn(): Promise<void> {
+    return Promise.all(this.drawing).then(() => undefined);
+  }
+
+  private drawing: Promise<unknown>[] = [];
+
   private draw() {
+    this.drawing = [];
     const o = this.options;
     const { w, h, radii } = this;
     const free = this.isFree();
@@ -455,7 +463,7 @@ export class Lens {
           })());
         });
         const maps = this.maps;
-        Promise.all(entries.map((e) => predecode(e.url))).then(() => {
+        this.drawing.push(Promise.all(entries.map((e) => predecode(e.url))).then(() => {
           if (this.mapKey !== key || this.maps !== maps) return;
           entries.forEach((e, i) => {
             maps[i].image.setAttribute('href', e.url);
@@ -468,7 +476,7 @@ export class Lens {
           this.region = region;
           this.place();
           this.applyStrength();
-        });
+        }));
       }
     }
     if (this.shape) this.drawFieldLight(field, zR, moving);
@@ -501,11 +509,11 @@ export class Lens {
     }
     const url = toDataURL(img.shadow);
     const empty = emptyImage(img.shadow.width, img.shadow.height);
-    predecode(url).then(() => {
+    this.drawing.push(predecode(url).then(() => {
       if (this.lightKey !== key) return;
       this.lightUrl = { url, empty, free: pad };
       this.applyLight();
-    });
+    }));
   }
 
   /** A shape's light, shadow and coverage, as images on the element (and its shadow layer). */
@@ -521,12 +529,12 @@ export class Lens {
     if (o.opacity < 1) for (let i = 3; i < img.light.data.length; i += 4) img.light.data[i] *= o.opacity;
     const urls = [img.light, img.shadow, img.mask].map(toDataURL);
     const empty = emptyImage(img.light.width, img.light.height);
-    Promise.all(urls.map(predecode)).then(() => {
+    this.drawing.push(Promise.all(urls.map(predecode)).then(() => {
       if (this.lightKey !== key) return;
       this.lightUrl = { url: urls[0], shadow: urls[1], empty, field: true };
       this.el.style.setProperty('mask-image', `url(${urls[2]})`);
       this.applyLight();
-    });
+    }));
   }
 
   private drawLight(zR: number) {
@@ -552,7 +560,7 @@ export class Lens {
       this.lightUrl = light;
       this.applyLight();
     };
-    if (light) predecode(light.url).then(apply);
+    if (light) this.drawing.push(predecode(light.url).then(apply));
     else apply();
   }
 

@@ -3,7 +3,7 @@
 // Sandboxed, context-isolated, no preload, and a strict Content-Security-Policy in the page: liquid-glass-electron
 // works without loosening any of it.
 //
-// For screenshots and recordings (scripts/shots.mjs drives these):
+// For screenshots and recordings (scripts/media.mjs makes the README's, with a faster recorder of its own):
 //   --page=<name>         open that demo
 //   --shot=<file.png>     capture the window once the page is ready, then quit
 //   --record=<dir> --seconds=<n>   write every frame for n seconds as PNGs
