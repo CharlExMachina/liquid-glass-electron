@@ -4,13 +4,13 @@ import { autoGlass, setEnvironment } from '../dist/liquid-glass.js';
 
 const DEMOS = [
   ['Bars', ['toolbar', 'tabbar', 'scroll']],
-  ['Controls', ['controls', 'buttons', 'toasts']],
+  ['Controls', ['ios', 'controls', 'buttons', 'toasts']],
   ['Motion', ['morph', 'container', 'drag', 'dock']],
   ['Lenses', ['video', 'magnifier']],
   ['Look', ['appearance', 'compare', 'playground']],
 ];
 const TITLES = {
-  toolbar: 'Toolbar', tabbar: 'Tab bar', scroll: 'Over scrolling content', controls: 'Sliders and toggles', buttons: 'Buttons',
+  ios: 'iOS controls', toolbar: 'Toolbar', tabbar: 'Tab bar', scroll: 'Over scrolling content', controls: 'Sliders and toggles', buttons: 'Buttons',
   toasts: 'Toasts', morph: 'Morphing', container: 'Merging glass', drag: 'Dragging', dock: 'Dock', video: 'Over video',
   magnifier: 'Magnifier', appearance: 'Clear, tinted, accessible', compare: 'Glass vs. blur', playground: 'Playground',
 };
