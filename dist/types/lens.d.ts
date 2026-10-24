@@ -105,7 +105,11 @@ export declare class Lens {
      * the shadow can fall outside the box. Painted once, like a rounded rectangle's.
      */
     private drawFreeLight;
-    /** A shape's light, shadow and coverage, as images on the element (and its shadow layer). */
+    /**
+     * A shape's light, shadow and coverage, as images on the element (and its shadow layer), over the part of the box
+     * the shape is in and its shadow's reach (positioned there; the rest has no glass). While the shape moves, at half
+     * the resolution.
+     */
     private drawFieldLight;
     private drawLight;
     /**

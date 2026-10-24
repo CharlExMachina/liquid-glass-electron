@@ -388,8 +388,10 @@ function tableMap(f, o, scale, N = 256, fringe = 0, profile = f) {
     const [sx, sy] = shift(x, y);
     return [encode(0, sx), encode(1, sy)];
   };
+  const far = -(1.5 / scale + 1);
   const { width, height: height2, data } = sampleBox(f, scale, margin, (x, y, d) => {
     if (d >= 0.5) return valueAt(x, y);
+    if (d < far) return [0.5, 0.5];
     const n = normal(f, x, y);
     const a = valueAt(x - n[0] * (0.5 - d), y - n[1] * (0.5 - d));
     const b = valueAt(x - n[0] * (1.5 - d), y - n[1] * (1.5 - d));
@@ -455,25 +457,42 @@ function fieldLight(f, bevel, o, shadow, scale, pad, fill = null) {
   const light = new Uint8ClampedArray(width * height2 * 4), shade = new Uint8ClampedArray(width * height2 * 4), mask = new Uint8ClampedArray(width * height2 * 4);
   const flat = lightAt(Infinity, 0, 0, 0.5, f.shortHalf, zR, o);
   const lit = o.fresnel > 0 || o.edge > 0 || o.specular > 0;
-  for (let j = 0; j < height2; j++) {
-    for (let i = 0; i < width; i++) {
-      const x = (i + 0.5) / scale - pad, y = (j + 0.5) / scale - pad;
-      const d = -f.sdf(x, y);
-      const k = (j * width + i) * 4;
-      const cover = Math.min(Math.max(d * scale + 0.5, 0), 1);
-      if (cover > 0) {
-        mask[k + 3] = Math.round(255 * cover);
-        if (lit || fill) {
-          let a = lit ? flat : 0;
-          if (lit && d < reach) {
-            const [nx, ny] = normal(f, x, y);
-            a = lightAt(Math.max(d, 0), nx, ny, 1 - Math.min(Math.max(y / f.h, 0), 1), f.shortHalf, zR, o);
+  const shadowReach = Math.max(shadow.spread, 1) * 3 + Math.abs(shadow.offsetY) + 2;
+  const cell = 8, cw = Math.ceil(width / cell), ch = Math.ceil(height2 / cell);
+  const near = Math.max(reach, shadowReach) + cell / scale * Math.SQRT2;
+  for (let cj = 0; cj < ch; cj++) {
+    for (let ci = 0; ci < cw; ci++) {
+      const i0 = ci * cell, j0 = cj * cell, i1 = Math.min(i0 + cell, width), j1 = Math.min(j0 + cell, height2);
+      const cx = (i0 + i1) / 2 / scale - pad, cy = (j0 + j1) / 2 / scale - pad;
+      const dc = -f.sdf(cx, cy);
+      if (dc < -near) continue;
+      const inside = dc > near;
+      for (let j = j0; j < j1; j++) {
+        for (let i = i0; i < i1; i++) {
+          const k = (j * width + i) * 4;
+          if (inside) {
+            mask[k + 3] = 255;
+            if (lit || fill) paint(light, k, 1, lit ? flat : 0, fill);
+            continue;
           }
-          paint(light, k, cover, a, fill);
+          const x = (i + 0.5) / scale - pad, y = (j + 0.5) / scale - pad;
+          const d = -f.sdf(x, y);
+          const cover = Math.min(Math.max(d * scale + 0.5, 0), 1);
+          if (cover > 0) {
+            mask[k + 3] = Math.round(255 * cover);
+            if (lit || fill) {
+              let a = lit ? flat : 0;
+              if (lit && d < reach) {
+                const [nx, ny] = normal(f, x, y);
+                a = lightAt(Math.max(d, 0), nx, ny, 1 - Math.min(Math.max(y / f.h, 0), 1), f.shortHalf, zR, o);
+              }
+              paint(light, k, cover, a, fill);
+            }
+          }
+          if (cover < 1 && shadow.opacity > 0 && d > -shadowReach) {
+            shade[k + 3] = Math.round(255 * (1 - cover) * boxShadowAlpha(-f.sdf(x, y - shadow.offsetY), shadow.opacity, shadow.spread));
+          }
         }
-      }
-      if (cover < 1 && shadow.opacity > 0) {
-        shade[k + 3] = Math.round(255 * (1 - cover) * boxShadowAlpha(-f.sdf(x, y - shadow.offsetY), shadow.opacity, shadow.spread));
       }
     }
   }
@@ -997,7 +1016,7 @@ var Lens = class {
   }
   drawing = [];
   draw() {
-    this.drawing = [];
+    const applies = [];
     const o = this.options;
     const { w, h, radii } = this;
     const free = this.isFree();
@@ -1021,7 +1040,7 @@ var Lens = class {
           })());
         });
         const maps = this.maps;
-        this.drawing.push(Promise.all(entries.map((e) => predecode(e.url))).then(() => {
+        applies.push(Promise.all(entries.map((e) => predecode(e.url))).then(() => () => {
           if (this.mapKey !== key || this.maps !== maps) return;
           entries.forEach((e, i) => {
             maps[i].image.setAttribute("href", e.url);
@@ -1037,9 +1056,8 @@ var Lens = class {
         }));
       }
     }
-    if (this.shape) this.drawFieldLight(field, zR, moving);
-    else if (free) this.drawFreeLight(field, zR);
-    else this.drawLight(zR);
+    applies.push(this.shape ? this.drawFieldLight(field, zR, moving, region) : free ? this.drawFreeLight(field, zR) : this.drawLight(zR));
+    this.drawing = [Promise.all(applies).then((fns) => fns.forEach((f) => f?.()))];
   }
   /**
    * A free shape's light and shadow, as one image stretched over the element and past it (border-image-outset), so
@@ -1051,7 +1069,7 @@ var Lens = class {
     const fill = o.fill ? parseColour(o.fill, o.opacity) : null;
     const pad = o.shadowOpacity > 0 ? Math.ceil(Math.max(o.shadowSpread, 1) * 3 + Math.abs(o.shadowOffsetY)) + 2 : 2;
     const key = `free|${this.mapKey}|${field.w}x${field.h}|${zR}|${o.fresnel}|${o.edgeHighlight}|${o.specular}|${o.shadowOpacity}|${o.shadowSpread}|${o.shadowOffsetY}|${o.opacity}|${scale}|${fill}|${o.shape}|${o.path}|${o.cornerRadius}`;
-    if (key === this.lightKey) return this.applyLight();
+    if (key === this.lightKey) return Promise.resolve(() => this.applyLight());
     this.lightKey = key;
     const img = fieldLight(
       field,
@@ -1072,22 +1090,30 @@ var Lens = class {
     }
     const url = toDataURL(img.shadow);
     const empty = emptyImage(img.shadow.width, img.shadow.height);
-    this.drawing.push(predecode(url).then(() => {
+    return predecode(url).then(() => () => {
       if (this.lightKey !== key) return;
       this.lightUrl = { url, empty, free: pad };
       this.applyLight();
-    }));
+    });
   }
-  /** A shape's light, shadow and coverage, as images on the element (and its shadow layer). */
-  drawFieldLight(field, zR, moving) {
+  /**
+   * A shape's light, shadow and coverage, as images on the element (and its shadow layer), over the part of the box
+   * the shape is in and its shadow's reach (positioned there; the rest has no glass). While the shape moves, at half
+   * the resolution.
+   */
+  drawFieldLight(field, zR, moving, region) {
     const o = this.options, shape = this.shape;
-    const scale = moving ? 1 : Math.min(2, Math.ceil(devicePixelRatio || 1));
+    const scale = moving ? 0.35 : Math.min(2, Math.ceil(devicePixelRatio || 1));
     const fill = o.fill ? parseColour(o.fill, o.opacity) : null;
     const key = `${shape.key()}|${zR}|${o.fresnel}|${o.edgeHighlight}|${o.specular}|${o.shadowOpacity}|${o.shadowSpread}|${o.shadowOffsetY}|${o.opacity}|${scale}|${fill}`;
-    if (key === this.lightKey) return this.applyLight();
+    if (key === this.lightKey) return Promise.resolve(() => this.applyLight());
     this.lightKey = key;
+    const reach = o.shadowOpacity > 0 ? Math.ceil(Math.max(o.shadowSpread, 1) * 3 + Math.abs(o.shadowOffsetY)) + 2 : 2;
+    const x0 = Math.max(Math.floor(region.x - reach), 0), y0 = Math.max(Math.floor(region.y - reach), 0);
+    const x1 = Math.min(Math.ceil(region.x + region.w + reach), field.w), y1 = Math.min(Math.ceil(region.y + region.h + reach), field.h);
+    const box = { x: x0, y: y0, w: Math.max(x1 - x0, 1), h: Math.max(y1 - y0, 1) };
     const img = fieldLight(
-      field,
+      within(field, box),
       zR,
       { fresnel: o.fresnel, edge: o.edgeHighlight, specular: o.specular },
       { opacity: o.shadowOpacity * o.opacity, spread: o.shadowSpread, offsetY: o.shadowOffsetY },
@@ -1098,12 +1124,11 @@ var Lens = class {
     if (o.opacity < 1) for (let i = 3; i < img.light.data.length; i += 4) img.light.data[i] *= o.opacity;
     const urls = [img.light, img.shadow, img.mask].map(toDataURL);
     const empty = emptyImage(img.light.width, img.light.height);
-    this.drawing.push(Promise.all(urls.map(predecode)).then(() => {
+    return Promise.all(urls.map(predecode)).then(() => () => {
       if (this.lightKey !== key) return;
-      this.lightUrl = { url: urls[0], shadow: urls[1], empty, field: true };
-      this.el.style.setProperty("mask-image", `url(${urls[2]})`);
+      this.lightUrl = { url: urls[0], shadow: urls[1], mask: urls[2], empty, field: true, box };
       this.applyLight();
-    }));
+    });
   }
   drawLight(zR) {
     const o = this.options;
@@ -1113,7 +1138,7 @@ var Lens = class {
     const lighting = { fresnel: o.fresnel, edge: o.edgeHighlight, specular: o.specular };
     const fill = o.fill ? parseColour(o.fill, o.opacity) : null;
     const key = [...radii, zR, shortHalf, lighting.fresnel, lighting.edge, lighting.specular, scale, o.opacity, o.variant === "identity" ? 1 : 0].map((v) => Math.round(v * 4) / 4).join(":") + `|${fill}`;
-    if (key === this.lightKey) return this.applyLight();
+    if (key === this.lightKey) return Promise.resolve(() => this.applyLight());
     this.lightKey = key;
     let hit = lightCache.get(key);
     if (hit === void 0) {
@@ -1127,8 +1152,7 @@ var Lens = class {
       this.lightUrl = light;
       this.applyLight();
     };
-    if (light) this.drawing.push(predecode(light.url).then(apply));
-    else apply();
+    return light ? predecode(light.url).then(() => apply) : Promise.resolve(apply);
   }
   /**
    * The light at the current strength: the image cross-faded with a transparent one of the same size (so a 9-slice
@@ -1138,8 +1162,11 @@ var Lens = class {
     const light = this.lightUrl, s = this.amount();
     const image = (url, empty) => s >= 1 ? `url(${url})` : `-webkit-cross-fade(url(${empty}), url(${url}), ${+(s * 100).toFixed(2)}%)`;
     if (light?.field) {
-      this.el.style.setProperty("background-image", image(light.url, light.empty));
-      this.shape.shadowEl.style.setProperty("background-image", image(light.shadow, light.empty));
+      const b = light.box, at = `${b.x}px ${b.y}px`, size = `${b.w}px ${b.h}px`;
+      for (const [el, url] of [[this.el, light.url], [this.shape.shadowEl, light.shadow]]) {
+        Object.assign(el.style, { backgroundImage: image(url, light.empty), backgroundPosition: at, backgroundSize: size, backgroundRepeat: "no-repeat" });
+      }
+      Object.assign(this.el.style, { maskImage: `url(${light.mask})`, maskPosition: at, maskSize: size, maskRepeat: "no-repeat" });
       return;
     }
     if (!light) {
@@ -1473,11 +1500,32 @@ var GlassContainer = class {
     }
     this.key = this.members.map((m) => [m.x, m.y, m.w, m.h, ...m.radii].map((v) => Math.round(v * 2) / 2).join(",")).join(";") + `|${this.spacing()}`;
   }
-  /** Measure the members again and redraw the glass if they moved. */
+  drawn = "";
+  pending = false;
+  settle = 0;
+  /**
+   * Measure the members again and redraw the glass if they moved. One redraw at a time: while one is being decoded,
+   * the next waits, and then draws the latest shape (so a fast drag skips shapes rather than queueing them).
+   */
   update() {
-    const before = this.key;
     this.measure();
-    if (this.key !== before) this.lens?.reshape();
+    if (!this.lens || this.key === this.drawn) return;
+    if (this.drawn) {
+      this.movingUntil = Math.max(this.movingUntil, performance.now() + 200);
+      clearTimeout(this.settle);
+      this.settle = window.setTimeout(() => {
+        this.drawn = "";
+        this.update();
+      }, 220);
+    }
+    if (this.pending) return;
+    this.drawn = this.key;
+    this.pending = true;
+    this.lens.reshape();
+    this.lens.whenDrawn().finally(() => {
+      this.pending = false;
+      if (this.key !== this.drawn) this.update();
+    });
   }
   /** Follow the members every frame for `ms` (while they move in ways the container can't see coming). */
   animate(ms = 400) {
@@ -1488,7 +1536,7 @@ var GlassContainer = class {
       if (performance.now() < this.movingUntil) this.running = requestAnimationFrame(tick);
       else {
         this.running = 0;
-        this.key = "";
+        this.drawn = "";
         this.update();
       }
     };
@@ -1499,11 +1547,12 @@ var GlassContainer = class {
     Object.assign(this.options, options);
     if (options.spacing !== void 0) this.el.dataset.glassContainer = String(options.spacing);
     this.lens.refresh(options);
-    this.key = "";
+    this.drawn = "";
     this.update();
   }
   destroy() {
     cancelAnimationFrame(this.running);
+    clearTimeout(this.settle);
     this.sizes.disconnect();
     this.tree.disconnect();
     this.stopEvents();

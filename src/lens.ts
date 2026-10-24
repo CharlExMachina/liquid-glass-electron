@@ -82,7 +82,7 @@ export class Lens {
   private structure = '';
   private unitMaps = true;
   private following = 0;
-  private lightUrl: { url: string; empty: string; shadow?: string; slice?: number; edge?: number; field?: boolean; free?: number } | null = null;
+  private lightUrl: { url: string; empty: string; shadow?: string; mask?: string; box?: { x: number; y: number; w: number; h: number }; slice?: number; edge?: number; field?: boolean; free?: number } | null = null;
   private passes: { node: SVGFEDisplacementMapElement; spread: number; map: number }[] = [];
   private stash = false;
   private bends = false;
@@ -436,7 +436,8 @@ export class Lens {
   private drawing: Promise<unknown>[] = [];
 
   private draw() {
-    this.drawing = [];
+    // the map, light (and a container's mask) go on screen together, once all are decoded, so they always match
+    const applies: Promise<(() => void) | void>[] = [];
     const o = this.options;
     const { w, h, radii } = this;
     const free = this.isFree();
@@ -463,7 +464,7 @@ export class Lens {
           })());
         });
         const maps = this.maps;
-        this.drawing.push(Promise.all(entries.map((e) => predecode(e.url))).then(() => {
+        applies.push(Promise.all(entries.map((e) => predecode(e.url))).then(() => () => {
           if (this.mapKey !== key || this.maps !== maps) return;
           entries.forEach((e, i) => {
             maps[i].image.setAttribute('href', e.url);
@@ -479,22 +480,21 @@ export class Lens {
         }));
       }
     }
-    if (this.shape) this.drawFieldLight(field, zR, moving);
-    else if (free) this.drawFreeLight(field, zR);
-    else this.drawLight(zR);
+    applies.push(this.shape ? this.drawFieldLight(field, zR, moving, region) : free ? this.drawFreeLight(field, zR) : this.drawLight(zR));
+    this.drawing = [Promise.all(applies).then((fns) => fns.forEach((f) => f?.()))];
   }
 
   /**
    * A free shape's light and shadow, as one image stretched over the element and past it (border-image-outset), so
    * the shadow can fall outside the box. Painted once, like a rounded rectangle's.
    */
-  private drawFreeLight(field: Field, zR: number) {
+  private drawFreeLight(field: Field, zR: number): Promise<(() => void) | void> {
     const o = this.options;
     const scale = Math.min(2, Math.ceil(devicePixelRatio || 1));
     const fill = o.fill ? parseColour(o.fill, o.opacity) : null;
     const pad = o.shadowOpacity > 0 ? Math.ceil(Math.max(o.shadowSpread, 1) * 3 + Math.abs(o.shadowOffsetY)) + 2 : 2;
     const key = `free|${this.mapKey}|${field.w}x${field.h}|${zR}|${o.fresnel}|${o.edgeHighlight}|${o.specular}|${o.shadowOpacity}|${o.shadowSpread}|${o.shadowOffsetY}|${o.opacity}|${scale}|${fill}|${o.shape}|${o.path}|${o.cornerRadius}`;
-    if (key === this.lightKey) return this.applyLight();
+    if (key === this.lightKey) return Promise.resolve(() => this.applyLight());
     this.lightKey = key;
     const img = fieldLight(field, zR, { fresnel: o.fresnel, edge: o.edgeHighlight, specular: o.specular },
       { opacity: o.shadowOpacity * o.opacity, spread: o.shadowSpread, offsetY: o.shadowOffsetY }, scale, pad, fill);
@@ -509,35 +509,42 @@ export class Lens {
     }
     const url = toDataURL(img.shadow);
     const empty = emptyImage(img.shadow.width, img.shadow.height);
-    this.drawing.push(predecode(url).then(() => {
+    return predecode(url).then(() => () => {
       if (this.lightKey !== key) return;
       this.lightUrl = { url, empty, free: pad };
       this.applyLight();
-    }));
+    });
   }
 
-  /** A shape's light, shadow and coverage, as images on the element (and its shadow layer). */
-  private drawFieldLight(field: Field, zR: number, moving: boolean) {
+  /**
+   * A shape's light, shadow and coverage, as images on the element (and its shadow layer), over the part of the box
+   * the shape is in and its shadow's reach (positioned there; the rest has no glass). While the shape moves, at half
+   * the resolution.
+   */
+  private drawFieldLight(field: Field, zR: number, moving: boolean, region: { x: number; y: number; w: number; h: number }): Promise<(() => void) | void> {
     const o = this.options, shape = this.shape!;
-    const scale = moving ? 1 : Math.min(2, Math.ceil(devicePixelRatio || 1));
+    const scale = moving ? 0.35 : Math.min(2, Math.ceil(devicePixelRatio || 1));
     const fill = o.fill ? parseColour(o.fill, o.opacity) : null;
     const key = `${shape.key()}|${zR}|${o.fresnel}|${o.edgeHighlight}|${o.specular}|${o.shadowOpacity}|${o.shadowSpread}|${o.shadowOffsetY}|${o.opacity}|${scale}|${fill}`;
-    if (key === this.lightKey) return this.applyLight();
+    if (key === this.lightKey) return Promise.resolve(() => this.applyLight());
     this.lightKey = key;
-    const img = fieldLight(field, zR, { fresnel: o.fresnel, edge: o.edgeHighlight, specular: o.specular },
+    const reach = o.shadowOpacity > 0 ? Math.ceil(Math.max(o.shadowSpread, 1) * 3 + Math.abs(o.shadowOffsetY)) + 2 : 2;
+    const x0 = Math.max(Math.floor(region.x - reach), 0), y0 = Math.max(Math.floor(region.y - reach), 0);
+    const x1 = Math.min(Math.ceil(region.x + region.w + reach), field.w), y1 = Math.min(Math.ceil(region.y + region.h + reach), field.h);
+    const box = { x: x0, y: y0, w: Math.max(x1 - x0, 1), h: Math.max(y1 - y0, 1) };
+    const img = fieldLight(within(field, box), zR, { fresnel: o.fresnel, edge: o.edgeHighlight, specular: o.specular },
       { opacity: o.shadowOpacity * o.opacity, spread: o.shadowSpread, offsetY: o.shadowOffsetY }, scale, 0, fill);
     if (o.opacity < 1) for (let i = 3; i < img.light.data.length; i += 4) img.light.data[i] *= o.opacity;
     const urls = [img.light, img.shadow, img.mask].map(toDataURL);
     const empty = emptyImage(img.light.width, img.light.height);
-    this.drawing.push(Promise.all(urls.map(predecode)).then(() => {
+    return Promise.all(urls.map(predecode)).then(() => () => {
       if (this.lightKey !== key) return;
-      this.lightUrl = { url: urls[0], shadow: urls[1], empty, field: true };
-      this.el.style.setProperty('mask-image', `url(${urls[2]})`);
+      this.lightUrl = { url: urls[0], shadow: urls[1], mask: urls[2], empty, field: true, box };
       this.applyLight();
-    }));
+    });
   }
 
-  private drawLight(zR: number) {
+  private drawLight(zR: number): Promise<(() => void) | void> {
     const o = this.options;
     const { w, h, radii } = this;
     const shortHalf = Math.min(w, h) / 2;
@@ -546,7 +553,7 @@ export class Lens {
     const fill = o.fill ? parseColour(o.fill, o.opacity) : null;
     const key = [...radii, zR, shortHalf, lighting.fresnel, lighting.edge, lighting.specular, scale, o.opacity, o.variant === 'identity' ? 1 : 0]
       .map((v) => Math.round(v * 4) / 4).join(':') + `|${fill}`;
-    if (key === this.lightKey) return this.applyLight();
+    if (key === this.lightKey) return Promise.resolve(() => this.applyLight());
     this.lightKey = key;
     let hit = lightCache.get(key);
     if (hit === undefined) {
@@ -560,8 +567,7 @@ export class Lens {
       this.lightUrl = light;
       this.applyLight();
     };
-    if (light) this.drawing.push(predecode(light.url).then(apply));
-    else apply();
+    return light ? predecode(light.url).then(() => apply) : Promise.resolve(apply);
   }
 
   /**
@@ -572,8 +578,11 @@ export class Lens {
     const light = this.lightUrl, s = this.amount();
     const image = (url: string, empty: string) => (s >= 1 ? `url(${url})` : `-webkit-cross-fade(url(${empty}), url(${url}), ${+(s * 100).toFixed(2)}%)`);
     if (light?.field) {
-      this.el.style.setProperty('background-image', image(light.url, light.empty));
-      this.shape!.shadowEl.style.setProperty('background-image', image(light.shadow!, light.empty));
+      const b = light.box!, at = `${b.x}px ${b.y}px`, size = `${b.w}px ${b.h}px`;
+      for (const [el, url] of [[this.el, light.url], [this.shape!.shadowEl, light.shadow!]] as const) {
+        Object.assign(el.style, { backgroundImage: image(url, light.empty), backgroundPosition: at, backgroundSize: size, backgroundRepeat: 'no-repeat' });
+      }
+      Object.assign(this.el.style, { maskImage: `url(${light.mask})`, maskPosition: at, maskSize: size, maskRepeat: 'no-repeat' });
       return;
     }
     if (!light) {

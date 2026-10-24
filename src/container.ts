@@ -133,11 +133,34 @@ export class GlassContainer {
     this.key = this.members.map((m) => [m.x, m.y, m.w, m.h, ...m.radii].map((v) => Math.round(v * 2) / 2).join(',')).join(';') + `|${this.spacing()}`;
   }
 
-  /** Measure the members again and redraw the glass if they moved. */
+  private drawn = '';
+  private pending = false;
+  private settle = 0;
+
+  /**
+   * Measure the members again and redraw the glass if they moved. One redraw at a time: while one is being decoded,
+   * the next waits, and then draws the latest shape (so a fast drag skips shapes rather than queueing them).
+   */
   update() {
-    const before = this.key;
     this.measure();
-    if (this.key !== before) this.lens?.reshape();
+    if (!this.lens || this.key === this.drawn) return;
+    // A change is drawn at once at moving quality, and again at full quality once the shape has been still a moment.
+    if (this.drawn) {
+      this.movingUntil = Math.max(this.movingUntil, performance.now() + 200);
+      clearTimeout(this.settle);
+      this.settle = window.setTimeout(() => {
+        this.drawn = '';
+        this.update();
+      }, 220);
+    }
+    if (this.pending) return;
+    this.drawn = this.key;
+    this.pending = true;
+    this.lens.reshape();
+    this.lens.whenDrawn().finally(() => {
+      this.pending = false;
+      if (this.key !== this.drawn) this.update();
+    });
   }
 
   /** Follow the members every frame for `ms` (while they move in ways the container can't see coming). */
@@ -150,7 +173,7 @@ export class GlassContainer {
       else {
         this.running = 0;
         // once still, at full resolution
-        this.key = '';
+        this.drawn = '';
         this.update();
       }
     };
@@ -162,12 +185,13 @@ export class GlassContainer {
     Object.assign(this.options, options);
     if (options.spacing !== undefined) this.el.dataset.glassContainer = String(options.spacing);
     this.lens.refresh(options);
-    this.key = '';
+    this.drawn = '';
     this.update();
   }
 
   destroy() {
     cancelAnimationFrame(this.running);
+    clearTimeout(this.settle);
     this.sizes.disconnect();
     this.tree.disconnect();
     this.stopEvents();

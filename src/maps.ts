@@ -155,8 +155,12 @@ export function tableMap(f: Field, o: Optics, scale: number, N = 256, fringe = 0
     return [encode(0, sx), encode(1, sy)];
   };
   // The map: inside, the value that gives the shift there; outside, the inside values carried on in a straight line.
+  // far outside the shape nothing is seen (a container's mask, or the box's edge): only a pixel or two out matters,
+  // for the stretching between the last inside value and the first outside one
+  const far = -(1.5 / scale + 1);
   const { width, height, data } = sampleBox(f, scale, margin, (x, y, d) => {
     if (d >= 0.5) return valueAt(x, y);
+    if (d < far) return [0.5, 0.5];
     // step in along the inward normal to 0.5 and 1.5 px, and carry the line on
     const n = normal(f, x, y);
     const a = valueAt(x - n[0] * (0.5 - d), y - n[1] * (0.5 - d));
@@ -260,26 +264,46 @@ export function fieldLight(f: Field, bevel: number, o: Lighting, shadow: { opaci
   const light = new Uint8ClampedArray(width * height * 4), shade = new Uint8ClampedArray(width * height * 4), mask = new Uint8ClampedArray(width * height * 4);
   const flat = lightAt(Infinity, 0, 0, 0.5, f.shortHalf, zR, o);
   const lit = o.fresnel > 0 || o.edge > 0 || o.specular > 0;
-  for (let j = 0; j < height; j++) {
-    for (let i = 0; i < width; i++) {
-      const x = (i + 0.5) / scale - pad, y = (j + 0.5) / scale - pad;
-      const d = -f.sdf(x, y);
-      const k = (j * width + i) * 4;
-      const cover = Math.min(Math.max(d * scale + 0.5, 0), 1);
-      if (cover > 0) {
-        mask[k + 3] = Math.round(255 * cover);
-        if (lit || fill) {
-          let a = lit ? flat : 0;
-          if (lit && d < reach) {
-            const [nx, ny] = normal(f, x, y);
-            a = lightAt(Math.max(d, 0), nx, ny, 1 - Math.min(Math.max(y / f.h, 0), 1), f.shortHalf, zR, o);
+  // past this, the shadow is too faint to draw
+  const shadowReach = Math.max(shadow.spread, 1) * 3 + Math.abs(shadow.offsetY) + 2;
+  // A coarse pass first: cells far from any edge are either flat inside (the flat top's light) or empty outside, and
+  // only cells near an edge need each pixel worked out. Edges are thin, so this skips most of the image.
+  const cell = 8, cw = Math.ceil(width / cell), ch = Math.ceil(height / cell);
+  const near = Math.max(reach, shadowReach) + (cell / scale) * Math.SQRT2;
+  for (let cj = 0; cj < ch; cj++) {
+    for (let ci = 0; ci < cw; ci++) {
+      const i0 = ci * cell, j0 = cj * cell, i1 = Math.min(i0 + cell, width), j1 = Math.min(j0 + cell, height);
+      const cx = ((i0 + i1) / 2) / scale - pad, cy = ((j0 + j1) / 2) / scale - pad;
+      const dc = -f.sdf(cx, cy);
+      if (dc < -near) continue;
+      const inside = dc > near;
+      for (let j = j0; j < j1; j++) {
+        for (let i = i0; i < i1; i++) {
+          const k = (j * width + i) * 4;
+          if (inside) {
+            mask[k + 3] = 255;
+            if (lit || fill) paint(light, k, 1, lit ? flat : 0, fill);
+            continue;
           }
-          paint(light, k, cover, a, fill);
+          const x = (i + 0.5) / scale - pad, y = (j + 0.5) / scale - pad;
+          const d = -f.sdf(x, y);
+          const cover = Math.min(Math.max(d * scale + 0.5, 0), 1);
+          if (cover > 0) {
+            mask[k + 3] = Math.round(255 * cover);
+            if (lit || fill) {
+              let a = lit ? flat : 0;
+              if (lit && d < reach) {
+                const [nx, ny] = normal(f, x, y);
+                a = lightAt(Math.max(d, 0), nx, ny, 1 - Math.min(Math.max(y / f.h, 0), 1), f.shortHalf, zR, o);
+              }
+              paint(light, k, cover, a, fill);
+            }
+          }
+          if (cover < 1 && shadow.opacity > 0 && d > -shadowReach) {
+            // the shadow, from the shape moved down by its offset, under what the shape doesn't cover
+            shade[k + 3] = Math.round(255 * (1 - cover) * boxShadowAlpha(-f.sdf(x, y - shadow.offsetY), shadow.opacity, shadow.spread));
+          }
         }
-      }
-      if (cover < 1 && shadow.opacity > 0) {
-        // the shadow, from the shape moved down by its offset, under what the shape doesn't cover
-        shade[k + 3] = Math.round(255 * (1 - cover) * boxShadowAlpha(-f.sdf(x, y - shadow.offsetY), shadow.opacity, shadow.spread));
       }
     }
   }
