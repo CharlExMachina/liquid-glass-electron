@@ -71,7 +71,7 @@ Options can also come from data attributes (`data-glass-refraction="0.4"`, `data
   off, `backdrop`.
 - **Per frame while anything on the page changes, every glass element costs a little** (Chromium re-runs every
   backdrop filter). Glass at `strength: 0` and `refraction: 0` costs nothing. For many elements, put them in a
-  `glassGroup` (they look the same, one filter bends them all: 30 capsules cost 7× less) or, for shapes that may flow
+  `glassGroup` (they look the same, one filter bends them all: 30 capsules cost 6.5× less) or, for shapes that may flow
   together, one `container`.
 
 ## Rules that silently break glass
