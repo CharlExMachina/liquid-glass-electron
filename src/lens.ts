@@ -25,6 +25,8 @@ import { fromCss, fromData, resolve, type Environment, type GlassOptions } from 
 // px. Small glass gets a finer map, which is cheap, and its corners are most of it.
 const MAP_PIXELS = 4096;
 const mapScale = (w: number, h: number, moving: boolean) => Math.min(Math.max(Math.sqrt(MAP_PIXELS / (w * h)), 0.08), 0.5) / (moving ? 2 : 1);
+// How far filter 2's region reaches past the element, px (less than any map's margin: see place())
+const EDGE = 2;
 // How long a size has to hold before the map and light are drawn for it, ms.
 const SETTLE = 120;
 // Keeps the green channel only, and so on: the fringe's three passes are added up.
@@ -400,10 +402,13 @@ export class Lens {
     const { w, h } = this, m = this.margin;
     for (const f of [this.pre, this.main]) if (f) setAttrs(f, { x: 0, y: 0, width: w, height: h });
     if (!this.maps.length) return;
-    // The rim samples the backdrop up to `reach` px past the edge. Filter 2 reads filter 1's output, which is cropped
-    // to filter 1's region (transparent past it): both reach that far, and the stashed maps sit beyond.
+    // The rim samples the backdrop up to `reach` px past the edge: filter 1, which smooths it, reaches that far, and
+    // the stashed maps sit beyond. Filter 2 reads all of filter 1's output whatever its own region, which only has to
+    // cover the element (and a little more, for its antialiased edge): each shifted read of a stashed map then falls
+    // inside the map's own margin, and Skia samples it in place. A read that reached past filter 1's region would be
+    // copied out first, a pass per read.
     const e = Math.max(m, this.reach);
-    if (this.pre) setAttrs(this.main!, { x: -e, y: -e, width: w + 2 * e, height: h + 2 * e });
+    if (this.pre) setAttrs(this.main!, { x: -EDGE, y: -EDGE, width: w + 2 * EDGE, height: h + 2 * EDGE });
     const stashed = !!this.pre, slot = Math.ceil(w + m + e) + 8;
     const r = this.region.w ? this.region : { x: 0, y: 0, w, h };
     this.maps.forEach((map, i) => {

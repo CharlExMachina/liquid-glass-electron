@@ -728,6 +728,7 @@ var LiquidGlass = (() => {
   // src/lens.ts
   var MAP_PIXELS = 4096;
   var mapScale = (w, h, moving) => Math.min(Math.max(Math.sqrt(MAP_PIXELS / (w * h)), 0.08), 0.5) / (moving ? 2 : 1);
+  var EDGE = 2;
   var SETTLE = 120;
   var KEEP = ["1 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 1 0", "0 0 0 0 0  0 1 0 0 0  0 0 0 0 0  0 0 0 1 0", "0 0 0 0 0  0 0 0 0 0  0 0 1 0 0  0 0 0 1 0"];
   var nextId = 0;
@@ -1041,7 +1042,7 @@ var LiquidGlass = (() => {
       for (const f of [this.pre, this.main]) if (f) setAttrs(f, { x: 0, y: 0, width: w, height: h });
       if (!this.maps.length) return;
       const e = Math.max(m, this.reach);
-      if (this.pre) setAttrs(this.main, { x: -e, y: -e, width: w + 2 * e, height: h + 2 * e });
+      if (this.pre) setAttrs(this.main, { x: -EDGE, y: -EDGE, width: w + 2 * EDGE, height: h + 2 * EDGE });
       const stashed = !!this.pre, slot = Math.ceil(w + m + e) + 8;
       const r = this.region.w ? this.region : { x: 0, y: 0, w, h };
       this.maps.forEach((map, i) => {
