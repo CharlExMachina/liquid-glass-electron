@@ -15,10 +15,10 @@ nothing on screen changes it costs nothing at all.
   colour fringing at the rim, and its Fresnel, specular and edge light. At its defaults this library's glass differs
   from liquidglass's about as much as liquidglass differs from itself moved by one pixel (see
   [the comparison](#compared-with-liquidglass)).
-- **Apple's knobs:** regular, clear and identity glass, tints, interactive glass, capsules, circles, concentric and
-  continuous ("squircle") corners, containers whose glass flows together, morphing, materializing, `.glass` and
-  `.glassProminent` buttons, scroll edges, the system's Clear/Tinted setting, Reduce Transparency, Increase Contrast and
-  Reduce Motion. [docs/APPLE.md](docs/APPLE.md) maps each part of Apple's API to this one.
+- **Apple's knobs:** regular, clear and identity glass, the lens of iOS 26's small controls (measured from an
+  iPhone), tints, interactive glass, capsules, circles, concentric and continuous ("squircle") corners, containers
+  whose glass flows together, morphing, materializing, `.glass` and `.glassProminent` buttons, scroll edges, the
+  system's Clear/Tinted setting, Reduce Transparency, Increase Contrast and Reduce Motion. [docs/APPLE.md](docs/APPLE.md) maps each part of Apple's API to this one.
 - **A primitive, not a widget set.** Every visual parameter can change every frame without rebuilding the filter:
   `strength` takes glass from nothing to full and back within an animation, the way iOS 26 turns a slider's knob into
   glass only while it's held. Any shape works, including any SVG path.
@@ -177,11 +177,73 @@ The gallery runs sandboxed, context-isolated and under a strict Content-Security
 
 ## Performance
 
-<!-- BENCH -->
+Measured with `npm run bench` ([bench/run.mjs](bench/run.mjs)): every library below in the same scenes, in an Electron
+window of 1180 × 800 on a second display, unfocused. The number is the CPU time of Chromium's GPU process (where backdrop
+filters and WebGL are drawn), as Electron's `app.getAppMetrics()` reports it, in % of one core: over 8 seconds after a
+2-second warm-up, three runs per library interleaved with the others, the median. The renderer process's time is in
+[the results](bench/results/2026-10-24/results.md) too. Machine: AMD Ryzen 9 7950X, Radeon RX 7900 XTX (Mesa), Linux,
+Electron 44.9.3 (Chromium 152), a 4K display at 1.25×.
+
+The scenes, over a photo:
+
+- **idle**: four panels of 300 × 160 px, nothing changing.
+- **content**: the same, and a number on the page changing ten times a second.
+- **move**: one of the four panels moving every frame.
+- **scroll**: a page of text and photos scrolling under the four panels.
+- **10 / 30 elements**: 10 or 30 capsules of 170 × 64 px while the page scrolls.
+
+| GPU process, % of a core | idle | content | move | scroll | 10 elements | 30 elements |
+|---|---|---|---|---|---|---|
+| no glass | 0 | 0.9 | 0.2 | 4.4 | 4.1 | 4.1 |
+| plain CSS `backdrop-filter: blur() saturate()` | 0.1 | 1.4 | 8.7 | 9.9 | 14.1 | 33.8 |
+| **liquid-glass-electron**, defaults (colour fringing on) | **0.1** | **1.9** | **13.9** | **15.1** | **25.7** | **74.2** |
+| **liquid-glass-electron**, `chromAberration: 0` | **0** | **1.5** | **9.2** | **10.4** | **15.5** | **36.6** |
+| [@ybouane/liquidglass](https://github.com/ybouane/liquidglass) 1.0.3 (WebGL) | 11.1 | 12.2 | 15.5 | 27.0 | 50.1 | 111.0 |
+| [liquidGL](https://liquidgl.naughtyduk.com) 3.0.0 (WebGL) | 17.7 | 18.5 | 22.5 | 19.2 | 63.4 | 141.0 * |
+| [liquid-glass-react](https://www.npmjs.com/package/liquid-glass-react) 1.1.1 (SVG filter) | 0 | 11.5 | 65.1 | 68.1 | 79.2 | 67.7 |
+| [apple-liquid-glass-webgl](https://github.com/Oliverrr2424/webgl-apple-liquid-glass) 2.6.0 (WebGL) | 16.9 | 19.0 | 24.6 | 28.2 | 59.3 | 95.6 |
+| [simple-liquid-glass](https://github.com/lucaperullo/simple-liquid-glass) 5.4.0 (SVG filter) | 0 | 1.1 | 6.7 | 6.9 | 9.6 | 20.6 |
+| [@avenra/liquid-glass](https://github.com/DevSam7t3/liquid-glass) 1.2.0 (SVG filter) | 0 | 4.0 | 36.7 | 37.7 | 25.1 | 88.6 |
+
+\* liquidGL failed with 30 elements (shader errors; the capsules drew black), so that number isn't comparable.
+
+What this says:
+
+- **Nothing changing costs nothing**, and neither does content changing under still glass, as with no glass at all.
+  The WebGL libraries draw every frame regardless: 11–19% of a core while nothing happens.
+- **Moving glass costs about what liquidglass costs, not much less**: 13.9% against 15.5%. The goal was 10 points
+  below it; that wasn't reached. Chromium runs every glass's filter again on every frame anything changes, and colour
+  fringing is three bending passes. Without fringing it's 9.2%, close to a plain CSS blur's 8.7%.
+- **The cost grows with the number of glass elements on screen while anything moves.** 30 elements with fringing take
+  74% of a core, twice a plain blur. Turn fringing off (37%, about a plain blur), put many shapes in one `container`
+  (one filter for all of them), or leave glass at `strength: 0` while it isn't needed.
+- simple-liquid-glass costs less: its filter is simpler, and it looks different (a mirrored distortion).
+
+Every library was checked for drawing in each scene (`bench/results/<date>/shots/`, made by the run, not committed).
 
 ## Compared with liquidglass
 
-<!-- COMPARE -->
+`npm run compare` ([bench/compare/run.mjs](bench/compare/run.mjs)) draws the same scene with
+[@ybouane/liquidglass](https://github.com/ybouane/liquidglass) (WebGL) and with this library, at the same options
+(liquidglass's defaults) and a device scale factor of 1, and measures the mean difference per channel (0–255) in three
+zones: the rim (within 40 px of the edge), the interior, and the shadow (25 px outside). As a yardstick it also
+measures liquidglass against itself moved by one pixel: a difference that small is invisible, and it adds up to this
+much.
+
+| over | | rim | interior | shadow |
+|---|---|---|---|---|
+| a coast (NASA) | liquid-glass-electron | 3.2 | 1.8 | 0.2 |
+| | Libre Hub's earlier engine | 3.9 | 1.4 | 0.5 |
+| | liquidglass moved 1 px | 2.6 | 2.7 | |
+| mountains (NASA) | liquid-glass-electron | 4.1 | 1.4 | 0.1 |
+| | Libre Hub's earlier engine | 5.4 | 1.1 | 0.4 |
+| | liquidglass moved 1 px | 4.1 | 2.2 | |
+
+Inside the glass it's well within a pixel's shift of liquidglass; at the rim, within it over the mountains and a little
+over it over the coast. Compared with the engine it grew from, the rim is closer to liquidglass and crisp (smoothing
+before the bend, not a blur after it) and the interior a little further, still within the yardstick.
+
+![liquidglass and liquid-glass-electron over the same photo, with the rim enlarged](https://raw.githubusercontent.com/CharlExMachina/liquid-glass-electron/media/compare-coast.jpg)
 
 ## Limitations
 
@@ -217,6 +279,10 @@ The gallery runs sandboxed, context-isolated and under a strict Content-Security
 - **The OS's Clear/Tinted setting can't be read** on any platform; offer it as the app's own setting. Reduce
   Transparency and Increase Contrast come from the page's media queries, which Chromium fills in on macOS and Windows;
   on Linux pass them from the main process ([docs/ELECTRON.md](docs/ELECTRON.md#the-systems-settings)).
+- **Apple's lens (`bevelMode` 2) is measured from one control**, an iPhone's slider knob. Its rim folds back like thick
+  glass, and Chromium's nearest-pixel sampling leaves a one-pixel stair along what it folds, where the iPhone's is
+  smooth. The thin dark line around the iPhone's rim and the shading across its glass aren't part of the glass here;
+  the iOS demo draws them in CSS (`demo/demos/ios.css`).
 - Not done: Apple's shimmer on interactive glass, `backgroundExtensionEffect`, glass that thickens with its size.
 
 ## Tests

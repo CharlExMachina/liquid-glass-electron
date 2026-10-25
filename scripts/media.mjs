@@ -27,7 +27,7 @@ const arg = (name, fallback) => {
 
 const DEMOS = ['toolbar', 'tabbar', 'scroll', 'controls', 'buttons', 'toasts', 'morph', 'container', 'drag', 'dock', 'video', 'magnifier', 'appearance', 'playground', 'ios'];
 // seconds recorded, for the demos that act out more than the usual 7
-const LONG = { video: 10, scroll: 10, morph: 10, container: 10, ios: 16 };
+const LONG = { video: 6, scroll: 10, morph: 10, container: 10, ios: 16 };
 const LIGHT = new Set(['toolbar', 'appearance']); // these also get a light screenshot
 const MP4_WIDTH = 1180;
 const GIF_WIDTH = 760;

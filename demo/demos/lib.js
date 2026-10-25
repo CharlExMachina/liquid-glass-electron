@@ -105,7 +105,7 @@ export async function drag(el, dx, dy, ms = 900, target = el) {
   const t0 = performance.now();
   await new Promise((done) => {
     const step = (now) => {
-      const p = Math.min((now - t0) / ms, 1), e = p < 0.5 ? 2 * p * p : 1 - (-2 * p + 2) ** 2 / 2;
+      const p = Math.min(Math.max((now - t0) / ms, 0), 1), e = p < 0.5 ? 2 * p * p : 1 - (-2 * p + 2) ** 2 / 2;
       fire(target, 'pointermove', x + dx * e, y + dy * e);
       if (p < 1) requestAnimationFrame(step);
       else done();
@@ -120,7 +120,7 @@ export async function sweep(target, points, ms) {
   const t0 = performance.now();
   await new Promise((done) => {
     const step = (now) => {
-      const p = Math.min((now - t0) / ms, 1), f = p * (points.length - 1), i = Math.min(Math.floor(f), points.length - 2), t = f - i;
+      const p = Math.min(Math.max((now - t0) / ms, 0), 1), f = p * (points.length - 1), i = Math.min(Math.floor(f), points.length - 2), t = f - i;
       const x = points[i][0] + (points[i + 1][0] - points[i][0]) * t, y = points[i][1] + (points[i + 1][1] - points[i][1]) * t;
       const under = document.elementFromPoint(x, y) ?? target;
       fire(under, 'pointermove', x, y, { buttons: 0 });
