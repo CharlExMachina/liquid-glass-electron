@@ -96,15 +96,15 @@ export interface TableMap extends Pixels {
  * stretching reproduces a linear ramp exactly. So the map stores, per axis, where on a lookup table the shift is, laid
  * out linearly in distance from the edge (and in position across the middle), and feComponentTransfer's table turns it
  * back into the shift. Along the straight edges it's exact; in the corners, the stored value is what gives the right
- * shift through the same table, which varies smoothly too. The bevel's profile has to only fall inward for that
- * (`monotone`), which changes nothing visible. The image reaches `margin` px past the edge, so the outermost pixels
- * are interpolated rather than clamped.
+ * shift through the same table, which varies smoothly too. The shift peaks 2 px in and falls toward the edge, so a
+ * shift there can be found on either side of the peak: a point takes the one nearer its own distance, which along
+ * straight edges is the point itself. The image reaches `margin` px past the edge, so the outermost pixels are
+ * interpolated rather than clamped.
  */
 export function tableMap(f: Field, o: Optics, scale: number, N = 256, fringe = 0, profile: Field = f): TableMap {
-  const opt = { ...o, monotone: true };
   // `fringe` ≠ 0: this channel's map, sampled liquidglass's colour fringe further out (red, > 0) or in (blue, < 0)
   const shift = (x: number, y: number): [number, number] => {
-    const [sx, sy] = shiftAt(x, y, f, opt);
+    const [sx, sy] = shiftAt(x, y, f, o);
     if (!fringe) return [sx, sy];
     const [fx, fy] = fringeAt(x, y, f, o.bevel, Math.abs(fringe));
     return [sx + Math.sign(fringe) * fx, sy + Math.sign(fringe) * fy];
@@ -116,43 +116,57 @@ export function tableMap(f: Field, o: Optics, scale: number, N = 256, fringe = 0
   // Outside the element the shift stays what it is at the edge.
   const edgeShift = (axis: 0 | 1, d: number) => {
     const [x, y] = profile.probe(axis, Math.max(d, 0.01));
-    return (profile === f ? shift(x, y) : shiftAt(x, y, profile, opt))[axis];
+    return (profile === f ? shift(x, y) : shiftAt(x, y, profile, o))[axis];
   };
   // The table, per axis: w in [0, 1] (the channel's distance from 0.5, doubled) to a shift >= 0.
   // w in [0, W0]: linear up to the shift at the bevel's end (the middle, where only the magnification moves things);
   // w in [W0, 1]: the edge's profile, linear in d from the bevel's end (zR) to `margin` px outside.
-  const K = 2048;
+  const K = 2048, iEdge = Math.round((zR / (zR + margin)) * K);
   const tables = ([0, 1] as const).map((axis) => {
     const prof = new Float64Array(K + 1);
     for (let i = 0; i <= K; i++) prof[i] = edgeShift(axis, zR - (zR + margin) * (i / K));
-    // strictly rising, so it can be inverted (the flat top gets the slightest slope)
-    for (let i = 1; i <= K; i++) prof[i] = Math.max(prof[i], prof[i - 1] + 1e-6 * (prof[K] + 1));
+    // the peak, about 2 px in: strictly rising up to it and strictly falling from it to the edge, so either side can be
+    // inverted (the flat top gets the slightest slope)
+    let peak = 0;
+    for (let i = 1; i <= K; i++) if (prof[i] > prof[peak]) peak = i;
+    const eps = 1e-6 * (prof[peak] + 1);
+    for (let i = 1; i <= peak; i++) prof[i] = Math.max(prof[i], prof[i - 1] + eps);
+    for (let i = peak + 1; i <= iEdge; i++) prof[i] = Math.min(prof[i], prof[i - 1] - eps);
     // Where the bevel's end is the middle (a capsule's long axis), nothing is left for the middle's segment: the
     // profile starts from no shift, and takes the whole range.
     const start = Math.max(prof[0], 1e-6), W0 = start > 0.25 ? 0.12 : 0;
+    const toW = (i: number) => W0 + (i / K) * (1 - W0);
     const forward = (w: number) => {
       if (w <= W0) return W0 ? (w / W0) * start : 0;
       const t = ((w - W0) / (1 - W0)) * K, i = Math.min(Math.floor(t), K - 1);
       return prof[i] + (prof[i + 1] - prof[i]) * (t - i);
     };
-    const inverse = (t: number) => {
-      if (W0 && t <= start) return (t / start) * W0;
-      if (t >= prof[K]) return 1;
-      let lo = 0, hi = K;
+    // where on the profile between lo and hi the shift is t (rising or falling)
+    const search = (t: number, lo: number, hi: number) => {
+      const up = prof[hi] > prof[lo];
       while (hi - lo > 1) {
         const m = (lo + hi) >> 1;
-        if (prof[m] < t) lo = m;
+        if (prof[m] < t === up) lo = m;
         else hi = m;
       }
-      return W0 + ((lo + (t - prof[lo]) / (prof[hi] - prof[lo])) / K) * (1 - W0);
+      return toW(lo + (t - prof[lo]) / (prof[hi] - prof[lo]));
     };
-    return { forward, inverse, top: prof[K] };
+    // w for a shift t at a point d px in: the rising side, or the falling one between the peak and the edge, if that's
+    // nearer the point's own place on the table
+    const inverse = (t: number, d: number) => {
+      const rising = W0 && t <= start ? (t / start) * W0 : t >= prof[peak] ? toW(peak) : search(t, 0, peak);
+      const own = ((zR - d) / (zR + margin)) * K;
+      if (own <= peak || peak >= iEdge || t >= prof[peak] || t < prof[iEdge]) return rising;
+      const falling = search(t, peak, iEdge);
+      return Math.abs(falling - toW(own)) < Math.abs(rising - toW(own)) ? falling : rising;
+    };
+    return { forward, inverse, top: prof[peak] };
   });
   const rimPx = Math.max(tables[0].top, tables[1].top, 1e-6);
-  const encode = (axis: 0 | 1, t: number) => 0.5 + 0.5 * Math.sign(t) * tables[axis].inverse(Math.abs(t));
+  const encode = (axis: 0 | 1, t: number, d: number) => 0.5 + 0.5 * Math.sign(t) * tables[axis].inverse(Math.abs(t), d);
   const valueAt = (x: number, y: number): [number, number] => {
-    const [sx, sy] = shift(x, y);
-    return [encode(0, sx), encode(1, sy)];
+    const [sx, sy] = shift(x, y), d = -f.sdf(x, y);
+    return [encode(0, sx, d), encode(1, sy, d)];
   };
   // The map: inside, the value that gives the shift there; outside, the inside values carried on in a straight line.
   // far outside the shape nothing is seen (a container's mask, or the box's edge): only a pixel or two out matters,

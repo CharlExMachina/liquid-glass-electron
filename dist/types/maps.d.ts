@@ -39,9 +39,10 @@ export interface TableMap extends Pixels {
  * stretching reproduces a linear ramp exactly. So the map stores, per axis, where on a lookup table the shift is, laid
  * out linearly in distance from the edge (and in position across the middle), and feComponentTransfer's table turns it
  * back into the shift. Along the straight edges it's exact; in the corners, the stored value is what gives the right
- * shift through the same table, which varies smoothly too. The bevel's profile has to only fall inward for that
- * (`monotone`), which changes nothing visible. The image reaches `margin` px past the edge, so the outermost pixels
- * are interpolated rather than clamped.
+ * shift through the same table, which varies smoothly too. The shift peaks 2 px in and falls toward the edge, so a
+ * shift there can be found on either side of the peak: a point takes the one nearer its own distance, which along
+ * straight edges is the point itself. The image reaches `margin` px past the edge, so the outermost pixels are
+ * interpolated rather than clamped.
  */
 export declare function tableMap(f: Field, o: Optics, scale: number, N?: number, fringe?: number, profile?: Field): TableMap;
 export interface FieldLight {

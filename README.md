@@ -34,7 +34,8 @@ From GitHub (not on npm yet):
 npm install github:CharlExMachina/liquid-glass-electron
 ```
 
-`dist/` is committed, so there's nothing to build. To use it without a bundler, see
+`dist/` is committed, so there's nothing to build (`npm run bundle` rebuilds it; the script isn't called `build`,
+because npm would then install the dev dependencies to prepare the package). To use it without a bundler, see
 [docs/ELECTRON.md](docs/ELECTRON.md#loading-it).
 
 ## Use
@@ -72,6 +73,11 @@ data attributes are picked up, and a transition or animation of a `--glass-*` pr
 (`--glass-strength` is registered as a number so it interpolates; register others with `@property` to transition
 them.)
 
+Custom properties inherit, so one set on `:root` reaches every glass element: give the page's own variables other
+names. Libre Hub's earlier engine's short names work too (`--glass-bevel` for `zRadius`, `--glass-aberration`,
+`--glass-edge`, `--glass-dome`, `--glass-blur`, `--glass-radius`), but its `--glass-tint`, a background colour, is
+this library's `tint` option.
+
 The rest of the API:
 
 | | |
@@ -104,7 +110,7 @@ liquidglass's options, with its defaults:
 | `bevelMode` | 0 | 0 = a pill with a bevelled rim; 1 = a dome that magnifies the whole element; 2 = Apple's lens (this library's): the rim magnifies toward the middle, most at the edge and fading out `zRadius` px in, and the middle is flat |
 | `chromAberration` | 0.05 | Colour fringing at the rim. Two more passes per frame; 0 for less work |
 | `blurAmount` | 0 | Frost: 1 ≈ a 7.6 px blur |
-| `saturation`, `brightness` | 0, 0 | Boosts (0.5 = 1.5×). The glass is always 6% brighter, as liquidglass's is |
+| `saturation`, `brightness` | 0, 0 | Boosts (0.5 = 1.5×), on top of `baseBrightness` |
 | `tintStrength` | 0 | A tint toward liquidglass's cool glass, or toward `tint` |
 | `edgeHighlight`, `fresnel`, `specular` | 0.05, 1, 0 | The light: the edge's stroke and glow, reflection at grazing angles, highlights from four lights |
 | `distortion` | 0 | Micro-noise in the bending, like textured glass |
@@ -118,6 +124,7 @@ And this library's:
 
 | Option | Default | What it does |
 |---|---|---|
+| `baseBrightness` | 0.06 | The brightening liquidglass's glass always has (6%); 0 for none |
 | `strength` | 1 | How much glass there is, 0..1: bending, fringe, frost, colour, light, fill and shadow together. Cheap to change every frame; at 0 there's no filter |
 | `variant` | none | `regular` (frosted, saturated, a faint fill), `clear` (liquidglass's defaults), `identity` (no glass) |
 | `shape` | `rect` | `rect`, `capsule`, `circle`, `concentric` (the radius of the glass it sits in, less the inset), `squircle` (continuous corners), `path` |

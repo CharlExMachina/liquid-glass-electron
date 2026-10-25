@@ -43,8 +43,6 @@ export interface Optics {
   rim?: boolean;
   /** the slight magnification toward the middle of a pill */
   magnify: boolean;
-  /** keep the bevel's slope at its peak (2 px in) all the way to the edge, so the profile only falls inward */
-  monotone?: boolean;
 }
 
 /** The bevel's height gradient at (x, y), over ±2 px as liquidglass's shader takes it (inward), and the depth there. */
@@ -61,7 +59,7 @@ function gradient(f: Field, x: number, y: number, zR: number): [number, number, 
  */
 export function shiftAt(x: number, y: number, f: Field, o: Optics): [number, number] {
   const zR = Math.max(o.bevel, 1);
-  let [gx, gy, d] = gradient(f, x, y, zR);
+  const [gx, gy, d] = gradient(f, x, y, zR);
   const depth = smoothstep(0, zR, d);
   if (o.dome) {
     const [tx, ty] = f.toward(x, y), k = o.refraction * depth * 0.35;
@@ -75,14 +73,8 @@ export function shiftAt(x: number, y: number, f: Field, o: Optics): [number, num
     const [tx, ty] = f.toward(x, y);
     return [tx * k, ty * k];
   }
-  if (o.monotone && d < 2) {
-    // the gradient's direction, at the peak's magnitude, rising 2% a px on toward the edge (so it keeps rising)
-    const g = Math.hypot(gx, gy) || 1, peak = slope(2, zR) * (1 + 0.02 * (2 - d));
-    gx = (gx / g) * peak;
-    gy = (gy / g) * peak;
-  }
   // Biconvex: light bends where it enters and where it leaves, a little more the thicker the glass.
-  const k = (1 - 1 / IOR) * (2 + 0.5 * height(o.monotone ? Math.max(d, 2) : d, zR) / zR) * o.refraction * 30;
+  const k = (1 - 1 / IOR) * (2 + 0.5 * height(d, zR) / zR) * o.refraction * 30;
   const m = o.magnify ? o.refraction * 4 * depth : 0;
   const [px, py] = f.pull(x, y);
   return [gx * k + px * m, gy * k + py * m];

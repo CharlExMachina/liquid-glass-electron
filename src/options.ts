@@ -33,8 +33,10 @@ export interface GlassOptions {
   saturation: number;
   /** tint toward `tint` (0) */
   tintStrength: number;
-  /** brightness boost (0; the glass is always 6% brighter, as liquidglass's is) */
+  /** brightness boost (0), on top of baseBrightness */
   brightness: number;
+  /** the brightening the glass always has, as liquidglass's does (0.06 = 6%); 0 = none */
+  baseBrightness: number;
   shadowOpacity: number;
   shadowSpread: number;
   shadowOffsetY: number;
@@ -104,6 +106,7 @@ export const DEFAULTS: GlassOptions = {
   saturation: 0,
   tintStrength: 0,
   brightness: 0,
+  baseBrightness: 0.06,
   shadowOpacity: 0.3,
   shadowSpread: 10,
   shadowOffsetY: 1,
@@ -138,13 +141,14 @@ export const VARIANTS: Record<Variant, Partial<GlassOptions>> = {
 };
 
 const NUMBERS = ['blurAmount', 'refraction', 'chromAberration', 'edgeHighlight', 'specular', 'fresnel', 'distortion', 'cornerRadius',
-  'zRadius', 'opacity', 'saturation', 'tintStrength', 'brightness', 'shadowOpacity', 'shadowSpread', 'shadowOffsetY', 'bevelMode',
+  'zRadius', 'opacity', 'saturation', 'tintStrength', 'brightness', 'baseBrightness', 'shadowOpacity', 'shadowSpread', 'shadowOffsetY', 'bevelMode',
   'pressBulge', 'strength', 'elasticity'] as const;
 const BOOLEANS = ['floating', 'button', 'interactive', 'smooth', 'magnify', 'adaptive'] as const;
 const STRINGS = ['variant', 'tint', 'fill', 'shape', 'press', 'path', 'pathBox', 'backdrop'] as const;
 const ALL: readonly string[] = [...NUMBERS, ...BOOLEANS, ...STRINGS];
 
-// The names Libre Hub's engine used, for its CSS: --glass-bevel and so on.
+// The names Libre Hub's engine used, for its CSS: --glass-bevel and so on. Its --glass-tint was the app's background
+// colour, not an option; here it's `tint` (which does nothing while tintStrength is 0).
 const ALIASES: Record<string, keyof GlassOptions> = {
   bevel: 'zRadius', aberration: 'chromAberration', edge: 'edgeHighlight', dome: 'bevelMode', blur: 'blurAmount', radius: 'cornerRadius',
 };

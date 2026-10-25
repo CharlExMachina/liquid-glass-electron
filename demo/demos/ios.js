@@ -151,9 +151,9 @@ export default {
 
     // ---- the glass. Strength and frost come from CSS (ios.css) so transitions drive them; the rest is set here.
     // Knobs are Apple's lens (bevelMode 2): the rim magnifies toward the middle, so the track flares out where it
-    // enters the knob, and the middle is flat. No brightening (liquidglass's 6% would turn a light page white) and none
+    // enters the knob, and the middle is flat. No brightening (baseBrightness 0: liquidglass's 6% would turn a light page white) and none
     // of the glass's own light: the knob's rim and shading are CSS (.ios-knob::after), as measured from an iPhone.
-    const knob = { bevelMode: 2, zRadius: 24, refraction: 1.15, chromAberration: 0, brightness: -0.057, edgeHighlight: 0, fresnel: 0, specular: 0, fill: 'rgb(255 255 255 / 0.05)', shadowOpacity: 0.25, shadowSpread: 8, shadowOffsetY: 3 };
+    const knob = { bevelMode: 2, zRadius: 24, refraction: 1.15, chromAberration: 0, baseBrightness: 0, edgeHighlight: 0, fresnel: 0, specular: 0, fill: 'rgb(255 255 255 / 0.05)', shadowOpacity: 0.25, shadowSpread: 8, shadowOffsetY: 3 };
     const handles = [
       glass(size.knob, knob),
       glass(enabled.knob, { ...knob, zRadius: 14 }),

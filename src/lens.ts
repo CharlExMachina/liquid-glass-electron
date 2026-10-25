@@ -213,7 +213,7 @@ export class Lens {
   /** The frost and colour as CSS functions, scaled by the strength (glass that doesn't bend, and other browsers). */
   private cssBackdrop() {
     const o = this.options, s = this.amount(), sigma = blurSigma(o.blurAmount) * s;
-    return [o.backdrop ?? '', sigma > 0.01 ? `blur(${sigma.toFixed(2)}px)` : '', `saturate(${1 + o.saturation * s})`, `brightness(${(1 + (1.06 * (1 + o.brightness) - 1) * s).toFixed(3)})`].filter(Boolean).join(' ');
+    return [o.backdrop ?? '', sigma > 0.01 ? `blur(${sigma.toFixed(2)}px)` : '', `saturate(${1 + o.saturation * s})`, `brightness(${(1 + ((1 + o.baseBrightness) * (1 + o.brightness) - 1) * s).toFixed(3)})`].filter(Boolean).join(' ');
   }
 
   /** The border-box size, as the ResizeObserver reported it. */
@@ -354,12 +354,12 @@ export class Lens {
     this.el.style.setProperty('backdrop-filter', this.amount() > 0 ? this.filterCss : 'none');
   }
 
-  /** The colour matrix: saturation, brightness (6% always, as liquidglass's glass is, plus a button's hover) and tint. */
+  /** The colour matrix: saturation, brightness (baseBrightness, 6% as liquidglass's glass is, plus a button's hover) and tint. */
   private matrix() {
     const o = this.options;
     const gains = tintGains(o.tintStrength, o.tint ? tintRgb(o.tint) : undefined);
     const hover = this.hover && o.button && !this.pressed ? 0.2 : 0;
-    const m = colorMatrix(o.saturation, (1 + o.brightness + hover) * 1.06 - 1, gains), s = this.amount();
+    const m = colorMatrix(o.saturation, (1 + o.brightness + hover) * (1 + o.baseBrightness) - 1, gains), s = this.amount();
     const id = [1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0];
     return m.map((v, i) => +(id[i] + (v - id[i]) * s).toFixed(4));
   }

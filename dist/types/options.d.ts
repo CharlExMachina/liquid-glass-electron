@@ -26,8 +26,10 @@ export interface GlassOptions {
     saturation: number;
     /** tint toward `tint` (0) */
     tintStrength: number;
-    /** brightness boost (0; the glass is always 6% brighter, as liquidglass's is) */
+    /** brightness boost (0), on top of baseBrightness */
     brightness: number;
+    /** the brightening the glass always has, as liquidglass's does (0.06 = 6%); 0 = none */
+    baseBrightness: number;
     shadowOpacity: number;
     shadowSpread: number;
     shadowOffsetY: number;

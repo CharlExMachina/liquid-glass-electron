@@ -88,7 +88,7 @@ export declare class Lens {
     resize(w: number, h: number): void;
     private measure;
     private build;
-    /** The colour matrix: saturation, brightness (6% always, as liquidglass's glass is, plus a button's hover) and tint. */
+    /** The colour matrix: saturation, brightness (baseBrightness, 6% as liquidglass's glass is, plus a button's hover) and tint. */
     private matrix;
     /** The shape changed (a container's members moved): draw it again now. */
     reshape(): void;

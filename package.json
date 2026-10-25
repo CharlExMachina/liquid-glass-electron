@@ -47,7 +47,7 @@
   ],
   "sideEffects": false,
   "scripts": {
-    "build": "node scripts/build.mjs",
+    "bundle": "node scripts/build.mjs",
     "typecheck": "tsc -p tsconfig.json",
     "test": "node --test test/unit/*.test.ts",
     "test:visual": "node scripts/electron.mjs --x11 test/visual/run.mjs",

@@ -25,8 +25,6 @@ export interface Optics {
     rim?: boolean;
     /** the slight magnification toward the middle of a pill */
     magnify: boolean;
-    /** keep the bevel's slope at its peak (2 px in) all the way to the edge, so the profile only falls inward */
-    monotone?: boolean;
 }
 /**
  * Where the backdrop is sampled from, relative to the point (x, y) of the field's box: the bevel's refraction plus

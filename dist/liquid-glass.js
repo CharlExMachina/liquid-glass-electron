@@ -90,7 +90,7 @@ function gradient(f, x, y, zR) {
 }
 function shiftAt(x, y, f, o) {
   const zR = Math.max(o.bevel, 1);
-  let [gx, gy, d] = gradient(f, x, y, zR);
+  const [gx, gy, d] = gradient(f, x, y, zR);
   const depth = smoothstep(0, zR, d);
   if (o.dome) {
     const [tx, ty] = f.toward(x, y), k2 = o.refraction * depth * 0.35;
@@ -101,12 +101,7 @@ function shiftAt(x, y, f, o) {
     const [tx, ty] = f.toward(x, y);
     return [tx * k2, ty * k2];
   }
-  if (o.monotone && d < 2) {
-    const g = Math.hypot(gx, gy) || 1, peak = slope(2, zR) * (1 + 0.02 * (2 - d));
-    gx = gx / g * peak;
-    gy = gy / g * peak;
-  }
-  const k = (1 - 1 / IOR) * (2 + 0.5 * height(o.monotone ? Math.max(d, 2) : d, zR) / zR) * o.refraction * 30;
+  const k = (1 - 1 / IOR) * (2 + 0.5 * height(d, zR) / zR) * o.refraction * 30;
   const m = o.magnify ? o.refraction * 4 * depth : 0;
   const [px, py] = f.pull(x, y);
   return [gx * k + px * m, gy * k + py * m];
@@ -349,9 +344,8 @@ function paint(data, k, cover, a, fill) {
   data[k + 3] = Math.round(255 * A);
 }
 function tableMap(f, o, scale, N = 256, fringe = 0, profile = f) {
-  const opt = { ...o, monotone: true };
   const shift = (x, y) => {
-    const [sx, sy] = shiftAt(x, y, f, opt);
+    const [sx, sy] = shiftAt(x, y, f, o);
     if (!fringe) return [sx, sy];
     const [fx, fy] = fringeAt(x, y, f, o.bevel, Math.abs(fringe));
     return [sx + Math.sign(fringe) * fx, sy + Math.sign(fringe) * fy];
@@ -361,37 +355,47 @@ function tableMap(f, o, scale, N = 256, fringe = 0, profile = f) {
   if (o.dome || o.rim) return smoothMap(f, shift, scale, margin, N);
   const edgeShift = (axis, d) => {
     const [x, y] = profile.probe(axis, Math.max(d, 0.01));
-    return (profile === f ? shift(x, y) : shiftAt(x, y, profile, opt))[axis];
+    return (profile === f ? shift(x, y) : shiftAt(x, y, profile, o))[axis];
   };
-  const K = 2048;
+  const K = 2048, iEdge = Math.round(zR / (zR + margin) * K);
   const tables = [0, 1].map((axis) => {
     const prof = new Float64Array(K + 1);
     for (let i = 0; i <= K; i++) prof[i] = edgeShift(axis, zR - (zR + margin) * (i / K));
-    for (let i = 1; i <= K; i++) prof[i] = Math.max(prof[i], prof[i - 1] + 1e-6 * (prof[K] + 1));
+    let peak = 0;
+    for (let i = 1; i <= K; i++) if (prof[i] > prof[peak]) peak = i;
+    const eps = 1e-6 * (prof[peak] + 1);
+    for (let i = 1; i <= peak; i++) prof[i] = Math.max(prof[i], prof[i - 1] + eps);
+    for (let i = peak + 1; i <= iEdge; i++) prof[i] = Math.min(prof[i], prof[i - 1] - eps);
     const start = Math.max(prof[0], 1e-6), W0 = start > 0.25 ? 0.12 : 0;
+    const toW = (i) => W0 + i / K * (1 - W0);
     const forward = (w) => {
       if (w <= W0) return W0 ? w / W0 * start : 0;
       const t = (w - W0) / (1 - W0) * K, i = Math.min(Math.floor(t), K - 1);
       return prof[i] + (prof[i + 1] - prof[i]) * (t - i);
     };
-    const inverse = (t) => {
-      if (W0 && t <= start) return t / start * W0;
-      if (t >= prof[K]) return 1;
-      let lo = 0, hi = K;
+    const search = (t, lo, hi) => {
+      const up = prof[hi] > prof[lo];
       while (hi - lo > 1) {
         const m = lo + hi >> 1;
-        if (prof[m] < t) lo = m;
+        if (prof[m] < t === up) lo = m;
         else hi = m;
       }
-      return W0 + (lo + (t - prof[lo]) / (prof[hi] - prof[lo])) / K * (1 - W0);
+      return toW(lo + (t - prof[lo]) / (prof[hi] - prof[lo]));
     };
-    return { forward, inverse, top: prof[K] };
+    const inverse = (t, d) => {
+      const rising = W0 && t <= start ? t / start * W0 : t >= prof[peak] ? toW(peak) : search(t, 0, peak);
+      const own = (zR - d) / (zR + margin) * K;
+      if (own <= peak || peak >= iEdge || t >= prof[peak] || t < prof[iEdge]) return rising;
+      const falling = search(t, peak, iEdge);
+      return Math.abs(falling - toW(own)) < Math.abs(rising - toW(own)) ? falling : rising;
+    };
+    return { forward, inverse, top: prof[peak] };
   });
   const rimPx = Math.max(tables[0].top, tables[1].top, 1e-6);
-  const encode = (axis, t) => 0.5 + 0.5 * Math.sign(t) * tables[axis].inverse(Math.abs(t));
+  const encode = (axis, t, d) => 0.5 + 0.5 * Math.sign(t) * tables[axis].inverse(Math.abs(t), d);
   const valueAt = (x, y) => {
-    const [sx, sy] = shift(x, y);
-    return [encode(0, sx), encode(1, sy)];
+    const [sx, sy] = shift(x, y), d = -f.sdf(x, y);
+    return [encode(0, sx, d), encode(1, sy, d)];
   };
   const far = -(1.5 / scale + 1);
   const { width, height: height2, data } = sampleBox(f, scale, margin, (x, y, d) => {
@@ -519,6 +523,7 @@ var DEFAULTS = {
   saturation: 0,
   tintStrength: 0,
   brightness: 0,
+  baseBrightness: 0.06,
   shadowOpacity: 0.3,
   shadowSpread: 10,
   shadowOffsetY: 1,
@@ -563,6 +568,7 @@ var NUMBERS = [
   "saturation",
   "tintStrength",
   "brightness",
+  "baseBrightness",
   "shadowOpacity",
   "shadowSpread",
   "shadowOffsetY",
@@ -829,7 +835,7 @@ var Lens = class {
   /** The frost and colour as CSS functions, scaled by the strength (glass that doesn't bend, and other browsers). */
   cssBackdrop() {
     const o = this.options, s = this.amount(), sigma = blurSigma(o.blurAmount) * s;
-    return [o.backdrop ?? "", sigma > 0.01 ? `blur(${sigma.toFixed(2)}px)` : "", `saturate(${1 + o.saturation * s})`, `brightness(${(1 + (1.06 * (1 + o.brightness) - 1) * s).toFixed(3)})`].filter(Boolean).join(" ");
+    return [o.backdrop ?? "", sigma > 0.01 ? `blur(${sigma.toFixed(2)}px)` : "", `saturate(${1 + o.saturation * s})`, `brightness(${(1 + ((1 + o.baseBrightness) * (1 + o.brightness) - 1) * s).toFixed(3)})`].filter(Boolean).join(" ");
   }
   /** The border-box size, as the ResizeObserver reported it. */
   resize(w, h) {
@@ -953,12 +959,12 @@ var Lens = class {
     if (o.backdrop) this.filterCss = `${o.backdrop} ${this.filterCss}`;
     this.el.style.setProperty("backdrop-filter", this.amount() > 0 ? this.filterCss : "none");
   }
-  /** The colour matrix: saturation, brightness (6% always, as liquidglass's glass is, plus a button's hover) and tint. */
+  /** The colour matrix: saturation, brightness (baseBrightness, 6% as liquidglass's glass is, plus a button's hover) and tint. */
   matrix() {
     const o = this.options;
     const gains = tintGains(o.tintStrength, o.tint ? tintRgb(o.tint) : void 0);
     const hover = this.hover && o.button && !this.pressed ? 0.2 : 0;
-    const m = colorMatrix(o.saturation, (1 + o.brightness + hover) * 1.06 - 1, gains), s = this.amount();
+    const m = colorMatrix(o.saturation, (1 + o.brightness + hover) * (1 + o.baseBrightness) - 1, gains), s = this.amount();
     const id = [1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0];
     return m.map((v, i) => +(id[i] + (v - id[i]) * s).toFixed(4));
   }

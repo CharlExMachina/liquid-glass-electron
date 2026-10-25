@@ -31,19 +31,26 @@ test('a table map at 0.2 px per px follows the exact shift along straight edges'
   let err = 0, n = 0;
   for (let d = 0.5; d < 40; d += 0.5) {
     for (const y of [80, 110, 140]) {
-      const [a] = shiftAt(d, y, f, { ...optics, monotone: true });
+      const [a] = shiftAt(d, y, f, optics);
       const [b] = at(d, y);
       err += Math.abs(a - b);
       n++;
     }
   }
   assert.ok(err / n < 0.9, `mean error ${(err / n).toFixed(2)} px along the left edge`);
+  // the outermost px, where the shift falls off from its peak 2 px in (66 px) by about 10 px a px: a byte's step is
+  // about 0.4 px there
+  const [a] = shiftAt(0.5, 110, f, optics), [b] = at(0.5, 110);
+  assert.ok(Math.abs(a - b) < 4, `${b.toFixed(1)} px at the edge, not ${a.toFixed(1)}`);
 });
 
-test('its tables rise from the middle to the rim, and no shift comes out as 128', () => {
+test('its tables rise from the middle to the peak 2 px in and fall from it to the edge, and no shift comes out as 128', () => {
   const m = tableMap(roundedRect(300, 160, [30, 30, 30, 30]), optics, 0.2);
   for (const t of [m.tableX, m.tableY]) {
-    for (let i = 1; i < t.length; i++) assert.ok(t[i] >= t[i - 1] - 1e-9);
+    const peak = t.indexOf(Math.max(...t));
+    assert.ok(peak < t.length - 1 && t[t.length - 1] < t[peak] - 0.05, 'the shift falls toward the edge');
+    for (let i = t.length / 2 + 1; i <= peak; i++) assert.ok(t[i] >= t[i - 1] - 1e-9);
+    for (let i = peak + 1; i < t.length; i++) assert.ok(t[i] <= t[i - 1] + 1e-9);
     assert.equal(Math.floor(t[127] * 255), 128 - (t[127] < 0.5 ? 1 : 0) || 128);
   }
 });
