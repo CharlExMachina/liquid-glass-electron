@@ -78,6 +78,23 @@ names. Libre Hub's earlier engine's short names work too (`--glass-bevel` for `z
 `--glass-edge`, `--glass-dome`, `--glass-blur`, `--glass-radius`), but its `--glass-tint`, a background colour, is
 this library's `tint` option.
 
+With a lot of glass on screen at once (a grid of tiles, a long toolbar, a dock), put it in a group. Each element stays
+glass of its own and looks the same, but one backdrop filter bends them all, and that's most of what glass costs per
+frame: 30 elements take 6.5× less ([measured](#many-glass-elements-glassgroup)).
+
+```js
+import { glassGroup, glassOf } from 'liquid-glass-electron';
+
+const tiles = glassGroup(document.querySelector('.grid'), { variant: 'regular' });   // its data-glass children
+// or glassGroup([...document.querySelectorAll('.tile')], options)
+tiles.set({ strength: 0.6 });                            // all of them together: still one filter
+glassOf(document.querySelector('.tile')).set({ strength: 0.3 });   // one on its own: a filter of its own while it differs
+```
+
+The members must be siblings that don't overlap, with nothing painted between them near their edges
+([the rules](docs/AGENTS.md#rules-for-groups-glassgroup)). The gallery's **Lots of glass** demo
+(`demo/demos/many.js`) switches 24 tiles between separate glass and a group, and counts their backdrop filters.
+
 The rest of the API:
 
 | | |
@@ -183,6 +200,9 @@ The gallery runs sandboxed, context-isolated and under a strict Content-Security
 <tr><td width="50%"><img src="https://raw.githubusercontent.com/CharlExMachina/liquid-glass-electron/media/appearance.gif" alt="Clear, tinted, accessible: Clear/Tinted, Reduce Transparency, Increase Contrast, light and dark"><br><b>Clear, tinted, accessible</b>: Clear/Tinted, Reduce Transparency, Increase Contrast, light and dark (<a href="https://raw.githubusercontent.com/CharlExMachina/liquid-glass-electron/media/appearance.mp4">MP4</a>, <code>demo/demos/appearance.js</code>)</td><td width="50%"><img src="https://raw.githubusercontent.com/CharlExMachina/liquid-glass-electron/media/playground.gif" alt="Playground: every option, live, including any SVG path as the shape"><br><b>Playground</b>: every option, live, including any SVG path as the shape (<a href="https://raw.githubusercontent.com/CharlExMachina/liquid-glass-electron/media/playground.mp4">MP4</a>, <code>demo/demos/playground.js</code>)</td></tr>
 </table>
 
+Also in the gallery: **Lots of glass**, 24 glass tiles over a scrolling feed, as separate glass or one `glassGroup`,
+with a count of their backdrop filters (`demo/demos/many.js`).
+
 ## Performance
 
 Measured with `npm run bench` ([bench/run.mjs](bench/run.mjs)): every library below in the same scenes, in an Electron
@@ -248,8 +268,8 @@ outermost pixel; at fractional scales like 1.25×, scattered pixels round the ot
 
 ```js
 const tiles = glassGroup(document.querySelector('.grid'), { shape: 'capsule' });
-tiles.set({ strength: 0.6 });           // every member together: still one filter
-glassOf(tile).set({ strength: 0.3 });   // one member on its own: it gets its own filter while it differs
+tiles.set({ strength: 0.6 });                            // every member together: still one filter
+glassOf(tiles.elements[0]).set({ strength: 0.3 });       // one member on its own: its own filter while it differs
 ```
 
 In the table above, separate glass against a `glassGroup` costs 67.3% against 10.4% of a core in the GPU process with
