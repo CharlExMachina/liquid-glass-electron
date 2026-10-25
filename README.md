@@ -84,6 +84,7 @@ The rest of the API:
 |---|---|
 | `container(el, { spacing })`, `data-glass-container="16"` | Apple's GlassEffectContainer: the glass shapes inside (`data-glass` or `data-glass-member`) are one piece of glass, flowing together where they come within `spacing` px |
 | `union([a, b], options)` | Apple's glassEffectUnion: separate elements as one piece of glass |
+| `glassGroup(elements \| parent, options)` | many glass elements, one backdrop filter: each stays glass of its own and looks the same, for pages with a lot of glass on screen (see [Performance](#performance)) |
 | `morph(from, to)` | the glass of one element flows into another (Apple's glassEffectID) |
 | `materialize(el, 'in' \| 'out')` | glass grows in or fades away in place |
 | `glassButton(el, 'glass' \| 'prominent')` | Apple's `.glass` and `.glassProminent` button styles |
@@ -222,11 +223,54 @@ What this says:
   below it; that wasn't reached. Chromium runs every glass's filter again on every frame anything changes, and colour
   fringing is three bending passes. Without fringing it's 9.2%, close to a plain CSS blur's 8.7%.
 - **The cost grows with the number of glass elements on screen while anything moves.** 30 elements with fringing take
-  74% of a core, twice a plain blur. Turn fringing off (37%, about a plain blur), put many shapes in one `container`
-  (one filter for all of them), or leave glass at `strength: 0` while it isn't needed.
+  74% of a core, twice a plain blur. Put them in a `glassGroup` (10.7%: one filter bends them all, they look the
+  same; below), turn fringing off (37%, about a plain blur), or leave glass at `strength: 0` while it isn't needed.
 - simple-liquid-glass costs less: its filter is simpler, and it looks different (a mirrored distortion).
 
 Every library was checked for drawing in each scene (`bench/results/<date>/shots/`, made by the run, not committed).
+
+### Many glass elements: `glassGroup`
+
+Most of that cost is per backdrop filter, not per pixel: each one is recorded, sent to the GPU process with its map's
+pixels and run again on every frame, however small. `glassGroup(elements)` (or `glassGroup(parent)`, for its children
+with `data-glass`) keeps every element glass of its own, with its own options, light, shadow, pointer behaviour and
+`glassOf()` handle, and bends all of them with one filter on a layer just behind them: the members' own filter, with
+their maps copied into one image (at whole map pixels, so each is drawn as it would be alone) and clipped to their
+shapes. It draws the same pixels as separate glass (at 1× the only difference is the antialiasing of the rim's
+outermost pixel; at fractional scales like 1.25×, scattered pixels round the other way).
+
+```js
+const tiles = glassGroup(document.querySelector('.grid'), { shape: 'capsule' });
+tiles.set({ strength: 0.6 });           // every member together: still one filter
+glassOf(tile).set({ strength: 0.3 });   // one member on its own: it gets its own filter while it differs
+```
+
+Measured as above, in one run, `glassGroup` against separate glass (renderer / GPU process, % of one core; frames
+drawn per second are the same, the display's rate):
+
+| | idle | content | move | scroll | 10 elements | 30 elements |
+|---|---|---|---|---|---|---|
+| separate glass, defaults | 0 / 0 | 0.8 / 2.0 | 4.3 / 14.2 | 3.8 / 14.8 | 4.7 / 26.0 | 12.8 / 72.1 |
+| **`glassGroup`**, defaults | 0 / 0 | 0.8 / 1.3 | **4.2 / 10.8** | **3.5 / 8.7** | **3.7 / 7.8** | **6.3 / 10.7** |
+| separate glass, `chromAberration: 0` | | | | | | 12.7 / 38.6 |
+| `glassGroup`, `chromAberration: 0` | | | | | | 6.2 / 10.0 |
+
+30 capsules in a group cost less than plain CSS `backdrop-filter: blur()` on them (34): colour fringing and all. In
+the move scene the moving panel has its own filter while it moves and the other three share one.
+
+A member leaves the group, in the same frame, while it changes on its own (strength, colour, hover, a press, a drag,
+a transition or animation, a resize, a move by inline style or class) and joins again once it has kept still for
+~120 ms; `set()` and `animate()` on the group change every member together and keep them one filter. What a group needs
+(details in [docs/AGENTS.md](docs/AGENTS.md#rules-for-groups-glassgroup)):
+
+- **Siblings that don't overlap, with nothing painted between them near their edges.** The layer bends the backdrop
+  of all of them before any paints, so one member's rim can't bend another member (or a sibling drawn between them),
+  as separate glass within a few dozen px would.
+- **Moves it can see.** A member moved by something that doesn't touch it (an ancestor's class, a stylesheet rule with
+  no transition, `el.animate()`) leaves its glass behind until `refresh()`.
+- Free shapes (`squircle`, `path`), a dome's fringe (`bevelMode: 1` with `chromAberration`), `distortion`, `backdrop`,
+  sticky members, and members with their own `opacity`, `filter`, `mask`, `clip-path`, `mix-blend-mode`, rotation or
+  scale keep a filter of their own (correct, just not cheaper).
 
 ## Compared with liquidglass
 
@@ -261,7 +305,8 @@ before the bend, not a blur after it) and the interior a little further, still w
   change: Chromium runs every backdrop filter again for each frame. Idle, it's nothing; while something animates or
   scrolls, it's roughly proportional to the number of glass elements on screen (see [Performance](#performance)). Glass
   at `strength` 0 has no filter and costs nothing; so does `refraction: 0` (light and fill only). A container draws
-  all of its members with one filter.
+  all of its members with one filter, and so does a `glassGroup` (members that don't overlap, with nothing painted
+  between them near their edges).
 - **Glass inside glass only sees the outer glass's own painting**, not what's behind it, and an ancestor with
   `opacity` below 1, a `filter`, a `mask`, `clip-path` or `mix-blend-mode` turns the bending off inside it. These are
   CSS's rules (the backdrop root). Apple's design rule is the same: don't stack glass on glass.
@@ -295,7 +340,7 @@ before the bend, not a blur after it) and the interior a little further, still w
 ## Tests
 
 ```bash
-npm test               # the optics, fields, maps and options (node:test)
+npm test               # the optics, fields, maps, options and groups' geometry (node:test)
 npm run test:visual    # screenshots in Electron against test/visual/baseline/
 npm run typecheck
 ```

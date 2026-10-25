@@ -149,11 +149,61 @@ export class Lens {
       this.build();
       this.measure();
       this.bindPointer();
+      this.changed();
       return;
     }
     this.live();
     const pointer = (o: GlassOptions) => [o.floating, o.button, o.interactive, o.press].join();
     if (pointer(prev) !== pointer(this.options)) this.bindPointer();
+    this.changed();
+  }
+
+  // ---------------------------------------------------------------- groups (glassGroup)
+
+  /** Set by a group: called whenever what the filter draws may have changed. */
+  onChange: (() => void) | null = null;
+  /** Counts the changes, so a group can tell whether anything changed since it last looked. */
+  version = 0;
+  // while a group draws this element's glass, the element's own backdrop-filter is off
+  private batched = false;
+  private wanted = 'none';
+
+  private changed() {
+    this.version++;
+    this.onChange?.();
+  }
+
+  private setBackdrop(v: string) {
+    this.wanted = v;
+    const css = this.batched ? 'none' : v;
+    if (this.el.style.getPropertyValue('backdrop-filter') !== css) this.el.style.setProperty('backdrop-filter', css);
+  }
+
+  /** A group draws (true) or stops drawing (false) this element's glass: its own filter goes off or back on, at once. */
+  setBatched(on: boolean) {
+    if (on === this.batched) return;
+    this.batched = on;
+    this.setBackdrop(this.wanted);
+  }
+
+  /**
+   * What a group needs to draw this element's glass in a filter of its own, or null if it can't: glass that doesn't
+   * bend, a free shape, a dome's per-channel maps, noise (it's in the filter's coordinates), CSS filters in front, or no
+   * map yet. `filters` are the element's own filter elements (the group copies them), `image` its map, `side` how far
+   * the map is stashed beside the element, `margin` how far the filters reach past it.
+   */
+  batchSource(): { filters: SVGFilterElement[]; image: SVGFEImageElement; table: SVGFEComponentTransferElement; shift: SVGFEOffsetElement | null; side: number; margin: number } | null {
+    const o = this.options;
+    if (!this.bends || this.maps.length !== 1 || this.isFree() || this.shape || o.backdrop || o.distortion > 0 || this.amount() <= 0 || !this.main) return null;
+    const map = this.maps[0];
+    if (!map.image.getAttribute('href') || !map.rimPx) return null;
+    const first = this.pre ?? this.main;
+    return {
+      filters: this.pre ? [this.pre, this.main] : [this.main],
+      image: map.image, table: map.table, shift: map.shift,
+      side: map.shift ? -Number(map.shift.getAttribute('dx')) : 0,
+      margin: -Number(first.getAttribute('x')),
+    };
   }
 
   /** What, in the options, decides which filter nodes there are. */
@@ -180,7 +230,7 @@ export class Lens {
   private live() {
     const o = this.options, s = this.amount();
     if (!this.bends) {
-      this.el.style.setProperty('backdrop-filter', o.variant === 'identity' || s <= 0 ? 'none' : this.cssBackdrop());
+      this.setBackdrop(o.variant === 'identity' || s <= 0 ? 'none' : this.cssBackdrop());
     } else {
       this.recolour();
       this.blurNode?.setAttribute('stdDeviation', (blurSigma(o.blurAmount) * s).toFixed(2));
@@ -191,7 +241,7 @@ export class Lens {
         this.passes.forEach((p, k) => (p.spread = 1 + (k - 1) * a));
       }
       this.applyStrength();
-      this.el.style.setProperty('backdrop-filter', s > 0 ? this.filterCss : 'none');
+      this.setBackdrop(s > 0 ? this.filterCss : 'none');
     }
     this.layout(true);
   }
@@ -251,7 +301,7 @@ export class Lens {
     if (!this.bends) {
       // No bending: the frost and colour as CSS functions (also what browsers other than Chromium get).
       this.filterCss = o.variant === 'identity' ? 'none' : this.cssBackdrop();
-      this.el.style.setProperty('backdrop-filter', this.amount() > 0 ? this.filterCss : 'none');
+      this.setBackdrop(this.amount() > 0 ? this.filterCss : 'none');
       return;
     }
 
@@ -353,7 +403,7 @@ export class Lens {
     }
     if (o.backdrop) this.filterCss = `${o.backdrop} ${this.filterCss}`;
     // at strength 0 there's no filter at all, so glass that's off costs nothing
-    this.el.style.setProperty('backdrop-filter', this.amount() > 0 ? this.filterCss : 'none');
+    this.setBackdrop(this.amount() > 0 ? this.filterCss : 'none');
   }
 
   /** The colour matrix: saturation, brightness (baseBrightness, 6% as liquidglass's glass is, plus a button's hover) and tint. */
@@ -615,6 +665,7 @@ export class Lens {
   // ---------------------------------------------------------------- strength, hover, press, drag
 
   private applyStrength() {
+    this.changed();
     const k = this.bulge * this.amount() * (this.unitMaps ? this.options.refraction : 1);
     let most = 0;
     for (const { node, spread, map } of this.passes) {
@@ -666,6 +717,7 @@ export class Lens {
 
   private recolour() {
     this.colour?.setAttribute('values', this.matrix().join(' '));
+    this.changed();
   }
 
   private bindPointer() {

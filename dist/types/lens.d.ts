@@ -70,6 +70,30 @@ export declare class Lens {
      * enough to change every frame.
      */
     refresh(js?: Partial<GlassOptions>): void;
+    /** Set by a group: called whenever what the filter draws may have changed. */
+    onChange: (() => void) | null;
+    /** Counts the changes, so a group can tell whether anything changed since it last looked. */
+    version: number;
+    private batched;
+    private wanted;
+    private changed;
+    private setBackdrop;
+    /** A group draws (true) or stops drawing (false) this element's glass: its own filter goes off or back on, at once. */
+    setBatched(on: boolean): void;
+    /**
+     * What a group needs to draw this element's glass in a filter of its own, or null if it can't: glass that doesn't
+     * bend, a free shape, a dome's per-channel maps, noise (it's in the filter's coordinates), CSS filters in front, or no
+     * map yet. `filters` are the element's own filter elements (the group copies them), `image` its map, `side` how far
+     * the map is stashed beside the element, `margin` how far the filters reach past it.
+     */
+    batchSource(): {
+        filters: SVGFilterElement[];
+        image: SVGFEImageElement;
+        table: SVGFEComponentTransferElement;
+        shift: SVGFEOffsetElement | null;
+        side: number;
+        margin: number;
+    } | null;
     /** What, in the options, decides which filter nodes there are. */
     private structureKey;
     /** A shape the element's own (rounded) box can't clip: the filter masks itself, and light and shadow are an image. */
