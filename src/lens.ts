@@ -25,6 +25,8 @@ import { fromCss, fromData, resolve, type Environment, type GlassOptions } from 
 // px. Small glass gets a finer map, which is cheap, and its corners are most of it.
 const MAP_PIXELS = 4096;
 const mapScale = (w: number, h: number, moving: boolean) => Math.min(Math.max(Math.sqrt(MAP_PIXELS / (w * h)), 0.08), 0.5) / (moving ? 2 : 1);
+// How far filter 2's region reaches past the element, px (less than any map's margin: see place())
+const EDGE = 2;
 // How long a size has to hold before the map and light are drawn for it, ms.
 const SETTLE = 120;
 // Keeps the green channel only, and so on: the fringe's three passes are added up.
@@ -147,11 +149,61 @@ export class Lens {
       this.build();
       this.measure();
       this.bindPointer();
+      this.changed();
       return;
     }
     this.live();
     const pointer = (o: GlassOptions) => [o.floating, o.button, o.interactive, o.press].join();
     if (pointer(prev) !== pointer(this.options)) this.bindPointer();
+    this.changed();
+  }
+
+  // ---------------------------------------------------------------- groups (glassGroup)
+
+  /** Set by a group: called whenever what the filter draws may have changed. */
+  onChange: (() => void) | null = null;
+  /** Counts the changes, so a group can tell whether anything changed since it last looked. */
+  version = 0;
+  // while a group draws this element's glass, the element's own backdrop-filter is off
+  private batched = false;
+  private wanted = 'none';
+
+  private changed() {
+    this.version++;
+    this.onChange?.();
+  }
+
+  private setBackdrop(v: string) {
+    this.wanted = v;
+    const css = this.batched ? 'none' : v;
+    if (this.el.style.getPropertyValue('backdrop-filter') !== css) this.el.style.setProperty('backdrop-filter', css);
+  }
+
+  /** A group draws (true) or stops drawing (false) this element's glass: its own filter goes off or back on, at once. */
+  setBatched(on: boolean) {
+    if (on === this.batched) return;
+    this.batched = on;
+    this.setBackdrop(this.wanted);
+  }
+
+  /**
+   * What a group needs to draw this element's glass in a filter of its own, or null if it can't: glass that doesn't
+   * bend, a free shape, a dome's per-channel maps, noise (it's in the filter's coordinates), CSS filters in front, or no
+   * map yet. `filters` are the element's own filter elements (the group copies them), `image` its map, `side` how far
+   * the map is stashed beside the element, `margin` how far the filters reach past it.
+   */
+  batchSource(): { filters: SVGFilterElement[]; image: SVGFEImageElement; table: SVGFEComponentTransferElement; shift: SVGFEOffsetElement | null; side: number; margin: number } | null {
+    const o = this.options;
+    if (!this.bends || this.maps.length !== 1 || this.isFree() || this.shape || o.backdrop || o.distortion > 0 || this.amount() <= 0 || !this.main) return null;
+    const map = this.maps[0];
+    if (!map.image.getAttribute('href') || !map.rimPx) return null;
+    const first = this.pre ?? this.main;
+    return {
+      filters: this.pre ? [this.pre, this.main] : [this.main],
+      image: map.image, table: map.table, shift: map.shift,
+      side: map.shift ? -Number(map.shift.getAttribute('dx')) : 0,
+      margin: -Number(first.getAttribute('x')),
+    };
   }
 
   /** What, in the options, decides which filter nodes there are. */
@@ -178,7 +230,7 @@ export class Lens {
   private live() {
     const o = this.options, s = this.amount();
     if (!this.bends) {
-      this.el.style.setProperty('backdrop-filter', o.variant === 'identity' || s <= 0 ? 'none' : this.cssBackdrop());
+      this.setBackdrop(o.variant === 'identity' || s <= 0 ? 'none' : this.cssBackdrop());
     } else {
       this.recolour();
       this.blurNode?.setAttribute('stdDeviation', (blurSigma(o.blurAmount) * s).toFixed(2));
@@ -189,7 +241,7 @@ export class Lens {
         this.passes.forEach((p, k) => (p.spread = 1 + (k - 1) * a));
       }
       this.applyStrength();
-      this.el.style.setProperty('backdrop-filter', s > 0 ? this.filterCss : 'none');
+      this.setBackdrop(s > 0 ? this.filterCss : 'none');
     }
     this.layout(true);
   }
@@ -249,7 +301,7 @@ export class Lens {
     if (!this.bends) {
       // No bending: the frost and colour as CSS functions (also what browsers other than Chromium get).
       this.filterCss = o.variant === 'identity' ? 'none' : this.cssBackdrop();
-      this.el.style.setProperty('backdrop-filter', this.amount() > 0 ? this.filterCss : 'none');
+      this.setBackdrop(this.amount() > 0 ? this.filterCss : 'none');
       return;
     }
 
@@ -351,7 +403,7 @@ export class Lens {
     }
     if (o.backdrop) this.filterCss = `${o.backdrop} ${this.filterCss}`;
     // at strength 0 there's no filter at all, so glass that's off costs nothing
-    this.el.style.setProperty('backdrop-filter', this.amount() > 0 ? this.filterCss : 'none');
+    this.setBackdrop(this.amount() > 0 ? this.filterCss : 'none');
   }
 
   /** The colour matrix: saturation, brightness (baseBrightness, 6% as liquidglass's glass is, plus a button's hover) and tint. */
@@ -400,10 +452,13 @@ export class Lens {
     const { w, h } = this, m = this.margin;
     for (const f of [this.pre, this.main]) if (f) setAttrs(f, { x: 0, y: 0, width: w, height: h });
     if (!this.maps.length) return;
-    // The rim samples the backdrop up to `reach` px past the edge. Filter 2 reads filter 1's output, which is cropped
-    // to filter 1's region (transparent past it): both reach that far, and the stashed maps sit beyond.
+    // The rim samples the backdrop up to `reach` px past the edge: filter 1, which smooths it, reaches that far, and
+    // the stashed maps sit beyond. Filter 2 reads all of filter 1's output whatever its own region, which only has to
+    // cover the element (and a little more, for its antialiased edge): each shifted read of a stashed map then falls
+    // inside the map's own margin, and Skia samples it in place. A read that reached past filter 1's region would be
+    // copied out first, a pass per read.
     const e = Math.max(m, this.reach);
-    if (this.pre) setAttrs(this.main!, { x: -e, y: -e, width: w + 2 * e, height: h + 2 * e });
+    if (this.pre) setAttrs(this.main!, { x: -EDGE, y: -EDGE, width: w + 2 * EDGE, height: h + 2 * EDGE });
     const stashed = !!this.pre, slot = Math.ceil(w + m + e) + 8;
     const r = this.region.w ? this.region : { x: 0, y: 0, w, h };
     this.maps.forEach((map, i) => {
@@ -610,6 +665,7 @@ export class Lens {
   // ---------------------------------------------------------------- strength, hover, press, drag
 
   private applyStrength() {
+    this.changed();
     const k = this.bulge * this.amount() * (this.unitMaps ? this.options.refraction : 1);
     let most = 0;
     for (const { node, spread, map } of this.passes) {
@@ -661,6 +717,7 @@ export class Lens {
 
   private recolour() {
     this.colour?.setAttribute('values', this.matrix().join(' '));
+    this.changed();
   }
 
   private bindPointer() {

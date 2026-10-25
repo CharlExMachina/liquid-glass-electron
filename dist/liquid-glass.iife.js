@@ -29,6 +29,7 @@ var LiquidGlass = (() => {
     getEnvironment: () => getEnvironment,
     glass: () => glass,
     glassButton: () => glassButton,
+    glassGroup: () => glassGroup,
     glassOf: () => glassOf,
     materialize: () => materialize,
     morph: () => morph,
@@ -728,6 +729,7 @@ var LiquidGlass = (() => {
   // src/lens.ts
   var MAP_PIXELS = 4096;
   var mapScale = (w, h, moving) => Math.min(Math.max(Math.sqrt(MAP_PIXELS / (w * h)), 0.08), 0.5) / (moving ? 2 : 1);
+  var EDGE = 2;
   var SETTLE = 120;
   var KEEP = ["1 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 1 0", "0 0 0 0 0  0 1 0 0 0  0 0 0 0 0  0 0 0 1 0", "0 0 0 0 0  0 0 0 0 0  0 0 1 0 0  0 0 0 1 0"];
   var nextId = 0;
@@ -818,11 +820,57 @@ var LiquidGlass = (() => {
         this.build();
         this.measure();
         this.bindPointer();
+        this.changed();
         return;
       }
       this.live();
       const pointer = (o) => [o.floating, o.button, o.interactive, o.press].join();
       if (pointer(prev) !== pointer(this.options)) this.bindPointer();
+      this.changed();
+    }
+    // ---------------------------------------------------------------- groups (glassGroup)
+    /** Set by a group: called whenever what the filter draws may have changed. */
+    onChange = null;
+    /** Counts the changes, so a group can tell whether anything changed since it last looked. */
+    version = 0;
+    // while a group draws this element's glass, the element's own backdrop-filter is off
+    batched = false;
+    wanted = "none";
+    changed() {
+      this.version++;
+      this.onChange?.();
+    }
+    setBackdrop(v) {
+      this.wanted = v;
+      const css = this.batched ? "none" : v;
+      if (this.el.style.getPropertyValue("backdrop-filter") !== css) this.el.style.setProperty("backdrop-filter", css);
+    }
+    /** A group draws (true) or stops drawing (false) this element's glass: its own filter goes off or back on, at once. */
+    setBatched(on) {
+      if (on === this.batched) return;
+      this.batched = on;
+      this.setBackdrop(this.wanted);
+    }
+    /**
+     * What a group needs to draw this element's glass in a filter of its own, or null if it can't: glass that doesn't
+     * bend, a free shape, a dome's per-channel maps, noise (it's in the filter's coordinates), CSS filters in front, or no
+     * map yet. `filters` are the element's own filter elements (the group copies them), `image` its map, `side` how far
+     * the map is stashed beside the element, `margin` how far the filters reach past it.
+     */
+    batchSource() {
+      const o = this.options;
+      if (!this.bends || this.maps.length !== 1 || this.isFree() || this.shape || o.backdrop || o.distortion > 0 || this.amount() <= 0 || !this.main) return null;
+      const map = this.maps[0];
+      if (!map.image.getAttribute("href") || !map.rimPx) return null;
+      const first = this.pre ?? this.main;
+      return {
+        filters: this.pre ? [this.pre, this.main] : [this.main],
+        image: map.image,
+        table: map.table,
+        shift: map.shift,
+        side: map.shift ? -Number(map.shift.getAttribute("dx")) : 0,
+        margin: -Number(first.getAttribute("x"))
+      };
     }
     /** What, in the options, decides which filter nodes there are. */
     structureKey() {
@@ -845,7 +893,7 @@ var LiquidGlass = (() => {
     live() {
       const o = this.options, s = this.amount();
       if (!this.bends) {
-        this.el.style.setProperty("backdrop-filter", o.variant === "identity" || s <= 0 ? "none" : this.cssBackdrop());
+        this.setBackdrop(o.variant === "identity" || s <= 0 ? "none" : this.cssBackdrop());
       } else {
         this.recolour();
         this.blurNode?.setAttribute("stdDeviation", (blurSigma(o.blurAmount) * s).toFixed(2));
@@ -856,7 +904,7 @@ var LiquidGlass = (() => {
           this.passes.forEach((p, k) => p.spread = 1 + (k - 1) * a);
         }
         this.applyStrength();
-        this.el.style.setProperty("backdrop-filter", s > 0 ? this.filterCss : "none");
+        this.setBackdrop(s > 0 ? this.filterCss : "none");
       }
       this.layout(true);
     }
@@ -906,7 +954,7 @@ var LiquidGlass = (() => {
       const sigma = blurSigma(o.blurAmount);
       if (!this.bends) {
         this.filterCss = o.variant === "identity" ? "none" : this.cssBackdrop();
-        this.el.style.setProperty("backdrop-filter", this.amount() > 0 ? this.filterCss : "none");
+        this.setBackdrop(this.amount() > 0 ? this.filterCss : "none");
         return;
       }
       const region = { filterUnits: "userSpaceOnUse", primitiveUnits: "userSpaceOnUse", "color-interpolation-filters": "sRGB", x: 0, y: 0, width: 1, height: 1 };
@@ -938,7 +986,7 @@ var LiquidGlass = (() => {
       const fringes = perChannel ? [1, 0, -1].map((k) => k * o.chromAberration) : [0];
       const mergeNodes = [svgEl("feMergeNode", { in: src })];
       fringes.forEach((f, i) => {
-        const image = svgEl("feImage", { preserveAspectRatio: "none", x: 0, y: 0, width: 1, height: 1, result: `map${i}raw` });
+        const image2 = svgEl("feImage", { preserveAspectRatio: "none", x: 0, y: 0, width: 1, height: 1, result: `map${i}raw` });
         const table = svgEl(
           "feComponentTransfer",
           { in: `map${i}raw`, result: fringe ? `side${i}` : `map${i}` },
@@ -946,14 +994,14 @@ var LiquidGlass = (() => {
           svgEl("feFuncG", { type: "table", tableValues: "0 1" }),
           ...this.isFree() ? [svgEl("feFuncB", { type: "table", tableValues: "0 1" })] : []
         );
-        first.append(image, table);
+        first.append(image2, table);
         let shift = null;
         if (fringe) {
           mergeNodes.push(svgEl("feMergeNode", { in: `side${i}` }));
           shift = svgEl("feOffset", { in: "SourceGraphic", dx: 0, dy: 0, result: `map${i}` });
           second.append(shift);
         }
-        this.maps.push({ image, table, shift, fringe: f, rimPx: 0 });
+        this.maps.push({ image: image2, table, shift, fringe: f, rimPx: 0 });
       });
       if (fringe) {
         first.append(svgEl("feMerge", {}, ...mergeNodes));
@@ -999,7 +1047,7 @@ var LiquidGlass = (() => {
         this.filterCss = `url(#${first.id})`;
       }
       if (o.backdrop) this.filterCss = `${o.backdrop} ${this.filterCss}`;
-      this.el.style.setProperty("backdrop-filter", this.amount() > 0 ? this.filterCss : "none");
+      this.setBackdrop(this.amount() > 0 ? this.filterCss : "none");
     }
     /** The colour matrix: saturation, brightness (baseBrightness, 6% as liquidglass's glass is, plus a button's hover) and tint. */
     matrix() {
@@ -1041,7 +1089,7 @@ var LiquidGlass = (() => {
       for (const f of [this.pre, this.main]) if (f) setAttrs(f, { x: 0, y: 0, width: w, height: h });
       if (!this.maps.length) return;
       const e = Math.max(m, this.reach);
-      if (this.pre) setAttrs(this.main, { x: -e, y: -e, width: w + 2 * e, height: h + 2 * e });
+      if (this.pre) setAttrs(this.main, { x: -EDGE, y: -EDGE, width: w + 2 * EDGE, height: h + 2 * EDGE });
       const stashed = !!this.pre, slot = Math.ceil(w + m + e) + 8;
       const r = this.region.w ? this.region : { x: 0, y: 0, w, h };
       this.maps.forEach((map, i) => {
@@ -1218,11 +1266,11 @@ var LiquidGlass = (() => {
      */
     applyLight() {
       const light = this.lightUrl, s = this.amount();
-      const image = (url, empty) => s >= 1 ? `url(${url})` : `-webkit-cross-fade(url(${empty}), url(${url}), ${+(s * 100).toFixed(2)}%)`;
+      const image2 = (url, empty) => s >= 1 ? `url(${url})` : `-webkit-cross-fade(url(${empty}), url(${url}), ${+(s * 100).toFixed(2)}%)`;
       if (light?.field) {
         const b = light.box, at = `${b.x}px ${b.y}px`, size = `${b.w}px ${b.h}px`;
         for (const [el, url] of [[this.el, light.url], [this.shape.shadowEl, light.shadow]]) {
-          Object.assign(el.style, { backgroundImage: image(url, light.empty), backgroundPosition: at, backgroundSize: size, backgroundRepeat: "no-repeat" });
+          Object.assign(el.style, { backgroundImage: image2(url, light.empty), backgroundPosition: at, backgroundSize: size, backgroundRepeat: "no-repeat" });
         }
         Object.assign(this.el.style, { maskImage: `url(${light.mask})`, maskPosition: at, maskSize: size, maskRepeat: "no-repeat" });
         return;
@@ -1235,18 +1283,19 @@ var LiquidGlass = (() => {
         this.el.style.setProperty("border-style", "solid");
         this.el.style.setProperty("border-width", "0");
       }
-      this.el.style.setProperty("border-image", light.free !== void 0 ? `${image(light.url, light.empty)} 0 fill / 0 / ${light.free}px stretch` : `${image(light.url, light.empty)} ${light.slice} fill / ${light.edge}px`);
+      this.el.style.setProperty("border-image", light.free !== void 0 ? `${image2(light.url, light.empty)} 0 fill / 0 / ${light.free}px stretch` : `${image2(light.url, light.empty)} ${light.slice} fill / ${light.edge}px`);
     }
     // ---------------------------------------------------------------- strength, hover, press, drag
     applyStrength() {
+      this.changed();
       const k = this.bulge * this.amount() * (this.unitMaps ? this.options.refraction : 1);
-      let most = 0;
+      let most2 = 0;
       for (const { node, spread, map } of this.passes) {
         const scale = 2 * (this.maps[map]?.rimPx ?? 0) * spread * k;
         node.setAttribute("scale", String(+scale.toFixed(3)));
-        most = Math.max(most, Math.abs(scale) / 2);
+        most2 = Math.max(most2, Math.abs(scale) / 2);
       }
-      const reach = Math.ceil((most + 1) / 4) * 4;
+      const reach = Math.ceil((most2 + 1) / 4) * 4;
       if (this.pre && reach > this.reach) {
         this.reach = reach;
         this.place();
@@ -1285,6 +1334,7 @@ var LiquidGlass = (() => {
     }
     recolour() {
       this.colour?.setAttribute("values", this.matrix().join(" "));
+      this.changed();
     }
     bindPointer() {
       for (const f of this.off) f();
@@ -1635,6 +1685,440 @@ var LiquidGlass = (() => {
     }
   };
 
+  // src/group.ts
+  var SETTLE2 = 120;
+  var nextGroup = 0;
+  var EVENTS = ["transitionrun", "transitionend", "transitioncancel", "animationstart", "animationend", "animationcancel"];
+  var GlassGroup = class {
+    id = `lgg${++nextGroup}`;
+    layer;
+    host;
+    members = [];
+    pre = null;
+    main = null;
+    atlas = null;
+    key = "";
+    rendered = "";
+    batch = /* @__PURE__ */ new Set();
+    queued = false;
+    settleTimer = 0;
+    building = null;
+    // where each member that waits to join was last seen: the image is drawn once none has moved for SETTLE ms
+    moved = /* @__PURE__ */ new Map();
+    sizes;
+    parent = null;
+    savedParentPosition = null;
+    destroyed = false;
+    clip = "";
+    filter = "";
+    // anything may have changed (the window, the parent's size): every member is measured again
+    onEvent = () => {
+      for (const m of this.members) m.look = null;
+      this.schedule();
+    };
+    constructor(host2) {
+      this.host = host2;
+      this.layer = document.createElement("div");
+      this.layer.setAttribute("aria-hidden", "true");
+      this.layer.dataset.lgLayer = "group";
+      this.layer.style.cssText = "position:absolute;left:0;top:0;width:0;height:0;pointer-events:none;margin:0;padding:0;border:0;";
+      this.sizes = new ResizeObserver(this.onEvent);
+      addEventListener("resize", this.onEvent);
+    }
+    /** The members, in no particular order. */
+    get elements() {
+      return this.members.map((m) => m.el);
+    }
+    has(el) {
+      return this.members.some((m) => m.el === el);
+    }
+    add(el) {
+      const lens = this.host.lensOf(el);
+      if (!lens || this.has(el)) return;
+      const m = { el, lens, version: -1, source: null, look: null, saved: el.style.getPropertyValue("isolation"), observer: null, touch: () => {
+        m.look = null;
+        if (this.batch.has(el)) this.schedule();
+        else this.later();
+      } };
+      lens.onChange = m.touch;
+      m.observer = new MutationObserver(m.touch);
+      m.observer.observe(el, { attributes: true, attributeFilter: ["style", "class"] });
+      for (const t of EVENTS) el.addEventListener(t, m.touch);
+      this.sizes.observe(el);
+      this.members.push(m);
+      this.schedule();
+    }
+    remove(el) {
+      const i = this.members.findIndex((m2) => m2.el === el);
+      if (i < 0) return;
+      const [m] = this.members.splice(i, 1);
+      this.release(m);
+      this.batch.delete(el);
+      this.schedule();
+    }
+    release(m) {
+      m.lens.onChange = null;
+      m.lens.setBatched(false);
+      m.observer.disconnect();
+      for (const t of EVENTS) m.el.removeEventListener(t, m.touch);
+      this.sizes.unobserve(m.el);
+      if (m.saved) m.el.style.setProperty("isolation", m.saved);
+      else m.el.style.removeProperty("isolation");
+    }
+    lazy = 0;
+    waiting = 0;
+    /** Look at the members again once nothing has changed for a moment. */
+    later() {
+      clearTimeout(this.lazy);
+      this.lazy = window.setTimeout(() => {
+        this.lazy = 0;
+        this.schedule();
+      }, SETTLE2);
+    }
+    /** Look at the members again after the next change, before the frame is drawn. */
+    schedule() {
+      if (this.queued || this.destroyed) return;
+      this.queued = true;
+      queueMicrotask(() => {
+        this.queued = false;
+        if (!this.destroyed) this.reconcile();
+      });
+    }
+    /** Resolves once every member's map and light are on screen and the group's image has caught up. */
+    async whenDrawn() {
+      for (let i = 0; i < 100; i++) {
+        await Promise.all(this.members.map((m) => m.lens.whenDrawn()));
+        await new Promise((r) => requestAnimationFrame(r));
+        if (this.building) await this.building;
+        else if (!this.settleTimer && !this.lazy && !this.queued && !this.waiting) return;
+        else await new Promise((r) => setTimeout(r, SETTLE2 / 2));
+      }
+    }
+    destroy() {
+      this.destroyed = true;
+      clearTimeout(this.settleTimer);
+      clearTimeout(this.lazy);
+      for (const m of this.members) this.release(m);
+      this.members = [];
+      this.sizes.disconnect();
+      removeEventListener("resize", this.onEvent);
+      this.layer.remove();
+      this.pre?.remove();
+      this.main?.remove();
+      if (this.parent && this.savedParentPosition !== null) this.parent.style.position = this.savedParentPosition;
+    }
+    // ---------------------------------------------------------------- which members the layer draws
+    /** The key of what a member's filter does, everything but where its map is. */
+    sourceOf(m) {
+      if (m.version === m.lens.version && m.source) return m.source;
+      m.version = m.lens.version;
+      const src = m.lens.batchSource();
+      if (!src) return m.source = null;
+      const parts = [];
+      for (const f of src.filters) {
+        for (const n of f.querySelectorAll("*")) {
+          parts.push(n.tagName);
+          for (const a of n.attributes) {
+            if (n === src.image && (a.name === "x" || a.name === "y" || a.name === "width" || a.name === "height" || a.name === "href")) continue;
+            if (n === src.shift && a.name === "dx") continue;
+            if (n.parentNode === src.table && a.name === "tableValues") continue;
+            if (n.tagName === "feDisplacementMap" && a.name === "scale") {
+              parts.push(`scale=${Number(a.value).toFixed(2)}`);
+              continue;
+            }
+            parts.push(`${a.name}=${a.value}`);
+          }
+        }
+        parts.push("|");
+      }
+      parts.push(`margin=${src.margin}`);
+      const num = (a) => Number(src.image.getAttribute(a));
+      const tables = [...src.table.children].map((f) => f.getAttribute("tableValues")).join("|");
+      return m.source = { key: parts.join(" "), tables, src, map: { x: num("x") - src.side, y: num("y"), w: num("width"), h: num("height") }, href: src.image.getAttribute("href") };
+    }
+    /**
+     * Whether the layer can draw this member's glass for it: nothing on the element that the glass would be painted
+     * through (opacity, filter, mask, clip-path, blending: those apply to an element's backdrop filter too), no running
+     * animation or transition, no transform but a translation, a box of its own size, the same parent as the others.
+     */
+    eligible(el, cs, rect) {
+      if (el.parentElement !== this.parent || !rect.width || !rect.height) return false;
+      if (Math.abs(rect.width - el.offsetWidth) > 0.5 || Math.abs(rect.height - el.offsetHeight) > 0.5) return false;
+      if (cs.position === "sticky" || cs.opacity !== "1" || cs.filter !== "none" || cs.mixBlendMode !== "normal" || cs.maskImage !== "none" || cs.clipPath !== "none") return false;
+      if (cs.rotate !== "none" || cs.scale !== "none" && cs.scale !== "1") return false;
+      if (cs.transform !== "none" && !/^matrix\(1, 0, 0, 1, [-\d.e]+, [-\d.e]+\)$/.test(cs.transform)) return false;
+      if (cs.visibility !== "visible" || cs.display === "none" || cs.display === "contents") return false;
+      return !el.getAnimations().some((a) => a.playState === "running");
+    }
+    reconcile() {
+      this.parent = this.members[0]?.el.parentElement ?? null;
+      if (!this.parent) return;
+      const lr = this.layer.getBoundingClientRect();
+      const look = this.members.map((m) => {
+        const source = this.sourceOf(m);
+        if (!source) return { m, source, ok: false, fixed: false, z: "", box: null, clip: "" };
+        if (!m.look || m.look.version !== m.version) {
+          const cs = getComputedStyle(m.el), rect = m.el.getBoundingClientRect();
+          const box = { x: rect.left - lr.left, y: rect.top - lr.top, w: rect.width, h: rect.height };
+          m.look = {
+            version: m.version,
+            ok: this.eligible(m.el, cs, rect),
+            fixed: cs.position === "fixed",
+            z: cs.zIndex,
+            box,
+            // its own rounded box, as Chromium clips its backdrop filter
+            clip: roundedBox(box.x, box.y, box.w, box.h, cs)
+          };
+        }
+        return { m, source, ...m.look };
+      });
+      const counts = /* @__PURE__ */ new Map();
+      for (const l of look) if (l.ok) counts.set(l.source.key, (counts.get(l.source.key) ?? 0) + 1);
+      const key = most(counts, this.key);
+      const first = look.find((l) => l.ok && l.source.key === key);
+      const candidates = look.filter((l) => l.ok && l.source.key === key && l.fixed === first.fixed && l.z === first.z);
+      const boxes = [];
+      const sharing = candidates.filter((l) => {
+        const r = l.box;
+        if (boxes.some((b) => r.x < b.x + b.w && b.x < r.x + r.w && r.y < b.y + b.h && b.y < r.y + r.h)) return false;
+        boxes.push(r);
+        return true;
+      });
+      const atlas = this.atlas;
+      const sig = (l) => placeSig(l.source, l.box);
+      const inLayer = atlas && first && atlas.fixed === first.fixed ? sharing.filter((l) => atlas.placed.get(l.m.el) === sig(l)) : [];
+      const waiting = sharing.filter((l) => !inLayer.includes(l));
+      this.waiting = sharing.length > 1 ? waiting.length : 0;
+      let restart = false;
+      for (const l of waiting) {
+        const s = sig(l);
+        if (this.moved.get(l.m.el) !== s) {
+          this.moved.set(l.m.el, s);
+          restart = true;
+        }
+      }
+      for (const el of this.moved.keys()) if (!waiting.some((l) => l.m.el === el)) this.moved.delete(el);
+      if (waiting.length && (restart || !this.settleTimer) && !this.building && sharing.length > 1) {
+        clearTimeout(this.settleTimer);
+        this.settleTimer = window.setTimeout(() => {
+          this.settleTimer = 0;
+          this.building = this.build(key).finally(() => {
+            this.building = null;
+            for (const m of this.members) m.look = null;
+            this.schedule();
+          });
+        }, SETTLE2);
+      }
+      const batch = inLayer.length > 1 ? inLayer : [];
+      this.key = key;
+      if (batch.length) {
+        const src = batch[0].source.src, id = `${key}|${src.side}|${devicePixelRatio}|${this.atlasId(atlas)}`;
+        if (id !== this.rendered) {
+          this.rendered = id;
+          this.render(src, atlas);
+        }
+      }
+      this.apply(new Set(batch.map((l) => l.m.el)), batch.map((l) => l.clip).join(" "));
+    }
+    atlasIds = /* @__PURE__ */ new WeakMap();
+    atlasId(a) {
+      let n = this.atlasIds.get(a);
+      if (n === void 0) this.atlasIds.set(a, n = ++atlasCount);
+      return n;
+    }
+    /** Who the layer draws now: its clip, and the members' own filters off (or back on), in one go. */
+    apply(now, path) {
+      const layer = this.layer;
+      for (const m of this.members) {
+        const on = now.has(m.el);
+        m.lens.setBatched(on);
+        const iso = on ? "isolate" : m.saved;
+        if (m.el.style.getPropertyValue("isolation") !== iso) {
+          if (iso) m.el.style.setProperty("isolation", iso);
+          else m.el.style.removeProperty("isolation");
+        }
+      }
+      this.batch = now;
+      const filter = !now.size ? "none" : this.pre ? `url(#${this.pre.id}) url(#${this.main.id})` : `url(#${this.main.id})`;
+      if (now.size && path !== this.clip) {
+        this.clip = path;
+        layer.style.clipPath = `path('${path}')`;
+      }
+      if (filter !== this.filter) {
+        this.filter = filter;
+        layer.style.backdropFilter = filter;
+      }
+    }
+    // ---------------------------------------------------------------- the layer's image and filter
+    /** Draw the members that share a filter into the group's image, and put the layer over them. */
+    async build(key) {
+      const parent = this.parent;
+      if (!parent) return;
+      const plan = this.members.map((m) => ({ m, source: this.sourceOf(m) })).filter((p) => p.source && p.source.key === key);
+      const looks = plan.map((p) => ({ ...p, cs: getComputedStyle(p.m.el), rect: p.m.el.getBoundingClientRect() })).filter((l) => this.eligible(l.m.el, l.cs, l.rect));
+      if (looks.length < 2) return;
+      const fixed = looks[0].cs.position === "fixed";
+      const x0 = Math.min(...looks.map((l) => l.rect.left)), y0 = Math.min(...looks.map((l) => l.rect.top));
+      const w = Math.max(...looks.map((l) => l.rect.right)) - x0, h = Math.max(...looks.map((l) => l.rect.bottom)) - y0;
+      const imgs = await Promise.all(looks.map((l) => image(l.source.href)));
+      if (this.destroyed) return;
+      const items = looks.map((l, i) => {
+        const map = l.source.map, img = imgs[i];
+        return { img, x: l.rect.left - x0 + map.x, y: l.rect.top - y0 + map.y, w: map.w, h: map.h, kx: img.naturalWidth / map.w, ky: img.naturalHeight / map.h, tables: l.source.tables, table: l.source.src.table };
+      });
+      const classes = classify(items).map((idx) => ({ kx: items[idx[0]].kx, ky: items[idx[0]].ky, table: items[idx[0]].table.cloneNode(true), items: idx.map((i) => items[i]) }));
+      const drawn = await Promise.all(classes.map(async (c) => {
+        const left = Math.min(...c.items.map((i) => i.x)), top = Math.min(...c.items.map((i) => i.y));
+        const cw = Math.round(Math.max(...c.items.map((i) => (i.x - left + i.w) * c.kx))), ch = Math.round(Math.max(...c.items.map((i) => (i.y - top + i.h) * c.ky)));
+        const cv = document.createElement("canvas");
+        cv.width = Math.max(cw, 1);
+        cv.height = Math.max(ch, 1);
+        const ctx = cv.getContext("2d");
+        ctx.imageSmoothingEnabled = false;
+        for (const i of c.items) ctx.drawImage(i.img, Math.round((i.x - left) * c.kx), Math.round((i.y - top) * c.ky));
+        const url = cv.toDataURL();
+        await predecode(url);
+        return { url, x: left, y: top, w: cv.width / c.kx, h: cv.height / c.ky, table: c.table };
+      }));
+      if (this.destroyed) return;
+      const mapMargin = Math.max(...looks.map((l) => -l.source.map.y));
+      if (!fixed && getComputedStyle(parent).position === "static" && looks.every((l) => l.cs.position === "static" || l.cs.position === "relative")) {
+        this.savedParentPosition ??= parent.style.position;
+        parent.style.position = "relative";
+      }
+      const placed = /* @__PURE__ */ new Map();
+      this.atlas = { w, h, fixed, placed, classes: drawn, mapMargin };
+      this.placeLayer(looks[0].cs, fixed, x0, y0, w, h);
+      const lr = this.layer.getBoundingClientRect();
+      for (const l of looks) {
+        const r = l.m.el.getBoundingClientRect();
+        if (Math.abs(r.left - lr.left - (l.rect.left - x0)) > 0.01 || Math.abs(r.top - lr.top - (l.rect.top - y0)) > 0.01) continue;
+        placed.set(l.m.el, placeSig(l.source, { x: r.left - lr.left, y: r.top - lr.top, w: r.width, h: r.height }));
+      }
+    }
+    /** The layer: the previous sibling of the first member, as big as the members' bounds, positioned as they are. */
+    placeLayer(cs, fixed, x, y, w, h) {
+      const layer = this.layer, first = this.members.map((m) => m.el).filter((el) => el.parentElement === this.parent).sort((a, b) => a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1)[0];
+      if (first && layer.nextElementSibling !== first) first.before(layer);
+      layer.style.position = fixed ? "fixed" : "absolute";
+      layer.style.zIndex = cs.position === "static" ? "auto" : cs.zIndex;
+      Object.assign(layer.style, { width: `${w}px`, height: `${h}px` });
+      const r = layer.getBoundingClientRect();
+      const cx = r.left - (parseFloat(layer.style.left) || 0), cy = r.top - (parseFloat(layer.style.top) || 0);
+      Object.assign(layer.style, { left: `${x - cx}px`, top: `${y - cy}px` });
+    }
+    /** The layer's filter: the members' own, with the group's image in place of a member's map. */
+    render(src, atlas) {
+      const defs2 = filterDefs();
+      const wantPre = src.filters.length === 2;
+      const make = (id) => {
+        const f = svgEl("filter", { id });
+        defs2.append(f);
+        return f;
+      };
+      this.main ??= make(this.id);
+      if (wantPre && !this.pre) this.pre = make(`${this.id}a`);
+      if (!wantPre && this.pre) {
+        this.pre.remove();
+        this.pre = null;
+      }
+      const filters = wantPre ? [this.pre, this.main] : [this.main];
+      src.filters.forEach((own, i) => {
+        const f = filters[i];
+        for (const a of own.attributes) if (a.name !== "id") f.setAttribute(a.name, a.value);
+        f.replaceChildren(...[...own.children].map((n) => n.cloneNode(true)));
+      });
+      const e = src.margin, m = atlas.mapMargin;
+      let side = 0;
+      if (src.shift) {
+        side = Math.ceil(atlas.w + m + e) + 8;
+        const d = devicePixelRatio || 1;
+        for (let k = 0; k < 64 && Math.abs(side * d - Math.round(side * d)) > 1e-4; k++) side++;
+      }
+      const first = filters[0];
+      const at = [...src.filters[0].children].indexOf(src.image), tableAt = [...src.filters[0].children].indexOf(src.table);
+      const image2 = first.children[at], table = first.children[tableAt];
+      const raw = image2.getAttribute("result"), out = table.getAttribute("result");
+      const nodes = [];
+      const merge = svgEl("feMerge", { result: out });
+      atlas.classes.forEach((c, i) => {
+        const im = image2.cloneNode(true);
+        setAttrs(im, { x: side + c.x, y: c.y, width: c.w, height: c.h, href: c.url, result: `${raw}_${i}` });
+        const t = c.table.cloneNode(true);
+        setAttrs(t, { in: `${raw}_${i}`, result: atlas.classes.length > 1 ? `${out}_${i}` : out });
+        nodes.push(im, t);
+        merge.append(svgEl("feMergeNode", { in: `${out}_${i}` }));
+      });
+      if (atlas.classes.length > 1) nodes.push(merge);
+      table.remove();
+      image2.replaceWith(...nodes);
+      if (src.shift) {
+        const shiftAt2 = [...src.filters[1].children].indexOf(src.shift);
+        filters[1].children[shiftAt2].setAttribute("dx", String(-side));
+      }
+      if (wantPre) {
+        const edge = -Number(src.filters[1].getAttribute("x"));
+        setAttrs(this.main, { x: -edge, y: -edge, width: atlas.w + 2 * edge, height: atlas.h + 2 * edge });
+        setAttrs(this.pre, { x: -e, y: -e, width: side + atlas.w + m + e, height: atlas.h + 2 * e });
+      } else {
+        setAttrs(this.main, { x: -e, y: -e, width: atlas.w + m + e, height: atlas.h + 2 * e });
+      }
+    }
+  };
+  var atlasCount = 0;
+  function classify(items) {
+    const near = (v) => Math.abs(v - Math.round(v)) < 1e-4;
+    const classes = [];
+    const apart = (a, b) => {
+      const px = 1 / a.kx, py = 1 / a.ky;
+      return a.x + a.w + px <= b.x - px || b.x + b.w + px <= a.x - px || a.y + a.h + py <= b.y - py || b.y + b.h + py <= a.y - py;
+    };
+    items.forEach((it, i) => {
+      const c = classes.find((c2) => {
+        const o = items[c2[0]];
+        return o.tables === it.tables && Math.abs(o.kx - it.kx) < 1e-9 && Math.abs(o.ky - it.ky) < 1e-9 && near((it.x - o.x) * it.kx) && near((it.y - o.y) * it.ky) && c2.every((j) => apart(items[j], it));
+      });
+      if (c) c.push(i);
+      else classes.push([i]);
+    });
+    return classes;
+  }
+  function placeSig(s, b) {
+    return `${s.href}|${b.x.toFixed(2)},${b.y.toFixed(2)},${b.w.toFixed(2)},${b.h.toFixed(2)},${s.map.x},${s.map.y},${s.map.w},${s.map.h}`;
+  }
+  function most(counts, current) {
+    let key = current, best = counts.get(current) ?? 0;
+    for (const [k, n] of counts) if (n > best) [key, best] = [k, n];
+    return key;
+  }
+  var images = /* @__PURE__ */ new Map();
+  async function image(url) {
+    let img = images.get(url);
+    if (!img) {
+      img = new Image();
+      img.src = url;
+      if (images.size > 64) images.delete(images.keys().next().value);
+      images.set(url, img);
+    }
+    await img.decode().catch(() => void 0);
+    return img;
+  }
+  function roundedBox(x, y, w, h, cs) {
+    const corner = (v) => {
+      const [a, b = a] = v.split(" ");
+      const px = (s, of) => s.endsWith("%") ? parseFloat(s) / 100 * of : parseFloat(s) || 0;
+      return [px(a, w), px(b, h)];
+    };
+    const [tl, tr, br, bl] = [cs.borderTopLeftRadius, cs.borderTopRightRadius, cs.borderBottomRightRadius, cs.borderBottomLeftRadius].map(corner);
+    const f = Math.min(1, w / (tl[0] + tr[0] || 1), w / (bl[0] + br[0] || 1), h / (tl[1] + bl[1] || 1), h / (tr[1] + br[1] || 1));
+    for (const c of [tl, tr, br, bl]) {
+      c[0] *= f;
+      c[1] *= f;
+    }
+    const n = (v) => +v.toFixed(3);
+    return `M${n(x + tl[0])} ${n(y)}H${n(x + w - tr[0])}A${n(tr[0])} ${n(tr[1])} 0 0 1 ${n(x + w)} ${n(y + tr[1])}V${n(y + h - br[1])}A${n(br[0])} ${n(br[1])} 0 0 1 ${n(x + w - br[0])} ${n(y + h)}H${n(x + bl[0])}A${n(bl[0])} ${n(bl[1])} 0 0 1 ${n(x)} ${n(y + h - bl[1])}V${n(y + tl[1])}A${n(tl[0])} ${n(tl[1])} 0 0 1 ${n(x + tl[0])} ${n(y)}Z`;
+  }
+
   // src/morph.ts
   var SPRING = "linear(0, 0.14 6%, 0.52 18%, 0.82 30%, 0.98 42%, 1.04 52%, 1.04 62%, 1.01 76%, 1)";
   var hooks = {
@@ -1787,7 +2271,7 @@ var LiquidGlass = (() => {
       },
       update: (o) => l.refresh(o),
       set: (o) => l.refresh(o),
-      animate: (to, opts = {}) => tween(l, to, opts),
+      animate: (to, opts = {}) => tween([l], to, opts),
       refresh: () => l.refresh(),
       drawn: () => l.whenDrawn(),
       destroy: () => unglass(el)
@@ -1814,9 +2298,9 @@ var LiquidGlass = (() => {
     const spacing = parseFloat(el.dataset.glassContainer ?? "");
     return Number.isFinite(spacing) ? { spacing } : {};
   }
-  function tween(l, to, { duration = 300, easing = "ease" }) {
+  function tween(ls, to, { duration = 300, easing = "ease" }) {
     const keys = Object.keys(to).filter((k) => typeof to[k] === "number");
-    const from = Object.fromEntries(keys.map((k) => [k, l.options[k]]));
+    const froms = ls.map((l) => Object.fromEntries(keys.map((k) => [k, l.options[k]])));
     if (getEnvironment().reduceMotion) duration = 0;
     const probe = document.createElement("div").animate([{ opacity: 0 }, { opacity: 1 }], { duration: Math.max(duration, 1), easing, fill: "forwards" });
     probe.pause();
@@ -1827,10 +2311,10 @@ var LiquidGlass = (() => {
         probe.currentTime = p * Math.max(duration, 1);
         const e = Number(probe.effect.getComputedTiming().progress ?? p);
         const eased = Number.isFinite(e) ? e : p;
-        l.refresh(Object.fromEntries(keys.map((k) => [k, from[k] + (to[k] - from[k]) * eased])));
+        ls.forEach((l, i) => l.refresh(Object.fromEntries(keys.map((k) => [k, froms[i][k] + (to[k] - froms[i][k]) * eased]))));
         if (p < 1) requestAnimationFrame(step);
         else {
-          l.refresh(Object.fromEntries(keys.map((k) => [k, to[k]])));
+          for (const l of ls) l.refresh(Object.fromEntries(keys.map((k) => [k, to[k]])));
           done();
         }
       };
@@ -1840,6 +2324,8 @@ var LiquidGlass = (() => {
   function unglass(el) {
     const lens = lenses.get(el);
     if (!lens) return;
+    groups.get(el)?.remove(el);
+    groups.delete(el);
     sizes?.unobserve(el);
     lens.destroy();
     lenses.delete(el);
@@ -1885,6 +2371,46 @@ var LiquidGlass = (() => {
     return {
       stop() {
         mo.disconnect();
+      }
+    };
+  }
+  var groups = /* @__PURE__ */ new Map();
+  function glassGroup(target, options = {}) {
+    const els = target instanceof HTMLElement ? [...target.children].filter((c) => c instanceof HTMLElement && c.matches("[data-glass], [data-glass-member]")) : [...target];
+    const group = new GlassGroup({ lensOf: (el) => lenses.get(el) });
+    const add = (el, o = {}) => {
+      groups.get(el)?.remove(el);
+      const handle = glass(el, { ...options, ...o });
+      groups.set(el, group);
+      group.add(el);
+      return handle;
+    };
+    for (const el of els) add(el);
+    const lensList = () => group.elements.map((el) => lenses.get(el)).filter((l) => !!l);
+    return {
+      get elements() {
+        return group.elements;
+      },
+      set: (o) => lensList().forEach((l) => l.refresh(o)),
+      update: (o) => lensList().forEach((l) => l.refresh(o)),
+      animate: (to, opts = {}) => tween(lensList(), to, opts),
+      refresh: () => {
+        lensList().forEach((l) => l.refresh());
+        group.schedule();
+      },
+      drawn: () => group.whenDrawn(),
+      add,
+      remove: (el) => {
+        group.remove(el);
+        groups.delete(el);
+      },
+      destroy: () => {
+        const members = group.elements;
+        group.destroy();
+        for (const el of members) {
+          groups.delete(el);
+          unglass(el);
+        }
       }
     };
   }

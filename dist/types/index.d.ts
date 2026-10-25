@@ -65,6 +65,37 @@ export declare function glassOf(el: HTMLElement): GlassHandle | undefined;
 export declare function autoGlass(selector?: string, options?: Partial<GlassOptions>, root?: ParentNode): {
     stop(): void;
 };
+export interface GlassGroupHandle {
+    /** the members */
+    readonly elements: HTMLElement[];
+    /** change options on every member at once (they stay one filter) */
+    set(options: Partial<GlassOptions>): void;
+    /** the same as set() */
+    update(options: Partial<GlassOptions>): void;
+    /** tween numeric options on every member together, as GlassHandle.animate does */
+    animate(to: Partial<GlassOptions>, options?: {
+        duration?: number;
+        easing?: string;
+    }): Promise<void>;
+    /** read every member's CSS custom properties and data attributes again, and measure where the members are */
+    refresh(): void;
+    /** resolves once every member's glass is on screen, drawn by the group where it can be */
+    drawn(): Promise<void>;
+    /** make an element glass (with the group's options and `options` on top) and a member */
+    add(el: HTMLElement, options?: Partial<GlassOptions>): GlassHandle;
+    /** take a member out of the group; it stays glass, with a filter of its own */
+    remove(el: HTMLElement): void;
+    /** take the glass off every member and remove the group */
+    destroy(): void;
+}
+/**
+ * Many glass elements, one backdrop filter: each element is glass as glass() makes it (its own options, light, shadow,
+ * pointer behaviour; a handle from glassOf()), and one layer behind them bends the backdrop for all of them, which is
+ * what costs per frame. Pass the elements, or their parent (its children with data-glass or data-glass-member).
+ * The members must be siblings that don't overlap, with nothing painted between them near their edges; a member that
+ * moves or changes on its own gets a filter of its own while it does, and joins again once it settles.
+ */
+export declare function glassGroup(target: HTMLElement | Iterable<HTMLElement>, options?: Partial<GlassOptions>): GlassGroupHandle;
 /**
  * Apple's glassEffectUnion: separate elements drawn as one piece of glass, joined however far apart they are. Their
  * parent becomes a container whose spacing reaches across the widest gap between them.

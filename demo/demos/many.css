@@ -1,0 +1,9 @@
+.many-overlay { position: absolute; z-index: 4; left: 224px; right: 0; top: 0; bottom: 0; display: grid; place-items: center; pointer-events: none; }
+.tiles { display: grid; grid-template-columns: repeat(6, 96px); gap: 22px; pointer-events: auto; }
+.tile { width: 96px; height: 96px; border-radius: 26px; display: grid; place-content: center; justify-items: center; gap: 6px; color: var(--text); }
+.tile span { font-size: 12px; font-weight: 600; }
+.many-panel { position: absolute; z-index: 5; right: 24px; bottom: 22px; height: 48px; padding: 0 18px 0 5px; display: flex; align-items: center; gap: 14px; border-radius: 24px; color: var(--text); font-size: 14px; }
+.many-panel b { font-variant-numeric: tabular-nums; }
+.many-seg { display: flex; gap: 2px; }
+.many-seg button { height: 38px; padding: 0 14px; border-radius: 19px; font-weight: 600; font-size: 13px; }
+.many-seg button[aria-pressed='true'] { background: rgb(127 127 127 / 0.22); }

@@ -1,5 +1,5 @@
 // The visual test cases: each a fixed scene, chosen by the page's hash. window.caseReady is set when it's drawn.
-import { container, glass, glassButton, setEnvironment } from '../../dist/liquid-glass.js';
+import { container, glass, glassButton, glassGroup, glassOf, setEnvironment } from '../../dist/liquid-glass.js';
 
 const h = (tag, cls, props = {}) => Object.assign(document.createElement(tag), { className: cls }, props);
 const at = (el, x, y, w, ht) => {
@@ -70,6 +70,15 @@ const CASES = {
       c.append(m);
     }
     container(c, { spacing: 24 });
+  },
+  async group() {
+    // six capsules as one glassGroup, one bent by a filter of its own (half strength). The baseline is the same scene
+    // drawn as six separate glass() elements: a group has to look like that.
+    await photo('coast');
+    const els = [[40, 120], [240, 120], [440, 120], [40, 240], [240, 240], [440, 240]].map(([x, y], i) => box(x, y, 160, 56, String(i + 1)));
+    const g = glassGroup(els, { shape: 'capsule' });
+    glassOf(els[4]).set({ strength: 0.5 });
+    await g.drawn();
   },
   async prominent() {
     await photo('coast');

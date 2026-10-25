@@ -9,6 +9,7 @@
 //   autoGlass();   // <nav data-glass="regular" data-glass-floating>
 import { installStyles } from './dom.ts';
 import { GlassContainer, type ContainerOptions } from './container.ts';
+import { GlassGroup } from './group.ts';
 import { Lens } from './lens.ts';
 import { hooks } from './morph.ts';
 import type { Environment, GlassOptions } from './options.ts';
@@ -148,7 +149,7 @@ export function glass(el: HTMLElement, options: Partial<GlassOptions> = {}): Gla
     },
     update: (o) => l.refresh(o),
     set: (o) => l.refresh(o),
-    animate: (to, opts = {}) => tween(l, to, opts),
+    animate: (to, opts = {}) => tween([l], to, opts),
     refresh: () => l.refresh(),
     drawn: () => l.whenDrawn(),
     destroy: () => unglass(el),
@@ -189,9 +190,10 @@ function fromContainerData(el: HTMLElement): ContainerOptions {
  * Numeric options from where they are to `to`, a frame at a time. The easing is sampled through the Web Animations
  * API, so any CSS easing works (springs with linear(), cubic-bezier, ease-out…).
  */
-function tween(l: Lens, to: Partial<GlassOptions>, { duration = 300, easing = 'ease' }: { duration?: number; easing?: string }): Promise<void> {
+function tween(ls: Lens[], to: Partial<GlassOptions>, { duration = 300, easing = 'ease' }: { duration?: number; easing?: string }): Promise<void> {
   const keys = Object.keys(to).filter((k) => typeof to[k as keyof GlassOptions] === 'number') as (keyof GlassOptions)[];
-  const from = Object.fromEntries(keys.map((k) => [k, l.options[k] as number]));
+  // all of them in one frame callback, so a group's members change together
+  const froms = ls.map((l) => Object.fromEntries(keys.map((k) => [k, l.options[k] as number])));
   if (getEnvironment().reduceMotion) duration = 0;
   // the easing's progress: a dummy animation on a detached element, read each frame
   const probe = document.createElement('div').animate([{ opacity: 0 }, { opacity: 1 }], { duration: Math.max(duration, 1), easing, fill: 'forwards' });
@@ -203,10 +205,10 @@ function tween(l: Lens, to: Partial<GlassOptions>, { duration = 300, easing = 'e
       probe.currentTime = p * Math.max(duration, 1);
       const e = Number((probe.effect as KeyframeEffect).getComputedTiming().progress ?? p);
       const eased = Number.isFinite(e) ? e : p;
-      l.refresh(Object.fromEntries(keys.map((k) => [k, from[k] + ((to[k] as number) - from[k]) * eased])) as Partial<GlassOptions>);
+      ls.forEach((l, i) => l.refresh(Object.fromEntries(keys.map((k) => [k, froms[i][k] + ((to[k] as number) - froms[i][k]) * eased])) as Partial<GlassOptions>));
       if (p < 1) requestAnimationFrame(step);
       else {
-        l.refresh(Object.fromEntries(keys.map((k) => [k, to[k]])) as Partial<GlassOptions>);
+        for (const l of ls) l.refresh(Object.fromEntries(keys.map((k) => [k, to[k]])) as Partial<GlassOptions>);
         done();
       }
     };
@@ -218,6 +220,8 @@ function tween(l: Lens, to: Partial<GlassOptions>, { duration = 300, easing = 'e
 export function unglass(el: HTMLElement) {
   const lens = lenses.get(el);
   if (!lens) return;
+  groups.get(el)?.remove(el);
+  groups.delete(el);
   sizes?.unobserve(el);
   lens.destroy();
   lenses.delete(el);
@@ -272,6 +276,78 @@ export function autoGlass(selector = '[data-glass]', options: Partial<GlassOptio
   return {
     stop() {
       mo.disconnect();
+    },
+  };
+}
+
+// ---------------------------------------------------------------- groups
+
+const groups = new Map<HTMLElement, GlassGroup>();
+
+export interface GlassGroupHandle {
+  /** the members */
+  readonly elements: HTMLElement[];
+  /** change options on every member at once (they stay one filter) */
+  set(options: Partial<GlassOptions>): void;
+  /** the same as set() */
+  update(options: Partial<GlassOptions>): void;
+  /** tween numeric options on every member together, as GlassHandle.animate does */
+  animate(to: Partial<GlassOptions>, options?: { duration?: number; easing?: string }): Promise<void>;
+  /** read every member's CSS custom properties and data attributes again, and measure where the members are */
+  refresh(): void;
+  /** resolves once every member's glass is on screen, drawn by the group where it can be */
+  drawn(): Promise<void>;
+  /** make an element glass (with the group's options and `options` on top) and a member */
+  add(el: HTMLElement, options?: Partial<GlassOptions>): GlassHandle;
+  /** take a member out of the group; it stays glass, with a filter of its own */
+  remove(el: HTMLElement): void;
+  /** take the glass off every member and remove the group */
+  destroy(): void;
+}
+
+/**
+ * Many glass elements, one backdrop filter: each element is glass as glass() makes it (its own options, light, shadow,
+ * pointer behaviour; a handle from glassOf()), and one layer behind them bends the backdrop for all of them, which is
+ * what costs per frame. Pass the elements, or their parent (its children with data-glass or data-glass-member).
+ * The members must be siblings that don't overlap, with nothing painted between them near their edges; a member that
+ * moves or changes on its own gets a filter of its own while it does, and joins again once it settles.
+ */
+export function glassGroup(target: HTMLElement | Iterable<HTMLElement>, options: Partial<GlassOptions> = {}): GlassGroupHandle {
+  const els = target instanceof HTMLElement ? [...target.children].filter((c): c is HTMLElement => c instanceof HTMLElement && c.matches('[data-glass], [data-glass-member]')) : [...target];
+  const group = new GlassGroup({ lensOf: (el) => lenses.get(el) });
+  const add = (el: HTMLElement, o: Partial<GlassOptions> = {}) => {
+    groups.get(el)?.remove(el);
+    const handle = glass(el, { ...options, ...o });
+    groups.set(el, group);
+    group.add(el);
+    return handle;
+  };
+  for (const el of els) add(el);
+  const lensList = () => group.elements.map((el) => lenses.get(el)).filter((l): l is Lens => !!l);
+  return {
+    get elements() {
+      return group.elements;
+    },
+    set: (o) => lensList().forEach((l) => l.refresh(o)),
+    update: (o) => lensList().forEach((l) => l.refresh(o)),
+    animate: (to, opts = {}) => tween(lensList(), to, opts),
+    refresh: () => {
+      lensList().forEach((l) => l.refresh());
+      group.schedule();
+    },
+    drawn: () => group.whenDrawn(),
+    add,
+    remove: (el) => {
+      group.remove(el);
+      groups.delete(el);
+    },
+    destroy: () => {
+      const members = group.elements;
+      group.destroy();
+      for (const el of members) {
+        groups.delete(el);
+        unglass(el);
+      }
     },
   };
 }
