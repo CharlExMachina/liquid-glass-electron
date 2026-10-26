@@ -87,14 +87,14 @@ export declare class Lens {
     /**
      * What a group needs to draw this element's glass in a filter of its own, or null if it can't: glass that doesn't
      * bend, a free shape, a dome's per-channel maps, noise (it's in the filter's coordinates), CSS filters in front, or no
-     * map yet. `filters` are the element's own filter elements (the group copies them), `image` its map, `side` how far
-     * the map is stashed beside the element, `margin` how far the filters reach past it.
+     * map yet. `filters` are the element's own filter elements (the group copies them), `images` its map's (a grey per
+     * channel), `side` how far the map is stashed beside the element, `margin` how far the filters reach past it.
      */
     batchSource(): {
         filters: SVGFilterElement[];
-        image: SVGFEImageElement;
-        table: SVGFEComponentTransferElement;
-        shift: SVGFEOffsetElement | null;
+        images: SVGFEImageElement[];
+        tables: [SVGFEComponentTransferElement, SVGFEComponentTransferElement];
+        shifts: SVGFEOffsetElement[];
         side: number;
         margin: number;
         grid: MapGrid;

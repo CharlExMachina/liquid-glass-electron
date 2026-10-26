@@ -23,9 +23,16 @@ export interface Optics {
      * and the middle is flat
      */
     rim?: boolean;
+    /**
+     * Apple's switch lens (bevelMode 3): the glass shrinks what's behind it, every point sampling outward along the
+     * edge's normal, and its outermost px fold back
+     */
+    minify?: boolean;
     /** the slight magnification toward the middle of a pill */
     magnify: boolean;
 }
+/** The switch lens's shift outward, px, at `d` px in from the edge, for a glass whose shorter side is 2 × `half` px. */
+export declare function switchLens(d: number, half: number): number;
 /**
  * Where the backdrop is sampled from, relative to the point (x, y) of the field's box: the bevel's refraction plus
  * the magnification, as liquidglass's shader computes them.

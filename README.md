@@ -131,7 +131,7 @@ liquidglass's options, with its defaults:
 |---|---|---|
 | `refraction` | 0.69 | How much the bevel bends what's behind it. 0 = no bending at all (light, fill and shadow only, which cost nothing per frame) |
 | `zRadius` | 40 | The bevel's depth, px: how far in from the edge it curves |
-| `bevelMode` | 0 | 0 = a pill with a bevelled rim; 1 = a dome that magnifies the whole element; 2 = Apple's lens (this library's): the rim magnifies toward the middle, most at the edge and fading out `zRadius` px in, and the middle is flat |
+| `bevelMode` | 0 | 0 = a pill with a bevelled rim; 1 = a dome that magnifies the whole element; 2 = Apple's lens (this library's): the rim magnifies toward the middle, most at the edge and fading out `zRadius` px in, and the middle is flat; 3 = Apple's switch lens, measured from iOS's switch: it shrinks what's behind it, and its rim folds back (scaled to the element, not `zRadius`) |
 | `chromAberration` | 0.05 | Colour fringing at the rim. Two more passes per frame; 0 for less work |
 | `blurAmount` | 0 | Frost: 1 ≈ a 7.6 px blur |
 | `saturation`, `brightness` | 0, 0 | Boosts (0.5 = 1.5×), on top of `baseBrightness` |
@@ -371,6 +371,16 @@ before the bend, not a blur after it) and the interior a little further, still w
   glass, and Chromium's nearest-pixel sampling leaves a one-pixel stair along what it folds, where the iPhone's is
   smooth. The thin dark line around the iPhone's rim and the shading across its glass aren't part of the glass here;
   the iOS demo draws them in CSS (`demo/demos/ios.css`).
+- **Apple's switch lens (`bevelMode` 3) is measured from one control too**, iOS 26's switch knob (an iPhone app on a
+  Mac, held over lines of known places): its shift is matched to within 0.2 px, and its outline, shading, rim light
+  and shadow are an image the iOS demo draws (`surface()` in `demo/demos/ios.js`). Where the knob refracts the blue
+  track, iOS's rim light turns cyan; here it stays white.
+- **Maps travel as greys and alpha.** Chromium composites in the display's colour space (Display P3 on a wide-gamut
+  Mac) and converts a coloured map into it before bending, which bent up and left by as much as a fifth less than down
+  and right. A grey is the same in both spaces and alpha isn't converted, so each shift has an image of its own, and
+  the map a displacement reads is the shift down as a grey and the shift across as alpha, at half the levels of a byte
+  each (128 a side). With chromatic aberration (two filters, the maps stashed between them), the shift across still
+  comes out about 0.25 px to the right on such a display.
 - Not done: Apple's shimmer on interactive glass, `backgroundExtensionEffect`, glass that thickens with its size.
 
 ## Tests

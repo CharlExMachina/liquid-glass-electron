@@ -88,6 +88,8 @@ export interface TableMap extends Pixels {
   rimPx: number;
   /** how far the image reaches past the element on each side, px (at least) */
   margin: number;
+  /** what each table value has added to it, so that Chromium's truncation when it bakes the table rounds */
+  bias: number;
   /** where the image goes, in the field's px: `margin` past it on each side, or the grid's rectangle */
   rect: { x: number; y: number; w: number; h: number };
   /** the grid it's drawn on */
@@ -135,7 +137,8 @@ export function tableMap(f: Field, o: Optics, scale: number, N = 256, fringe = 0
   const zR = Math.min(Math.max(o.bevel, 1), f.shortHalf);
   const margin = Math.ceil(2 / scale);
   const g = grid ?? ownGrid(f.w, f.h, scale, margin);
-  if (o.dome || o.rim) return smoothMap(f, shift, g, margin, N);
+  // the switch lens folds steeply within its outermost px: its own values right up to the edge
+  if (o.dome || o.rim || o.minify) return smoothMap(f, shift, g, margin, N, o.minify ? 0.05 : 0.5);
   // Per axis: the shift d px in from a straight edge (left, top), d from the bevel's end to `margin` outside.
   // Outside the element the shift stays what it is at the edge.
   const edgeShift = (axis: 0 | 1, d: number) => {
@@ -211,7 +214,7 @@ export function tableMap(f: Field, o: Optics, scale: number, N = 256, fringe = 0
     const v = k / (N - 1), t = Math.sign(2 * v - 1) * tables[axis].forward(Math.abs(2 * v - 1));
     return +Math.min(0.5 + 0.5 * t / rimPx + 1 / 255, 1).toFixed(5);
   });
-  return { width, height, data, tableX: table(0), tableY: table(1), tableB: SHAPE_TABLE, rimPx, margin, rect: gridRect(g), grid: g };
+  return { width, height, data, tableX: table(0), tableY: table(1), tableB: SHAPE_TABLE, rimPx, margin, bias: 1 / 255, rect: gridRect(g), grid: g };
 }
 
 const gridRect = (g: MapGrid) => ({ x: g.x, y: g.y, w: g.width * g.px, h: g.height * g.py });
@@ -250,12 +253,12 @@ function sampleBox(f: Field, g: MapGrid, value: (x: number, y: number, d: number
  * A dome's shift has no steep rim, so its map stores the shift as it is (with tables that change nothing), and
  * carries it on past the edge.
  */
-function smoothMap(f: Field, shift: (x: number, y: number) => [number, number], g: MapGrid, margin: number, N: number): TableMap {
-  // outside, the value at the edge
+function smoothMap(f: Field, shift: (x: number, y: number) => [number, number], g: MapGrid, margin: number, N: number, edge: number): TableMap {
+  // outside (and within `edge` px of it), the value `edge` px in
   const at = (x: number, y: number, d: number): [number, number] => {
-    if (d >= 0.5) return shift(x, y);
+    if (d >= edge) return shift(x, y);
     const n = normal(f, x, y);
-    return shift(x - n[0] * (0.5 - d), y - n[1] * (0.5 - d));
+    return shift(x - n[0] * (edge - d), y - n[1] * (edge - d));
   };
   let rimPx = 1e-6;
   sampleBox(f, g, (x, y, d) => {
@@ -269,7 +272,7 @@ function smoothMap(f: Field, shift: (x: number, y: number) => [number, number], 
   }, (v) => Math.round(Math.min(Math.max(v, 0), 255)));
   // identity, with the same step as tableMap's (Chromium truncates when it bakes the table)
   const identity = Array.from({ length: N }, (_, k) => +Math.min(k / (N - 1) + 0.5 / 255, 1).toFixed(5));
-  return { width, height, data, tableX: identity, tableY: identity, tableB: SHAPE_TABLE, rimPx, margin, rect: gridRect(g), grid: g };
+  return { width, height, data, tableX: identity, tableY: identity, tableB: SHAPE_TABLE, rimPx, margin, bias: 0.5 / 255, rect: gridRect(g), grid: g };
 }
 
 /** The outward normal of a field's edge at (x, y), from the gradient of its distance. */

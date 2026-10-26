@@ -48,9 +48,10 @@ export interface GlassOptions {
   button: boolean;
   /**
    * 0 = a pill with a bevelled rim (liquidglass's), 1 = a dome that magnifies the whole element, 2 = Apple's lens: the
-   * rim magnifies toward the middle, most at the edge and fading out `zRadius` px in, and the middle is flat
+   * rim magnifies toward the middle, most at the edge and fading out `zRadius` px in, and the middle is flat,
+   * 3 = Apple's switch lens: it shrinks what's behind it, and its rim folds back (scaled to the element, not `zRadius`)
    */
-  bevelMode: 0 | 1 | 2;
+  bevelMode: 0 | 1 | 2 | 3;
 
   // ---- beyond liquidglass
   /**

@@ -18,13 +18,16 @@
 import { gridField, roundedRect, signedDistance, squircle, type Field } from './field.ts';
 import { fieldLight, lightImage, tableMap, type MapGrid, type RGBA } from './maps.ts';
 import { ABERRATION, blurSigma, boxShadow, clampRadii, colorMatrix, tintGains, type Radii } from './optics.ts';
-import { filterDefs, predecode, setAttrs, supportsSvgBackdrop, svgEl, toDataURL } from './dom.ts';
+import { encodeTables, filterDefs, greyDataURL, mapNodes, predecode, setAttrs, stashNodes, supportsSvgBackdrop, svgEl, toDataURL } from './dom.ts';
 import { fromCss, fromData, resolve, type Environment, type GlassOptions } from './options.ts';
 
 // Map pixels per CSS px: about this many pixels in a map (per-frame cost follows its bytes), between 0.08 and 0.5 per
-// px. Small glass gets a finer map, which is cheap, and its corners are most of it.
-const MAP_PIXELS = 4096;
-const mapScale = (w: number, h: number, moving: boolean) => Math.min(Math.max(Math.sqrt(MAP_PIXELS / (w * h)), 0.08), 0.5) / (moving ? 2 : 1);
+// px. Small glass gets a finer map, which is cheap, and its corners are most of it. The switch lens (bevelMode 3) has
+// no tables to keep a coarse map exact, and folds within 3 px of its edge: it gets a pixel per device pixel (at least
+// 2 per px), from a larger budget (it's only ever small).
+const MAP_PIXELS = 4096, FINE_MAP_PIXELS = 65536;
+const mapScale = (w: number, h: number, moving: boolean, fine = false) =>
+  Math.min(Math.max(Math.sqrt((fine ? FINE_MAP_PIXELS : MAP_PIXELS) / (w * h)), 0.08), fine ? Math.max(devicePixelRatio, 2) : 0.5) / (moving ? 2 : 1);
 // How far filter 2's region reaches past the element, px (less than any map's margin: see place())
 const EDGE = 2;
 // How long a size has to hold before the map and light are drawn for it, ms.
@@ -33,7 +36,7 @@ const SETTLE = 120;
 const KEEP = ['1 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 1 0', '0 0 0 0 0  0 1 0 0 0  0 0 0 0 0  0 0 0 1 0', '0 0 0 0 0  0 0 0 0 0  0 0 1 0 0  0 0 0 1 0'];
 
 let nextId = 0;
-interface MapEntry { url: string; rimPx: number; margin: number; rect: { x: number; y: number; w: number; h: number }; grid: MapGrid; tables: [string, string, string] }
+interface MapEntry { urls: string[]; rimPx: number; margin: number; rect: { x: number; y: number; w: number; h: number }; grid: MapGrid; tables: { down: string; across: string; cover: string } }
 const mapCache = new Map<string, MapEntry>();
 const lightCache = new Map<string, { url: string; empty: string; slice: number; edge: number } | null>();
 const remember = <K, V>(m: Map<K, V>, k: K, v: V) => {
@@ -74,7 +77,7 @@ export class Lens {
   private pre: SVGFilterElement | null = null;
   private main: SVGFilterElement | null = null;
   // One map, or with a dome's fringe three (red, green, blue: liquidglass's fringe doesn't follow the dome's shift)
-  private maps: { image: SVGFEImageElement; table: SVGFEComponentTransferElement; shift: SVGFEOffsetElement | null; fringe: number; rimPx: number }[] = [];
+  private maps: { images: SVGFEImageElement[]; tables: [SVGFEComponentTransferElement, SVGFEComponentTransferElement]; cover: SVGFEComponentTransferElement | null; shifts: SVGFEOffsetElement[]; fringe: number; rimPx: number }[] = [];
   private colour: SVGFEColorMatrixElement | null = null;
   private blurNode: SVGFEGaussianBlurElement | null = null;
   private mixNode: SVGFECompositeElement | null = null;
@@ -85,7 +88,7 @@ export class Lens {
   private unitMaps = true;
   private following = 0;
   private lightUrl: { url: string; empty: string; shadow?: string; mask?: string; box?: { x: number; y: number; w: number; h: number }; slice?: number; edge?: number; field?: boolean; free?: number } | null = null;
-  private passes: { node: SVGFEDisplacementMapElement; spread: number; map: number }[] = [];
+  private passes: { node: SVGFEDisplacementMapElement; source: SVGFEOffsetElement; spread: number; map: number }[] = [];
   private stash = false;
   private bends = false;
   // geometry and the current map
@@ -193,19 +196,19 @@ export class Lens {
   /**
    * What a group needs to draw this element's glass in a filter of its own, or null if it can't: glass that doesn't
    * bend, a free shape, a dome's per-channel maps, noise (it's in the filter's coordinates), CSS filters in front, or no
-   * map yet. `filters` are the element's own filter elements (the group copies them), `image` its map, `side` how far
-   * the map is stashed beside the element, `margin` how far the filters reach past it.
+   * map yet. `filters` are the element's own filter elements (the group copies them), `images` its map's (a grey per
+   * channel), `side` how far the map is stashed beside the element, `margin` how far the filters reach past it.
    */
-  batchSource(): { filters: SVGFilterElement[]; image: SVGFEImageElement; table: SVGFEComponentTransferElement; shift: SVGFEOffsetElement | null; side: number; margin: number; grid: MapGrid; mapMargin: number } | null {
+  batchSource(): { filters: SVGFilterElement[]; images: SVGFEImageElement[]; tables: [SVGFEComponentTransferElement, SVGFEComponentTransferElement]; shifts: SVGFEOffsetElement[]; side: number; margin: number; grid: MapGrid; mapMargin: number } | null {
     const o = this.options;
     if (!this.bends || this.maps.length !== 1 || this.isFree() || this.shape || o.backdrop || o.distortion > 0 || this.amount() <= 0 || !this.main) return null;
     const map = this.maps[0];
-    if (!map.image.getAttribute('href') || !map.rimPx || !this.mapGrid) return null;
+    if (!map.images[0].getAttribute('href') || !map.rimPx || !this.mapGrid) return null;
     const first = this.pre ?? this.main;
     return {
       filters: this.pre ? [this.pre, this.main] : [this.main],
-      image: map.image, table: map.table, shift: map.shift,
-      side: map.shift ? -Number(map.shift.getAttribute('dx')) : 0,
+      images: map.images, tables: map.tables, shifts: map.shifts,
+      side: map.shifts.length ? -Number(map.shifts[0].getAttribute('dx')) : 0,
       margin: -Number(first.getAttribute('x')),
       grid: this.mapGrid, mapMargin: this.margin,
     };
@@ -215,7 +218,7 @@ export class Lens {
   private structureKey() {
     const o = this.options;
     const bends = supportsSvgBackdrop() && o.refraction > 0 && o.variant !== 'identity';
-    return [bends, o.backdrop, o.chromAberration > 0, o.bevelMode, blurSigma(o.blurAmount) >= 0.5, o.smooth, o.distortion > 0, o.opacity < 1, o.variant === 'identity', o.magnify, this.isFree()].join();
+    return [bends, o.backdrop, o.chromAberration > 0, o.bevelMode, o.blurAmount > 0, o.smooth, o.distortion > 0, o.opacity < 1, o.variant === 'identity', o.magnify, this.isFree()].join();
   }
 
   /** A shape the element's own (rounded) box can't clip: the filter masks itself, and light and shadow are an image. */
@@ -337,7 +340,9 @@ export class Lens {
     // samples nine times it draws it on its own first. (Smoothing and colour are both linear: in this order they give
     // the same, but for rounding, and for the brightest pixels, which the matrix clips.)
     let src = 'SourceGraphic';
-    if (sigma >= 0.5) {
+    // Frost of any amount is a Gaussian, so that a transition of it (to frost glass as it goes, say) never changes the
+    // filter's structure, which costs a frame or more; none at all is the 3×3 smoothing.
+    if (o.blurAmount > 0) {
       this.blurNode = svgEl('feGaussianBlur', { in: src, stdDeviation: (sigma * this.amount()).toFixed(2), edgeMode: 'duplicate', result: 'smooth' });
       first.append(this.blurNode);
       src = 'smooth';
@@ -369,40 +374,41 @@ export class Lens {
     const fringes = perChannel ? [1, 0, -1].map((k) => k * o.chromAberration) : [0];
     const mergeNodes = [svgEl('feMergeNode', { in: src })];
     fringes.forEach((f, i) => {
-      const image = svgEl('feImage', { preserveAspectRatio: 'none', x: 0, y: 0, width: 1, height: 1, result: `map${i}raw` });
-      const table = svgEl('feComponentTransfer', { in: `map${i}raw`, result: fringe ? `side${i}` : `map${i}` },
-        svgEl('feFuncR', { type: 'table', tableValues: '0 1' }), svgEl('feFuncG', { type: 'table', tableValues: '0 1' }),
-        ...(this.isFree() ? [svgEl('feFuncB', { type: 'table', tableValues: '0 1' })] : []));
-      first.append(image, table);
-      let shift: SVGFEOffsetElement | null = null;
+      const { images, nodes, tables, cover } = mapNodes(`map${i}raw`, fringe ? `side${i}` : `map${i}`, this.isFree() ? 3 : 2, fringe);
+      first.append(...nodes);
+      let shifts: SVGFEOffsetElement[] = [];
       if (fringe) {
-        mergeNodes.push(svgEl('feMergeNode', { in: `side${i}` }));
-        shift = svgEl('feOffset', { in: 'SourceGraphic', dx: 0, dy: 0, result: `map${i}` });
-        second.append(shift);
+        images.forEach((_, c) => mergeNodes.push(svgEl('feMergeNode', { in: `side${i}_${c}` })));
+        const stashed = stashNodes(`map${i}`, images.length as 2 | 3);
+        shifts = stashed.shifts;
+        second.append(...stashed.nodes);
       }
-      this.maps.push({ image, table, shift, fringe: f, rimPx: 0 });
+      this.maps.push({ images, tables, cover, shifts, fringe: f, rimPx: 0 });
     });
     if (fringe) {
       first.append(svgEl('feMerge', {}, ...mergeNodes));
       src = 'SourceGraphic';
     }
 
+    // a displacement, and its source moved by the quarter of its scale that the map's across channel starts from (see
+    // mapNodes)
     const pass = (result: string, spread: number, map: number) => {
-      const node = svgEl('feDisplacementMap', { in: src, in2: `map${map}`, xChannelSelector: 'R', yChannelSelector: 'G', result });
-      this.passes.push({ node, spread, map });
-      return node;
+      const source = svgEl('feOffset', { in: src, dx: 0, dy: 0, result: `${result}in` });
+      const node = svgEl('feDisplacementMap', { in: `${result}in`, in2: `map${map}`, xChannelSelector: 'A', yChannelSelector: 'R', result });
+      this.passes.push({ node, source, spread, map });
+      return [source, node];
     };
     if (fringe) {
       // Real glass bends blue further than red: each channel is bent by its own amount, then they're added up (an
       // additive blend, the cheapest way Chromium has to add two images). A pill's channels share one map, bent by
       // its own share of the shift each; a dome's have a map each, with liquidglass's fringe in it.
       const a = perChannel ? 0 : o.chromAberration * ABERRATION;
-      ['r', 'g', 'b'].forEach((ch, k) => second.append(pass(`${ch}0`, 1 + (k - 1) * a, perChannel ? k : 0),
+      ['r', 'g', 'b'].forEach((ch, k) => second.append(...pass(`${ch}0`, 1 + (k - 1) * a, perChannel ? k : 0),
         svgEl('feColorMatrix', { in: `${ch}0`, type: 'matrix', values: KEEP[k], result: ch })));
       second.append(svgEl('feComposite', { in: 'r', in2: 'g', operator: 'lighter', result: 'rg' }),
         svgEl('feComposite', { in: 'rg', in2: 'b', operator: 'lighter', result: 'bent' }));
     } else {
-      second.append(pass('bent', 1, 0));
+      second.append(...pass('bent', 1, 0));
     }
     if (o.opacity < 1) {
       // less glass: a mix with the (smoothed, coloured) backdrop
@@ -412,8 +418,7 @@ export class Lens {
     if (this.isFree()) {
       // the shape: the map's blue channel is the distance to its edge, its table turned it into coverage; as alpha, it
       // cuts the glass to the shape (the backdrop shows through outside it, as if there were no element)
-      second.append(svgEl('feColorMatrix', { in: 'map0', type: 'matrix', values: '0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 1 0 0', result: 'cover' }),
-        svgEl('feComposite', { in: this.mixNode ? 'mixed' : 'bent', in2: 'cover', operator: 'in' }));
+      second.append(svgEl('feComposite', { in: this.mixNode ? 'mixed' : 'bent', in2: 'map0_cover', operator: 'in' }));
     }
 
     const defs = filterDefs();
@@ -485,20 +490,23 @@ export class Lens {
     const left = Math.ceil(Math.max(m, -(r.x + rect.x)) - 1e-6), right = Math.ceil(Math.max(m, r.x + rect.x + rect.w - w) - 1e-6);
     // The rim samples the backdrop up to `reach` px past the edge: filter 1, which smooths it, reaches that far, and
     // the stashed maps sit beyond. Filter 2 reads all of filter 1's output whatever its own region, which only has to
-    // cover the element (and a little more, for its antialiased edge): each shifted read of a stashed map then falls
-    // inside the map's own margin, and Skia samples it in place. A read that reached past filter 1's region would be
-    // copied out first, a pass per read.
+    // cover the element (and a little more, for its antialiased edge), and to the right as far as the displacement
+    // reads its moved source (see mapNodes): each shifted read of a stashed map then falls inside the map's own
+    // margin, and Skia samples it in place. A read that reached past filter 1's region would be copied out first, a
+    // pass per read.
     const e = Math.ceil(Math.max(left, right, -(r.y + rect.y), r.y + rect.y + rect.h - h, this.reach) - 1e-6);
-    if (this.pre) setAttrs(this.main!, { x: -EDGE, y: -EDGE, width: w + 2 * EDGE, height: h + 2 * EDGE });
+    if (this.pre) setAttrs(this.main!, { x: -EDGE, y: -EDGE, width: w + EDGE + Math.max(EDGE, this.reach), height: h + 2 * EDGE });
     const stashed = !!this.pre, slot = Math.ceil(w + left + e) + 8;
-    this.maps.forEach((map, i) => {
-      const side = stashed ? slot * (i + 1) : 0;
-      setAttrs(map.image, { x: side + r.x + rect.x, y: r.y + rect.y, width: rect.w, height: rect.h });
-      if (map.shift) setAttrs(map.shift, { dx: -side });
-    });
+    // stashed, each channel of each map has a slot of its own
+    const channels = this.maps[0].images.length;
+    this.maps.forEach((map, i) => map.images.forEach((image, c) => {
+      const side = stashed ? slot * (i * channels + c + 1) : 0;
+      setAttrs(image, { x: side + r.x + rect.x, y: r.y + rect.y, width: rect.w, height: rect.h });
+      if (map.shifts[c]) setAttrs(map.shifts[c], { dx: -side });
+    }));
     // An image's rectangle is also its region, which Chromium clips to the filter's before fitting the image in it:
     // the filter that draws the maps reaches past the element by the margin too.
-    setAttrs((this.pre ?? this.main)!, { x: -e, y: -e, width: (stashed ? slot * this.maps.length : 0) + w + right + e, height: h + 2 * e });
+    setAttrs((this.pre ?? this.main)!, { x: -e, y: -e, width: (stashed ? slot * this.maps.length * channels : 0) + w + Math.max(right, this.reach) + e, height: h + 2 * e });
   }
 
   /** The corner radii, and whether they're the element's own CSS ones (circular, in px). */
@@ -540,7 +548,7 @@ export class Lens {
     const region = this.shape?.bounds() ?? { x: 0, y: 0, w, h };
     const sub = region.x || region.y || region.w !== w || region.h !== h ? within(field, region) : field;
     if (this.bends && this.maps.length) {
-      const scale = mapScale(region.w / Math.sqrt(this.shape?.detail() ?? 1), region.h, moving);
+      const scale = mapScale(region.w / Math.sqrt(this.shape?.detail() ?? 1), region.h, moving, o.bevelMode === 3);
       const refraction = this.unitMaps ? 1 : o.refraction;
       const grid = this.shape || free ? null : this.grid;
       const key = [w, h, ...radii, zR, refraction, o.bevelMode, +o.magnify, scale, ...this.maps.map((m) => m.fringe)].map((v) => Math.round(v * 400) / 400).join(':')
@@ -552,18 +560,18 @@ export class Lens {
           return mapCache.get(k) ?? remember(mapCache, k, (() => {
             // a path's edges are anywhere: its tables come from a plain box's straight edges
             const profile = free && o.shape === 'path' ? roundedRect(w, h, [0, 0, 0, 0]) : sub;
-            const m = tableMap(sub, { refraction, bevel: zR, dome: o.bevelMode === 1, rim: o.bevelMode === 2, magnify: o.magnify }, scale, moving ? 64 : 256, map.fringe, profile, grid);
-            return { url: toDataURL(m), rimPx: m.rimPx, margin: m.margin, rect: m.rect, grid: m.grid, tables: [m.tableX.join(' '), m.tableY.join(' '), m.tableB.join(' ')] as [string, string, string] };
+            const m = tableMap(sub, { refraction, bevel: zR, dome: o.bevelMode === 1, rim: o.bevelMode === 2, minify: o.bevelMode === 3, magnify: o.magnify }, scale, moving ? 64 : 256, map.fringe, profile, grid);
+            return { urls: [0, 1, 2].slice(0, free ? 3 : 2).map((c) => greyDataURL(m, c)), rimPx: m.rimPx, margin: m.margin, rect: m.rect, grid: m.grid, tables: { ...encodeTables(m.tableX, m.tableY, m.bias), cover: m.tableB.join(' ') } };
           })());
         });
         const maps = this.maps;
-        applies.push(Promise.all(entries.map((e) => predecode(e.url))).then(() => () => {
+        applies.push(Promise.all(entries.flatMap((e) => e.urls.map(predecode))).then(() => () => {
           if (this.mapKey !== key || this.maps !== maps) return;
           entries.forEach((e, i) => {
-            maps[i].image.setAttribute('href', e.url);
-            maps[i].table.children[0].setAttribute('tableValues', e.tables[0]);
-            maps[i].table.children[1].setAttribute('tableValues', e.tables[1]);
-            maps[i].table.children[2]?.setAttribute('tableValues', e.tables[2]);
+            maps[i].images.forEach((image, c) => image.setAttribute('href', e.urls[c]));
+            maps[i].tables[0].children[0].setAttribute('tableValues', e.tables.across);
+            for (const f of maps[i].tables[1].children) f.setAttribute('tableValues', e.tables.down);
+            maps[i].cover?.children[0].setAttribute('tableValues', e.tables.cover);
             maps[i].rimPx = e.rimPx;
           });
           this.margin = entries[0].margin;
@@ -699,16 +707,19 @@ export class Lens {
 
   private applyStrength() {
     this.changed();
-    const k = this.bulge * this.amount() * (this.unitMaps ? this.options.refraction : 1);
+    const full = Math.max(this.bulge, 1) * (this.unitMaps ? this.options.refraction : 1), k = full * this.amount() * Math.min(this.bulge, 1);
     let most = 0;
-    for (const { node, spread, map } of this.passes) {
-      const scale = 2 * (this.maps[map]?.rimPx ?? 0) * spread * k;
-      node.setAttribute('scale', String(+scale.toFixed(3)));
-      most = Math.max(most, Math.abs(scale) / 2);
+    for (const { node, source, spread, map } of this.passes) {
+      // the map's channels span half their range (see mapNodes): the scale is twice what it would be
+      const rim = 4 * (this.maps[map]?.rimPx ?? 0) * spread, scale = +(rim * k).toFixed(3);
+      node.setAttribute('scale', String(scale));
+      source.setAttribute('dx', String(scale / 4));
+      // its source is read from up to half the scale to the right: the filters reach that far, for the glass at full
+      // strength (so they aren't reset while the strength is tweened, which costs a frame each time)
+      most = Math.max(most, Math.abs(rim * full) / 2);
     }
-    // the filters' regions follow the farthest shift (in steps, so they aren't reset every frame of a tween)
     const reach = Math.ceil((most + 1) / 4) * 4;
-    if (this.pre && reach > this.reach) {
+    if (reach > this.reach) {
       this.reach = reach;
       this.place();
     }
@@ -914,13 +925,19 @@ function within(f: Field, r: { x: number; y: number; w: number; h: number }): Fi
  * a page's CSS reset (button { background: none }) can't take it away.
  */
 function parseColour(colour: string, opacity = 1): RGBA {
+  // Remembered: the light is drawn again every frame while the glass's strength is tweened, and reading a canvas back
+  // waits for the GPU to finish what it's doing (a press could hold up the page for 130 ms).
+  const key = `${colour}|${opacity}`;
+  const hit = colours.get(key);
+  if (hit) return hit;
   const ctx = document.createElement('canvas').getContext('2d')!;
   ctx.fillStyle = '#000';
   ctx.fillStyle = colour;
   ctx.fillRect(0, 0, 1, 1);
   const [r, g, b, a] = ctx.getImageData(0, 0, 1, 1).data;
-  return [r, g, b, (a / 255) * opacity];
+  return remember(colours, key, [r, g, b, (a / 255) * opacity] as RGBA);
 }
+const colours = new Map<string, RGBA>();
 
 /** A CSS colour as RGB gains, scaled so its luma is 1 (a tint shouldn't darken or brighten the glass). */
 function tintRgb(colour: string): [number, number, number] {

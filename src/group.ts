@@ -8,17 +8,18 @@
 // own filter back within the same task, and come back the same way: one that changes on its own (strength, hover, a
 // press, a drag, a transition, a resize) leaves while it changes, and members that change together stay together.
 //
-// The members' maps are copied into one image at whole pixels of the map, so they're drawn exactly as they'd be on
-// their own; members that don't line up with each other (different sizes, odd offsets) get an image each. Every image
-// goes through its own lookup table before anything is merged: the table turns a stretched value into a steep shift,
-// and it has to see the stretched value itself, not one rounded to 8 bits by a merge first.
+// The members' maps are copied into one image at whole pixels of the map (an image per channel: a map travels as greys,
+// see mapNodes), so they're drawn exactly as they'd be on their own; members that don't line up with each other
+// (different sizes, odd offsets) get images of their own. Every map goes through its own lookup table before anything
+// is merged: the table turns a stretched value into a steep shift, and it has to see the stretched value itself, not
+// one rounded to 8 bits by a merge first.
 //
 // glass() puts sibling glass in a group of its own accord (an implicit one), which is stricter: a member is drawn by
 // the layer only if nothing is painted between the layer and it over what it bends, and the parent is never made a
 // containing block if that would move anything else.
 import type { Lens } from './lens.ts';
 import type { MapGrid } from './maps.ts';
-import { filterDefs, predecode, setAttrs, svgEl } from './dom.ts';
+import { filterDefs, mapNodes, predecode, setAttrs, svgEl } from './dom.ts';
 
 /** How long a member has to keep its place before its map goes into the group's image, ms. */
 const SETTLE = 120;
@@ -35,7 +36,8 @@ interface Source {
   src: NonNullable<ReturnType<Lens['batchSource']>>;
   // the map's rectangle in the element's px (where it would be without the stash)
   map: { x: number; y: number; w: number; h: number };
-  href: string;
+  // its map's images, a grey per channel
+  hrefs: string[];
 }
 
 interface Box {
@@ -66,7 +68,7 @@ interface Atlas {
   h: number;
   fixed: boolean;
   placed: Map<HTMLElement, string>;
-  classes: { url: string; x: number; y: number; w: number; h: number; table: SVGFEComponentTransferElement }[];
+  classes: { urls: string[]; x: number; y: number; w: number; h: number; tables: SVGFEComponentTransferElement[] }[];
   mapMargin: number;
 }
 
@@ -230,9 +232,9 @@ export class GlassGroup {
       for (const n of f.querySelectorAll('*')) {
         parts.push(n.tagName);
         for (const a of n.attributes) {
-          if (n === src.image && (a.name === 'x' || a.name === 'y' || a.name === 'width' || a.name === 'height' || a.name === 'href')) continue;
-          if (n === src.shift && a.name === 'dx') continue;
-          if (n.parentNode === src.table && a.name === 'tableValues') continue;
+          if (src.images.includes(n as SVGFEImageElement) && (a.name === 'x' || a.name === 'y' || a.name === 'width' || a.name === 'height' || a.name === 'href')) continue;
+          if (src.shifts.includes(n as SVGFEOffsetElement) && a.name === 'dx') continue;
+          if (src.tables.includes(n.parentNode as SVGFEComponentTransferElement) && a.name === 'tableValues') continue;
           // elements of different sizes differ in the shift's scale in the fifth digit: shared, that moves a sample
           // by a thousandth of a pixel at most
           if (n.tagName === 'feDisplacementMap' && a.name === 'scale') {
@@ -244,9 +246,9 @@ export class GlassGroup {
       }
       parts.push('|');
     }
-    const num = (a: string) => Number(src.image.getAttribute(a));
-    const tables = [...src.table.children].map((f) => f.getAttribute('tableValues')).join('|');
-    return (m.source = { key: parts.join(' '), tables, src, map: { x: num('x') - src.side, y: num('y'), w: num('width'), h: num('height') }, href: src.image.getAttribute('href')! });
+    const num = (a: string) => Number(src.images[0].getAttribute(a));
+    const tables = src.tables.flatMap((t) => [...t.children].map((f) => f.getAttribute('tableValues'))).join('|');
+    return (m.source = { key: parts.join(' '), tables, src, map: { x: num('x') - src.side, y: num('y'), w: num('width'), h: num('height') }, hrefs: src.images.map((im) => im.getAttribute('href')!) });
   }
 
   /**
@@ -516,13 +518,13 @@ export class GlassGroup {
     const x0 = Math.min(...looks.map((l) => l.rect.left)), y0 = Math.min(...looks.map((l) => l.rect.top));
     const w = Math.max(...looks.map((l) => l.rect.right)) - x0, h = Math.max(...looks.map((l) => l.rect.bottom)) - y0;
     // the maps, decoded, and how many map pixels each has per px
-    const imgs = await Promise.all(looks.map((l) => image(l.source!.href)));
+    const imgs = await Promise.all(looks.map((l) => Promise.all(l.source!.hrefs.map(image))));
     if (this.destroyed) return;
     const items = looks.map((l, i) => {
       const map = l.source!.map, img = imgs[i];
-      return { img, x: l.rect.left - x0 + map.x, y: l.rect.top - y0 + map.y, w: map.w, h: map.h, kx: img.naturalWidth / map.w, ky: img.naturalHeight / map.h, tables: l.source!.tables, table: l.source!.src.table };
+      return { img, x: l.rect.left - x0 + map.x, y: l.rect.top - y0 + map.y, w: map.w, h: map.h, kx: img[0].naturalWidth / map.w, ky: img[0].naturalHeight / map.h, tables: l.source!.tables, maps: l.source!.src.tables };
     });
-    const classes = classify(items).map((idx) => ({ kx: items[idx[0]].kx, ky: items[idx[0]].ky, table: items[idx[0]].table.cloneNode(true) as SVGFEComponentTransferElement, items: idx.map((i) => items[i]) }));
+    const classes = classify(items).map((idx) => ({ kx: items[idx[0]].kx, ky: items[idx[0]].ky, tables: items[idx[0]].maps.map((t) => t.cloneNode(true) as SVGFEComponentTransferElement), items: idx.map((i) => items[i]) }));
     const drawn = await Promise.all(classes.map(async (c) => {
       const left = Math.min(...c.items.map((i) => i.x)), top = Math.min(...c.items.map((i) => i.y));
       const cw = Math.round(Math.max(...c.items.map((i) => (i.x - left + i.w) * c.kx))), ch = Math.round(Math.max(...c.items.map((i) => (i.y - top + i.h) * c.ky)));
@@ -531,10 +533,14 @@ export class GlassGroup {
       cv.height = Math.max(ch, 1);
       const ctx = cv.getContext('2d')!;
       ctx.imageSmoothingEnabled = false;
-      for (const i of c.items) ctx.drawImage(i.img, Math.round((i.x - left) * c.kx), Math.round((i.y - top) * c.ky));
-      const url = cv.toDataURL();
-      await predecode(url);
-      return { url, x: left, y: top, w: cv.width / c.kx, h: cv.height / c.ky, table: c.table };
+      // a grey image per channel
+      const urls = c.items[0].img.map((_, k) => {
+        ctx.clearRect(0, 0, cv.width, cv.height);
+        for (const i of c.items) ctx.drawImage(i.img[k], Math.round((i.x - left) * c.kx), Math.round((i.y - top) * c.ky));
+        return cv.toDataURL();
+      });
+      await Promise.all(urls.map(predecode));
+      return { urls, x: left, y: top, w: cv.width / c.kx, h: cv.height / c.ky, tables: c.tables };
     }));
     if (this.destroyed) return;
     const mapMargin = Math.max(...looks.map((l) => -l.source!.map.y));
@@ -599,41 +605,48 @@ export class GlassGroup {
     // the stash: past the layer and its reach, at a whole number of device pixels (at 1.25× that rounds fewer pixels
     // differently from separate glass than any other offset)
     let side = 0;
-    if (src.shift) {
+    const stash = src.shifts.length > 0;
+    if (stash) {
       side = Math.ceil(atlas.w + m + e) + 8;
       const d = devicePixelRatio || 1;
       for (let k = 0; k < 64 && Math.abs(side * d - Math.round(side * d)) > 1e-4; k++) side++;
     }
-    // the map: an image (and its table) per class, merged
+    // the map: its nodes (images, tables, and unless stashed what joins them) per class, merged; stashed, each channel
+    // in a slot of its own, merged channel by channel
     const first = filters[0];
-    const at = [...src.filters[0].children].indexOf(src.image), tableAt = [...src.filters[0].children].indexOf(src.table);
-    const image = first.children[at] as SVGFEImageElement, table = first.children[tableAt] as SVGFEComponentTransferElement;
-    const raw = image.getAttribute('result')!, out = table.getAttribute('result')!;
+    // (its nodes run from its first image to the last whose result is the map, or a stashed channel of it)
+    const own = [...src.filters[0].children], at = own.indexOf(src.images[0]);
+    const isOut = (n: Element) => /^(map|side)\d+(_\d)?$/.test(n.getAttribute('result') ?? '');
+    const endAt = own.length - 1 - [...own].reverse().findIndex(isOut);
+    const raw = src.images[0].getAttribute('result')!.replace(/_0$/, ''), out = own[endAt].getAttribute('result')!.replace(/_\d$/, '');
+    const channels = src.images.length as 2 | 3, many = atlas.classes.length > 1;
     const nodes: Element[] = [];
-    const merge = svgEl('feMerge', { result: out });
+    const merges = (stash ? Array.from({ length: channels }, (_, k) => `${out}_${k}`) : [out]).map((r) => svgEl('feMerge', { result: r }));
     atlas.classes.forEach((c, i) => {
-      const im = image.cloneNode(true) as SVGFEImageElement;
-      setAttrs(im, { x: side + c.x, y: c.y, width: c.w, height: c.h, href: c.url, result: `${raw}_${i}` });
-      // the class's own table (members of different sizes have tables of their own)
-      const t = c.table.cloneNode(true) as SVGFEComponentTransferElement;
-      setAttrs(t, { in: `${raw}_${i}`, result: atlas.classes.length > 1 ? `${out}_${i}` : out });
-      nodes.push(im, t);
-      merge.append(svgEl('feMergeNode', { in: `${out}_${i}` }));
+      const name = many ? `${out}_c${i}` : out;
+      const graph = mapNodes(`${raw}_${i}`, name, channels, stash);
+      graph.images.forEach((im, k) => setAttrs(im, { x: side * (stash ? k + 1 : 0) + c.x, y: c.y, width: c.w, height: c.h, href: c.urls[k] }));
+      // the class's own tables (members of different sizes have tables of their own)
+      graph.tables.forEach((t, k) => t.replaceChildren(...[...c.tables[k].children].map((f) => f.cloneNode(true))));
+      nodes.push(...graph.nodes);
+      merges.forEach((mg, k) => mg.append(svgEl('feMergeNode', { in: stash ? `${name}_${k}` : name })));
     });
-    if (atlas.classes.length > 1) nodes.push(merge);
-    table.remove();
-    image.replaceWith(...nodes);
-    if (src.shift) {
-      const shiftAt = [...src.filters[1].children].indexOf(src.shift);
-      filters[1].children[shiftAt].setAttribute('dx', String(-side));
-    }
+    if (many) nodes.push(...merges);
+    const anchor = first.children[at];
+    for (const n of [...first.children].slice(at + 1, endAt + 1)) n.remove();
+    anchor.replaceWith(...nodes);
+    src.shifts.forEach((shift, k) => {
+      const shiftAt = [...src.filters[1].children].indexOf(shift);
+      filters[1].children[shiftAt].setAttribute('dx', String(-side * (k + 1)));
+    });
     // the regions: as a member's, around the whole layer (filter 2 reaches past it only as far as a member's does)
     if (wantPre) {
       const edge = -Number(src.filters[1].getAttribute('x'));
-      setAttrs(this.main, { x: -edge, y: -edge, width: atlas.w + 2 * edge, height: atlas.h + 2 * edge });
-      setAttrs(this.pre!, { x: -e, y: -e, width: side + atlas.w + m + e, height: atlas.h + 2 * e });
+      // the displacement reads its source up to a member's reach to the right (see mapNodes)
+      setAttrs(this.main, { x: -edge, y: -edge, width: atlas.w + edge + Math.max(edge, e), height: atlas.h + 2 * edge });
+      setAttrs(this.pre!, { x: -e, y: -e, width: side * channels + atlas.w + m + e, height: atlas.h + 2 * e });
     } else {
-      setAttrs(this.main, { x: -e, y: -e, width: atlas.w + m + e, height: atlas.h + 2 * e });
+      setAttrs(this.main, { x: -e, y: -e, width: atlas.w + 2 * e, height: atlas.h + 2 * e });
     }
   }
 }
@@ -718,7 +731,7 @@ const boxKey = (b: Box) => `${b.x.toFixed(2)},${b.y.toFixed(2)},${b.w.toFixed(2)
 
 /** A member's map and where its box is in the layer: equal when the layer's image holds that map there. */
 function placeSig(s: Source, b: { x: number; y: number; w: number; h: number }) {
-  return `${s.href}|${b.x.toFixed(2)},${b.y.toFixed(2)},${b.w.toFixed(2)},${b.h.toFixed(2)},${s.map.x},${s.map.y},${s.map.w},${s.map.h}`;
+  return `${s.hrefs.join(" ")}|${b.x.toFixed(2)},${b.y.toFixed(2)},${b.w.toFixed(2)},${b.h.toFixed(2)},${s.map.x},${s.map.y},${s.map.w},${s.map.h}`;
 }
 
 /** The key counted most often (the current one wins a tie). */

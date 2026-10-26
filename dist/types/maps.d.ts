@@ -32,6 +32,8 @@ export interface TableMap extends Pixels {
     rimPx: number;
     /** how far the image reaches past the element on each side, px (at least) */
     margin: number;
+    /** what each table value has added to it, so that Chromium's truncation when it bakes the table rounds */
+    bias: number;
     /** where the image goes, in the field's px: `margin` past it on each side, or the grid's rectangle */
     rect: {
         x: number;
