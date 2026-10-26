@@ -1,0 +1,146 @@
+{
+ "panel-regular-light-coast": {
+  "inside": 2.3,
+  "rim": 3.6,
+  "edge": 6.9,
+  "near": 1,
+  "p95": 4.8,
+  "bias": 1.4
+ },
+ "panel-regular-dark-night": {
+  "inside": 4.1,
+  "rim": 4.4,
+  "edge": 3.8,
+  "near": 1,
+  "p95": 7.3,
+  "bias": 2.5
+ },
+ "capsule-regular-light-ponds": {
+  "inside": 2.6,
+  "rim": 4,
+  "edge": 10.2,
+  "near": 1,
+  "p95": 8.5,
+  "bias": 1.4
+ },
+ "small-regular-light-alps": {
+  "inside": 1.5,
+  "rim": 1.7,
+  "edge": 6.6,
+  "near": 1,
+  "p95": 3.5,
+  "bias": 0.8
+ },
+ "small-regular-dark-alps": {
+  "inside": 5.2,
+  "rim": 5.3,
+  "edge": 8.2,
+  "near": 1,
+  "p95": 7.3,
+  "bias": 4.6
+ },
+ "circle-regular-light-alps": {
+  "inside": 1.3,
+  "rim": 1.9,
+  "edge": 5.4,
+  "near": 1,
+  "p95": 3.5,
+  "bias": 0.9
+ },
+ "big-regular-light-ponds": {
+  "inside": 1.9,
+  "rim": 3.1,
+  "edge": 5.7,
+  "near": 1,
+  "p95": 3.5,
+  "bias": 1.5
+ },
+ "panel-regular-dark-g128": {
+  "inside": 5.4,
+  "rim": 5.4,
+  "edge": 9.8,
+  "near": 1,
+  "p95": 6,
+  "bias": 4.8
+ },
+ "panel-clear-light-coast": {
+  "inside": 1.1,
+  "rim": 1.2,
+  "edge": 3.6,
+  "near": 1,
+  "p95": 2.3,
+  "bias": 0.9
+ },
+ "panel-clear-dark-night": {
+  "inside": 1,
+  "rim": 1.1,
+  "edge": 1.6,
+  "near": 1,
+  "p95": 2.3,
+  "bias": 0.9
+ },
+ "capsule-clear-light-ponds": {
+  "inside": 1.5,
+  "rim": 1.9,
+  "edge": 4.7,
+  "near": 1,
+  "p95": 3.5,
+  "bias": 0.9
+ },
+ "small-clear-dark-coast": {
+  "inside": 1.4,
+  "rim": 1.4,
+  "edge": 4,
+  "near": 1,
+  "p95": 3.5,
+  "bias": 0.9
+ },
+ "circle-clear-dark-ponds": {
+  "inside": 1.6,
+  "rim": 2.1,
+  "edge": 7.4,
+  "near": 1,
+  "p95": 3.5,
+  "bias": 0.9
+ },
+ "big-clear-light-alps": {
+  "inside": 1,
+  "rim": 1.4,
+  "edge": 3.6,
+  "near": 1,
+  "p95": 2.3,
+  "bias": 0.9
+ },
+ "panel-clear-light-rampx-panel": {
+  "inside": 0.8,
+  "rim": 1,
+  "edge": 3.6,
+  "near": 1,
+  "p95": 3.5,
+  "bias": 0.9
+ },
+ "small-regular-light-rampy-small": {
+  "inside": 1.5,
+  "rim": 1.7,
+  "edge": 6.4,
+  "near": 1,
+  "p95": 2.3,
+  "bias": 1.2
+ },
+ "panel-regular-light-barsy0": {
+  "inside": 5,
+  "rim": 8.2,
+  "edge": 7.8,
+  "near": 1,
+  "p95": 19.8,
+  "bias": 2.7
+ },
+ "row-regular-light-coast": {
+  "inside": 2.4,
+  "rim": 2.7,
+  "edge": 7.8,
+  "near": 1,
+  "p95": 4.8,
+  "bias": 0.9
+ }
+}
