@@ -90,6 +90,11 @@ export interface GlassOptions {
   magnify: boolean;
   /** follow the system's Clear/Tinted setting and the accessibility settings (true) */
   adaptive: boolean;
+  /**
+   * share one filter with the glass next to it (true): sibling glass is bent by one backdrop filter wherever that draws
+   * the same pixels, which costs a fraction per frame. false = a filter of its own, always
+   */
+  group: boolean;
 }
 
 export const DEFAULTS: GlassOptions = {
@@ -128,6 +133,7 @@ export const DEFAULTS: GlassOptions = {
   smooth: true,
   magnify: true,
   adaptive: true,
+  group: true,
 };
 
 /** Apple's glass variants, as option sets. `fill` values that depend on light or dark are resolved later. */
@@ -143,7 +149,7 @@ export const VARIANTS: Record<Variant, Partial<GlassOptions>> = {
 const NUMBERS = ['blurAmount', 'refraction', 'chromAberration', 'edgeHighlight', 'specular', 'fresnel', 'distortion', 'cornerRadius',
   'zRadius', 'opacity', 'saturation', 'tintStrength', 'brightness', 'baseBrightness', 'shadowOpacity', 'shadowSpread', 'shadowOffsetY', 'bevelMode',
   'pressBulge', 'strength', 'elasticity'] as const;
-const BOOLEANS = ['floating', 'button', 'interactive', 'smooth', 'magnify', 'adaptive'] as const;
+const BOOLEANS = ['floating', 'button', 'interactive', 'smooth', 'magnify', 'adaptive', 'group'] as const;
 const STRINGS = ['variant', 'tint', 'fill', 'shape', 'press', 'path', 'pathBox', 'backdrop'] as const;
 const ALL: readonly string[] = [...NUMBERS, ...BOOLEANS, ...STRINGS];
 

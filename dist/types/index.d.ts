@@ -44,7 +44,11 @@ export declare function getEnvironment(): Environment;
 export declare function setEnvironment(env: Partial<Environment>): void;
 /** Read every glass's options again: after changing CSS custom properties, the theme or the appearance. */
 export declare function refreshAll(): void;
-/** Make an element glass. Calling it again on the same element updates its options. */
+/**
+ * Make an element glass. Calling it again on the same element updates its options. Glass next to other glass (siblings
+ * that don't overlap) shares one backdrop filter with it wherever that draws the same pixels, which costs a fraction
+ * per frame; `group: false` keeps it on a filter of its own.
+ */
 export declare function glass(el: HTMLElement, options?: Partial<GlassOptions>): GlassHandle;
 /**
  * Apple's GlassEffectContainer: the glass shapes inside `el` (elements with data-glass or data-glass-member) become
@@ -92,8 +96,10 @@ export interface GlassGroupHandle {
  * Many glass elements, one backdrop filter: each element is glass as glass() makes it (its own options, light, shadow,
  * pointer behaviour; a handle from glassOf()), and one layer behind them bends the backdrop for all of them, which is
  * what costs per frame. Pass the elements, or their parent (its children with data-glass or data-glass-member).
- * The members must be siblings that don't overlap, with nothing painted between them near their edges; a member that
- * moves or changes on its own gets a filter of its own while it does, and joins again once it settles.
+ * glass() groups siblings by itself; this makes a group you control: set() and animate() change every member at once
+ * and keep them one filter, and it trusts you with the rules glass() checks. The members must be siblings that don't
+ * overlap, with nothing painted between them near their edges; a member that moves or changes on its own gets a filter
+ * of its own while it does, and joins again once it settles.
  */
 export declare function glassGroup(target: HTMLElement | Iterable<HTMLElement>, options?: Partial<GlassOptions>): GlassGroupHandle;
 /**

@@ -78,9 +78,14 @@ names. Libre Hub's earlier engine's short names work too (`--glass-bevel` for `z
 `--glass-edge`, `--glass-dome`, `--glass-blur`, `--glass-radius`), but its `--glass-tint`, a background colour, is
 this library's `tint` option.
 
-With a lot of glass on screen at once (a grid of tiles, a long toolbar, a dock), put it in a group. Each element stays
-glass of its own and looks the same, but one backdrop filter bends them all, and that's most of what glass costs per
-frame: 30 elements take 6.5× less ([measured](#many-glass-elements-glassgroup)).
+Glass next to other glass shares a backdrop filter by itself: sibling glass elements that don't overlap are bent by
+one filter on a layer just behind them, which is most of what glass costs per frame (30 elements take 4.8× less,
+[measured](#many-glass-elements-groups)). Each element stays glass of its own, with its own options, light, shadow,
+pointer behaviour and handle, and looks the same; one that changes on its own (hover, a press, a different strength, a
+move) gets a filter of its own while it does, in the same frame. `group: false` (or `data-glass-group="false"`) keeps an
+element on a filter of its own always.
+
+To change many elements together and keep them one filter, group them yourself:
 
 ```js
 import { glassGroup, glassOf } from 'liquid-glass-electron';
@@ -92,8 +97,9 @@ glassOf(document.querySelector('.tile')).set({ strength: 0.3 });   // one on its
 ```
 
 The members must be siblings that don't overlap, with nothing painted between them near their edges
-([the rules](docs/AGENTS.md#rules-for-groups-glassgroup)). The gallery's **Lots of glass** demo
-(`demo/demos/many.js`) switches 24 tiles between separate glass and a group, and counts their backdrop filters.
+([the rules](docs/AGENTS.md#rules-for-groups-glassgroup)); glass grouped by itself is held to that, a group made with
+`glassGroup` is trusted with it. The gallery's **Lots of glass** demo (`demo/demos/many.js`) switches 24 tiles between
+`group: false`, `glass()` and `glassGroup()`, and counts their backdrop filters.
 
 The rest of the API:
 
@@ -101,7 +107,7 @@ The rest of the API:
 |---|---|
 | `container(el, { spacing })`, `data-glass-container="16"` | Apple's GlassEffectContainer: the glass shapes inside (`data-glass` or `data-glass-member`) are one piece of glass, flowing together where they come within `spacing` px |
 | `union([a, b], options)` | Apple's glassEffectUnion: separate elements as one piece of glass |
-| `glassGroup(elements \| parent, options)` | many glass elements, one backdrop filter: each stays glass of its own and looks the same, for pages with a lot of glass on screen (see [Performance](#performance)) |
+| `glassGroup(elements \| parent, options)` | many glass elements, one backdrop filter: each stays glass of its own and looks the same. Sibling glass is grouped by itself; this is for a group you control (`set()`/`animate()` on all of them, keeping them one filter; see [Performance](#many-glass-elements-groups)) |
 | `morph(from, to)` | the glass of one element flows into another (Apple's glassEffectID) |
 | `materialize(el, 'in' \| 'out')` | glass grows in or fades away in place |
 | `glassButton(el, 'glass' \| 'prominent')` | Apple's `.glass` and `.glassProminent` button styles |
@@ -155,6 +161,7 @@ And this library's:
 | `elasticity` | 0.15 | Floating glass stretches along the way it's dragged, by how fast, and springs back. 0 = rigid |
 | `smooth`, `magnify` | true, true | The smoothing that keeps the rim free of grain; the slight magnification of a pill |
 | `adaptive` | true | Follow Clear/Tinted, Reduce Transparency and Increase Contrast |
+| `group` | true | Share one backdrop filter with sibling glass where that looks the same ([Performance](#many-glass-elements-groups)). `false` = a filter of its own, always |
 
 ## How it works
 
@@ -200,8 +207,8 @@ The gallery runs sandboxed, context-isolated and under a strict Content-Security
 <tr><td width="50%"><img src="https://raw.githubusercontent.com/CharlExMachina/liquid-glass-electron/media/appearance.gif" alt="Clear, tinted, accessible: Clear/Tinted, Reduce Transparency, Increase Contrast, light and dark"><br><b>Clear, tinted, accessible</b>: Clear/Tinted, Reduce Transparency, Increase Contrast, light and dark (<a href="https://raw.githubusercontent.com/CharlExMachina/liquid-glass-electron/media/appearance.mp4">MP4</a>, <code>demo/demos/appearance.js</code>)</td><td width="50%"><img src="https://raw.githubusercontent.com/CharlExMachina/liquid-glass-electron/media/playground.gif" alt="Playground: every option, live, including any SVG path as the shape"><br><b>Playground</b>: every option, live, including any SVG path as the shape (<a href="https://raw.githubusercontent.com/CharlExMachina/liquid-glass-electron/media/playground.mp4">MP4</a>, <code>demo/demos/playground.js</code>)</td></tr>
 </table>
 
-Also in the gallery: **Lots of glass**, 24 glass tiles over a scrolling feed, as separate glass or one `glassGroup`,
-with a count of their backdrop filters (`demo/demos/many.js`).
+Also in the gallery: **Lots of glass**, 24 glass tiles over a scrolling feed, each on a filter of its own, grouped by
+`glass()` or in a `glassGroup`, with a count of their backdrop filters (`demo/demos/many.js`).
 
 ## Performance
 
@@ -209,9 +216,8 @@ Measured with `npm run bench` ([bench/run.mjs](bench/run.mjs)): every library be
 window of 1180 × 800 on a second display, unfocused. The number is the CPU time of Chromium's GPU process (where backdrop
 filters and WebGL are drawn), as Electron's `app.getAppMetrics()` reports it, in % of one core: over 8 seconds after a
 2-second warm-up, three runs per library interleaved with the others, the median. The renderer process's time and the
-frames drawn per second are in [the results](bench/results/2026-10-25/results.md) too (`base` there is the library
-before `glassGroup` and the filter-region fix, measured in the same run). Machine: AMD Ryzen 9 7950X, Radeon RX 7900
-XTX (Mesa), Linux, Electron 44.9.3 (Chromium 152), a 4K display at 1.25×.
+frames drawn per second are in [the results](bench/results/2026-10-25/results.md) too. Machine: AMD Ryzen 9 7950X,
+Radeon RX 7900 XTX (Mesa), Linux, Electron 44.9.3 (Chromium 152), a 4K display at 1.25×.
 
 The scenes, over a photo:
 
@@ -223,48 +229,59 @@ The scenes, over a photo:
 
 | GPU process, % of a core | idle | content | move | scroll | 10 elements | 30 elements |
 |---|---|---|---|---|---|---|
-| no glass | 0 | 0.7 | 0.2 | 4.4 | 4.4 | 4.1 |
-| plain CSS `backdrop-filter: blur() saturate()` | 0 | 1.4 | 8.6 | 9.5 | 14.2 | 33.5 |
-| **liquid-glass-electron**, defaults (colour fringing on) | **0.1** | **1.7** | **13.2** | **13.6** | **23.6** | **67.3** |
-| **liquid-glass-electron**, `chromAberration: 0` | **0** | **1.4** | **9.5** | **9.7** | **15.6** | **37.7** |
-| **liquid-glass-electron in a `glassGroup`**, defaults | **0.1** | **1.2** | **10.4** | **8.2** | **8.0** | **10.4** |
-| **liquid-glass-electron in a `glassGroup`**, `chromAberration: 0` | **0** | **1.2** | **8.5** | **7.5** | **7.0** | **9.6** |
-| [@ybouane/liquidglass](https://github.com/ybouane/liquidglass) 1.0.3 (WebGL) | 11.0 | 12.1 | 16.0 | 25.8 | 50.6 | 110.9 |
-| [liquidGL](https://liquidgl.naughtyduk.com) 3.0.0 (WebGL) | 17.7 | 19.2 | 22.7 | 19.4 | 63.3 | 142.9 * |
-| [liquid-glass-react](https://www.npmjs.com/package/liquid-glass-react) 1.1.1 (SVG filter) | 0 | 11.2 | 65.7 † | 70.6 † | 79.7 † | 67.8 † |
-| [apple-liquid-glass-webgl](https://github.com/Oliverrr2424/webgl-apple-liquid-glass) 2.6.0 (WebGL) | 16.2 | 18.2 | 25.1 | 27.5 | 59.4 | 95.5 |
-| [simple-liquid-glass](https://github.com/lucaperullo/simple-liquid-glass) 5.4.0 (SVG filter) | 0 | 1.0 | 6.5 | 6.6 | 9.2 | 19.4 |
-| [@avenra/liquid-glass](https://github.com/DevSam7t3/liquid-glass) 1.2.0 (SVG filter) | 0 | 3.9 | 37.0 | 37.2 | 25.4 | 90.4 |
+| no glass | 0 | 1.0 | 0.2 | 4.1 | 4.2 | 4.2 |
+| plain CSS `backdrop-filter: blur() saturate()` | 0 | 1.7 | 9.5 | 9.9 | 16.1 | 41.8 |
+| **liquid-glass-electron**, defaults (colour fringing on) | **0** | **1.7** | **10.9** | **8.7** | **9.2** | **12.9** |
+| **liquid-glass-electron**, `chromAberration: 0` | **0** | **1.5** | **10.2** | **7.7** | **7.6** | **10.7** |
+| liquid-glass-electron, `group: false` (every glass on a filter of its own) | 0 | 2.2 | 13.5 | 13.9 | 23.0 | 61.8 |
+| liquid-glass-electron, `group: false`, `chromAberration: 0` | 0 | 1.9 | 10.6 | 9.6 | 15.4 | 36.7 |
+| [@ybouane/liquidglass](https://github.com/ybouane/liquidglass) 1.0.3 (WebGL) | 11.5 | 12.4 | 16.2 | 28.3 | 53.3 | 110.6 ‡ |
+| [liquidGL](https://liquidgl.naughtyduk.com) 3.0.0 (WebGL) | 18.1 | 19.9 | 24.4 | 19.6 | 69.4 | 147.0 * |
+| [liquid-glass-react](https://www.npmjs.com/package/liquid-glass-react) 1.1.1 (SVG filter) | 0 | 11.9 | 65.8 † | 74.9 † | 80.6 † | 69.8 † |
+| [apple-liquid-glass-webgl](https://github.com/Oliverrr2424/webgl-apple-liquid-glass) 2.6.0 (WebGL) | 17.4 | 19.2 | 27.0 | 27.3 | 63.1 | 104.2 ‡ |
+| [simple-liquid-glass](https://github.com/lucaperullo/simple-liquid-glass) 5.4.0 (SVG filter) | 0 | 1.5 | 6.7 | 6.6 | 9.9 | 21.6 § |
+| [@avenra/liquid-glass](https://github.com/DevSam7t3/liquid-glass) 1.2.0 (SVG filter) | 0 | 4.4 | 38.5 | 39.8 | 28.7 | 86.9 ‡ |
 
 Every run drew at the display's rate (about 98 frames a second) unless marked: less CPU can also mean fewer frames.
-\* liquidGL failed with 30 elements (shader errors; the capsules drew black), so that number isn't comparable.
-† liquid-glass-react couldn't keep up: 55 frames a second when moving and scrolling, 32 with 10 elements, 10 with 30.
+\* liquidGL failed with 30 elements (shader errors), so that number isn't comparable.
+† liquid-glass-react couldn't keep up: 52 frames a second when moving, 53 scrolling, 30 with 10 elements, 10 with 30.
+‡ with 30 elements, 82 frames a second (liquidglass), 92 (apple-liquid-glass-webgl), 78 (@avenra/liquid-glass).
+§ simple-liquid-glass's lens map doesn't take effect in Electron: its `<feImage width="100%">` sits in a 0 × 0 `<svg>`,
+Skia gets an empty map and moves the whole backdrop by a constant 80 px instead of bending it (the mirrored look). Its
+numbers are what any backdrop filter costs; with fringing, this library's glass takes 8 passes on the GPU per filter.
 
 What this says:
 
 - **Nothing changing costs nothing**, and neither does content changing under still glass, as with no glass at all.
-  The WebGL libraries draw every frame regardless: 11–19% of a core while nothing happens.
-- **Moving glass costs less than liquidglass**: 13.2% against 16.0%, and 10.4% in a `glassGroup` (the three still
-  panels share one filter). Chromium runs every glass's filter again on every frame anything changes, and colour
-  fringing is three bending passes. Without fringing it's 9.5%, close to a plain CSS blur's 8.6%.
-- **Separate glass costs in proportion to the number of elements on screen while anything moves**: 30 elements with
-  fringing take 67% of a core, twice a plain blur. Most of that is per backdrop filter, not per pixel, so **a
-  `glassGroup` bends them all with one filter**: 10.4% for 30, colour fringing and all, a third of a plain blur on
-  them and 6.5× less than separate glass; the renderer's share halves too (13.6% to 5.9%). They look the same (below).
-- simple-liquid-glass costs less while moving and scrolling: its filter is simpler, and it looks different (a mirrored
-  distortion). With 10 or 30 elements, a `glassGroup` costs less than it.
+  The WebGL libraries draw every frame regardless: 11–18% of a core while nothing happens.
+- **Glass next to other glass shares one filter by itself** (see [groups](#many-glass-elements-groups)), and most of
+  the cost is per backdrop filter, not per pixel. 30 capsules with colour fringing take 12.9% of a core, against 61.8%
+  each on its own filter (`group: false`): 4.8× less, a third of a plain CSS blur on them, and less than any library
+  measured. With 10, 9.2% against 23.0%.
+- **Moving glass costs less than liquidglass**: 10.9% against 16.2% (the three still panels share one filter, the
+  moving one has its own). Chromium runs every glass's filter again on every frame anything changes, and colour fringing
+  is three bending passes; without fringing it's 10.2%, about a plain CSS blur's 9.5%.
+- simple-liquid-glass costs less with the four panels (moving and scrolling), but it doesn't bend them (§). With 10 or
+  30 elements this library costs less than it.
 
 Every library was checked for drawing in each scene (`bench/results/<date>/shots/`, made by the run, not committed).
 
-### Many glass elements: `glassGroup`
+### Many glass elements: groups
 
 Most of that cost is per backdrop filter, not per pixel: each one is recorded, sent to the GPU process with its map's
-pixels and run again on every frame, however small. `glassGroup(elements)` (or `glassGroup(parent)`, for its children
-with `data-glass`) keeps every element glass of its own, with its own options, light, shadow, pointer behaviour and
-`glassOf()` handle, and bends all of them with one filter on a layer just behind them: the members' own filter, with
-their maps copied into one image (at whole map pixels, so each is drawn as it would be alone) and clipped to their
-shapes. It draws the same pixels as separate glass (at 1× the only difference is the antialiasing of the rim's
-outermost pixel; at fractional scales like 1.25×, scattered pixels round the other way).
+pixels and run again on every frame, however small. A group keeps every element glass of its own, with its own
+options, light, shadow, pointer behaviour and `glassOf()` handle, and bends all of them with one filter on a layer just
+behind them: the members' own filter, with their maps copied into one image and clipped to their shapes. Members of
+the same size draw their maps on one grid, whole map pixels apart (each draws that same map on its own too, so it looks
+the same in the group and out of it), and one image holds them all. It draws the same pixels as separate glass, but for
+the antialiasing of the rim's outermost pixel and, at fractional scales like 1.25×, scattered pixels that round the
+other way; a map redrawn on a group's grid (a fraction of a px finer) moves a few more rim pixels.
+
+`glass()` groups siblings by itself (an implicit group), and is strict about it: a member is drawn by the layer only
+if nothing is painted between the layer and it over what it bends, only glass near together shares a layer (the layer
+bends everything in its box, so far-apart glass in one would cost the GPU more pixels than it saves the CPU), and a
+parent is made a containing block only if nothing else in it would move. `glassGroup(elements)` (or
+`glassGroup(parent)`, for its children with `data-glass`) makes a group you control:
 
 ```js
 const tiles = glassGroup(document.querySelector('.grid'), { shape: 'capsule' });
@@ -272,20 +289,21 @@ tiles.set({ strength: 0.6 });                            // every member togethe
 glassOf(tiles.elements[0]).set({ strength: 0.3 });       // one member on its own: its own filter while it differs
 ```
 
-In the table above, separate glass against a `glassGroup` costs 67.3% against 10.4% of a core in the GPU process with
-30 capsules, and 13.6% against 5.9% in the renderer, drawing the same frames; with 10, 23.6% against 8.0%. In the move
-scene the moving panel has its own filter while it moves and the other three share one.
+In the move scene the moving panel has its own filter while it moves and the other three share one. (Drawing a
+moving member from the layer too was tried and measured: redrawing the layer's clip every frame costs more than the
+filter it saves.)
 
 A member leaves the group, in the same frame, while it changes on its own (strength, colour, hover, a press, a drag,
-a transition or animation, a resize, a move by inline style or class) and joins again once it has kept still for
-~120 ms; `set()` and `animate()` on the group change every member together and keep them one filter. What a group needs
-(details in [docs/AGENTS.md](docs/AGENTS.md#rules-for-groups-glassgroup)):
+a transition or animation, a resize, a move) and joins again once it has kept still for ~120 ms; one that keeps moving
+keeps its own filter and doesn't hold the others up. `set()` and `animate()` on the group change every member together
+and keep them one filter. A move that touches nothing on the member (a stylesheet rule, a layout shift among its
+siblings, `el.animate()`) is seen too, a frame later: an IntersectionObserver whose root box is the member's own box
+fires as soon as it moves, for nothing per frame meanwhile. What a group needs (details in
+[docs/AGENTS.md](docs/AGENTS.md#rules-for-groups-glassgroup)):
 
 - **Siblings that don't overlap, with nothing painted between them near their edges.** The layer bends the backdrop
-  of all of them before any paints, so one member's rim can't bend another member (or a sibling drawn between them),
-  as separate glass within a few dozen px would.
-- **Moves it can see.** A member moved by something that doesn't touch it (an ancestor's class, a stylesheet rule with
-  no transition, `el.animate()`) leaves its glass behind until `refresh()`.
+  of all of them before any paints, so one member's rim doesn't bend another member's glass (or a sibling drawn between
+  them), as separate glass within a few dozen px would. That's Apple's rule too: glass doesn't sample other glass.
 - Free shapes (`squircle`, `path`), a dome's fringe (`bevelMode: 1` with `chromAberration`), `distortion`, `backdrop`,
   sticky members, and members with their own `opacity`, `filter`, `mask`, `clip-path`, `mix-blend-mode`, rotation or
   scale keep a filter of their own (correct, just not cheaper).
@@ -301,7 +319,7 @@ much.
 
 | over | | rim | interior | shadow |
 |---|---|---|---|---|
-| a coast (NASA) | liquid-glass-electron | 3.2 | 1.8 | 0.2 |
+| a coast (NASA) | liquid-glass-electron | 3.1 | 1.8 | 0.2 |
 | | Libre Hub's earlier engine | 3.9 | 1.4 | 0.5 |
 | | liquidglass moved 1 px | 2.6 | 2.7 | |
 | mountains (NASA) | liquid-glass-electron | 4.1 | 1.4 | 0.1 |
@@ -323,8 +341,8 @@ before the bend, not a blur after it) and the interior a little further, still w
   change: Chromium runs every backdrop filter again for each frame. Idle, it's nothing; while something animates or
   scrolls, it's roughly proportional to the number of glass elements on screen (see [Performance](#performance)). Glass
   at `strength` 0 has no filter and costs nothing; so does `refraction: 0` (light and fill only). A container draws
-  all of its members with one filter, and so does a `glassGroup` (members that don't overlap, with nothing painted
-  between them near their edges).
+  all of its members with one filter, and so does a group: sibling glass that doesn't overlap, with nothing painted
+  between, is grouped by itself.
 - **Glass inside glass only sees the outer glass's own painting**, not what's behind it, and an ancestor with
   `opacity` below 1, a `filter`, a `mask`, `clip-path` or `mix-blend-mode` turns the bending off inside it. These are
   CSS's rules (the backdrop root). Apple's design rule is the same: don't stack glass on glass.

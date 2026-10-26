@@ -13,7 +13,7 @@ import { fileURLToPath } from 'node:url';
 import { cpus, release } from 'node:os';
 
 const arg = (k, d) => process.argv.find((a) => a.startsWith(`--${k}=`))?.slice(k.length + 3) ?? d;
-const LIBS = arg('libs', 'none,css,ours,ours-nofringe,liquidglass,liquidgl,lgreact,applewebgl,simple,avenra').split(',');
+const LIBS = arg('libs', 'none,css,ours,ours-nofringe,ours-separate,ours-separate-nofringe,liquidglass,liquidgl,lgreact,applewebgl,simple,avenra').split(',');
 const SCENES = arg('scenes', 'idle,content,move,scroll,many10,many30').split(',');
 const REPS = Number(arg('reps', 3)), SECS = Number(arg('seconds', 8)), WARM = Number(arg('warmup', 2));
 const DRAWN = process.argv.includes('--drawn');
