@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { roundedRect } from '../../src/field.ts';
-import { blurSigma, boxShadow, boxShadowAlpha, colorMatrix, fringeAt, height, shiftAt, slope, switchLens, tintGains } from '../../src/optics.ts';
+import { blurSigma, boxShadow, boxShadowAlpha, colorMatrix, fringeAt, height, macFrost, macLens, macLensSize, macMaxLuma, outlineShadow, shiftAt, slope, switchLens, tintGains } from '../../src/optics.ts';
 
 const near = (a: number, b: number, eps = 1e-6, msg?: string) => assert.ok(Math.abs(a - b) <= eps, msg ?? `${a} ≉ ${b}`);
 const defaults = { refraction: 0.69, bevel: 40, dome: false, magnify: true };
@@ -145,4 +145,46 @@ test('Apple\'s switch lens (bevelMode 3) shrinks what\'s behind it, parts at the
   near(shiftAt(29, 6, f, o)[0], 0, 1e-9);
   // linear in refraction
   near(shiftAt(20, 8, f, { ...o, refraction: 0.5 })[1], 0.5 * shiftAt(20, 8, f, o)[1], 1e-9);
+});
+
+test('macOS\'s lens (bevelMode 4) samples inward along the normal, by its measured profile', () => {
+  const f = roundedRect(340, 200, [40, 40, 40, 40]);
+  const mac = macLensSize(200, true, 20);
+  // sized as macOS sizes it: 0.65 × the shorter side for clear glass, at most 60; its height at most 20
+  near(mac.amount, 60);
+  near(mac.height, 20);
+  near(macLensSize(44, false, 20).amount, 22);
+  near(macLensSize(44, false, 20).height, 11);
+  const o = { refraction: 1, bevel: 40, dome: false, magnify: false, mac };
+  // the middle of the left edge: inward (to the right), by the profile, nothing across
+  for (const d of [0.5, 4, 10, 20, 30]) {
+    const [x, y] = shiftAt(d, 100, f, o);
+    near(x, macLens(d, 60, 20), 1e-6);
+    near(y, 0, 1e-9);
+  }
+  // falling from the edge to nothing two heights in
+  assert.ok(macLens(0, 60, 20) > macLens(4, 60, 20) && macLens(4, 60, 20) > macLens(20, 60, 20) && macLens(20, 60, 20) > 0);
+  near(macLens(40, 60, 20), 0);
+  // around a corner it follows the normal: on the diagonal, the same inward and down
+  const r = 40, k = 10 / Math.SQRT2, [cx, cy] = shiftAt(r - (r - 10) / Math.SQRT2, r - (r - 10) / Math.SQRT2, f, o);
+  near(cx, cy, 1e-3);
+  near(Math.hypot(cx, cy), macLens(10, 60, 20), 1e-3);
+  assert.ok(k > 0);
+});
+
+test('macOS\'s frost and brightness cap follow the size, and its outline the edge\'s direction', () => {
+  // clear glass: a blur radius from 5 (small) to 10 (120 px and up)
+  near(macFrost(44, true, false), 0.5);
+  near(macFrost(300, true, false), 1);
+  // regular glass: less frost when small, light or dark
+  assert.ok(macFrost(44, false, false) < macFrost(200, false, false));
+  near(macFrost(200, false, false), 1);
+  assert.ok(macFrost(44, false, true) < macFrost(200, false, true));
+  // dark regular glass is kept dimmer the larger it is
+  assert.ok(macMaxLuma(44) > macMaxLuma(80) && macMaxLuma(80) > macMaxLuma(200));
+  near(macMaxLuma(200), macMaxLuma(1000));
+  // the outline: a device px outside the edge, as box-shadows moved that far each way, sideways darker than up and down
+  assert.equal(outlineShadow({ outline: 0.3, outlineTop: 0.1 }, 1, 2), '-0.5px 0 0 0 rgb(0 0 0 / 0.3), 0.5px 0 0 0 rgb(0 0 0 / 0.3), 0 -0.5px 0 0 rgb(0 0 0 / 0.1), 0 0.5px 0 0 rgb(0 0 0 / 0.1)');
+  assert.equal(outlineShadow({ outline: 0.3, outlineTop: 0 }, 0.5, 1), '-1px 0 0 0 rgb(0 0 0 / 0.15), 1px 0 0 0 rgb(0 0 0 / 0.15)');
+  assert.equal(outlineShadow({ outline: 0, outlineTop: 0 }), 'none');
 });

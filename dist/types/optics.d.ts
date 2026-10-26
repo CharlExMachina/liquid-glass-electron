@@ -28,11 +28,44 @@ export interface Optics {
      * edge's normal, and its outermost px fold back
      */
     minify?: boolean;
+    /**
+     * macOS's lens (bevelMode 4): every point samples inward along the edge's normal, by `amount` px at the edge, falling
+     * off over a few × `height` px (see macLens)
+     */
+    mac?: {
+        amount: number;
+        height: number;
+    };
     /** the slight magnification toward the middle of a pill */
     magnify: boolean;
 }
 /** The switch lens's shift outward, px, at `d` px in from the edge, for a glass whose shorter side is 2 × `half` px. */
 export declare function switchLens(d: number, half: number): number;
+/** How far in macOS's lens reaches, in units of its height: nothing is moved deeper than this. */
+export declare const MAC_LENS_REACH = 2;
+/** macOS's lens: the inward shift, px, `d` px in from the edge. */
+export declare function macLens(d: number, amount: number, height: number): number;
+/**
+ * The lens macOS gives glass whose shorter side is `s` px (SwiftUI's glassBackground filter, read from its layers):
+ * the amount is half the shorter side (0.65 of it for clear glass), at most 60 px; the height a quarter of it (0.36 for
+ * clear), at most `height` (macOS: 20).
+ */
+export declare function macLensSize(s: number, clear: boolean, height: number): {
+    amount: number;
+    height: number;
+};
+/**
+ * How much of the frost macOS gives glass whose shorter side is `s` px, against the frost it gives large glass: clear
+ * glass's blur radius grows from 5 to 10 between 48 and 120 px; regular glass's blur is laid over less of the backdrop
+ * below 160 px (from 40% at 64 px down), which measures as a narrower blur (under its blur fill, see lens.ts).
+ */
+export declare function macFrost(s: number, clear: boolean, dark: boolean): number;
+/**
+ * How bright dark regular glass gets, as a share of white luma: macOS caps it (0.45 for glass 104 px and larger, up to
+ * 0.6 at 64 px and smaller), as fitted to what it draws, where a clamp applied to the luma of the coloured backdrop
+ * keeps the hue.
+ */
+export declare function macMaxLuma(s: number): number;
 /**
  * Where the backdrop is sampled from, relative to the point (x, y) of the field's box: the bevel's refraction plus
  * the magnification, as liquidglass's shader computes them.
@@ -72,6 +105,16 @@ export declare function tintGains(strength: number, rgb?: [number, number, numbe
 export declare function colorMatrix(saturation: number, brightness: number, gains: [number, number, number]): number[];
 /** liquidglass's shadow's opacity `-d` px outside the shape (d is the distance in, so negative outside). */
 export declare function boxShadowAlpha(d: number, opacity: number, spread: number): number;
+/**
+ * macOS's outline: a line one device pixel wide just outside the edge, black at `outline` opacity where the edge faces
+ * sideways and `outlineTop` where it faces up or down (as measured, over grey and white, from SwiftUI's glass), times
+ * `strength`. As box-shadows the size of the element moved a device pixel each way, so it follows the corners and is
+ * painted once, like the shadow.
+ */
+export declare function outlineShadow(o: {
+    outline: number;
+    outlineTop: number;
+}, strength?: number, dpr?: number): string;
 /**
  * liquidglass's shadow: 0.65 exp(−d²/s²) + 0.35 exp(−2d/s) from 1 px outside the shape (s = shadowSpread), times
  * shadowOpacity; then squared, as its canvas blends alpha with itself (SRC_ALPHA on a non-premultiplied canvas). As

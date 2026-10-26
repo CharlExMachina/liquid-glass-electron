@@ -46,6 +46,11 @@ export interface Optics {
    * edge's normal, and its outermost px fold back
    */
   minify?: boolean;
+  /**
+   * macOS's lens (bevelMode 4): every point samples inward along the edge's normal, by `amount` px at the edge, falling
+   * off over a few × `height` px (see macLens)
+   */
+  mac?: { amount: number; height: number };
   /** the slight magnification toward the middle of a pill */
   magnify: boolean;
 }
@@ -68,6 +73,57 @@ const SWITCH_LENS = [
 export function switchLens(d: number, half: number) {
   const t = clamp(d / half, 0, 1) * (SWITCH_LENS.length - 1), i = Math.min(Math.floor(t), SWITCH_LENS.length - 2);
   return (SWITCH_LENS[i] + (SWITCH_LENS[i + 1] - SWITCH_LENS[i]) * (t - i)) * half;
+}
+
+/**
+ * macOS 27's lens, measured from SwiftUI's glassEffect over ramps of known levels (test/native): the inward shift along
+ * the edge's normal, as a share of the lens's amount, at these depths in units of its height. Glass of every size and
+ * shape (a 44 pt capsule, a 340 × 200 panel, a circle, a 500 × 300 panel) falls on this one profile, scaled by the
+ * amount and height macOS gives it, and around corners too: the shift follows the normal, never sideways.
+ */
+const MAC_LENS_T = [0, 0.05, 0.1, 0.15, 0.2, 0.3, 0.4, 0.5, 0.6, 0.8, 1, 1.25, 1.5, 2, 3];
+const MAC_LENS = [0.95, 0.65, 0.55, 0.47, 0.41, 0.3, 0.235, 0.185, 0.14, 0.075, 0.04, 0.02, 0.015, 0, 0];
+
+/** How far in macOS's lens reaches, in units of its height: nothing is moved deeper than this. */
+export const MAC_LENS_REACH = 2;
+
+/** macOS's lens: the inward shift, px, `d` px in from the edge. */
+export function macLens(d: number, amount: number, height: number) {
+  const t = Math.max(d, 0) / Math.max(height, 0.01);
+  if (t >= MAC_LENS_T[MAC_LENS_T.length - 1]) return 0;
+  let i = 0;
+  while (MAC_LENS_T[i + 1] < t) i++;
+  const u = (t - MAC_LENS_T[i]) / (MAC_LENS_T[i + 1] - MAC_LENS_T[i]);
+  return (MAC_LENS[i] + (MAC_LENS[i + 1] - MAC_LENS[i]) * u) * amount;
+}
+
+/**
+ * The lens macOS gives glass whose shorter side is `s` px (SwiftUI's glassBackground filter, read from its layers):
+ * the amount is half the shorter side (0.65 of it for clear glass), at most 60 px; the height a quarter of it (0.36 for
+ * clear), at most `height` (macOS: 20).
+ */
+export function macLensSize(s: number, clear: boolean, height: number) {
+  return { amount: Math.min((clear ? 0.65 : 0.5) * s, 60), height: Math.min((clear ? 0.36 : 0.25) * s, height) };
+}
+
+/**
+ * How much of the frost macOS gives glass whose shorter side is `s` px, against the frost it gives large glass: clear
+ * glass's blur radius grows from 5 to 10 between 48 and 120 px; regular glass's blur is laid over less of the backdrop
+ * below 160 px (from 40% at 64 px down), which measures as a narrower blur (under its blur fill, see lens.ts).
+ */
+export function macFrost(s: number, clear: boolean, dark: boolean) {
+  if (clear) return clamp(5 + ((s - 48) * 5) / 72, 5, 10) / 10;
+  const t = clamp((s - 64) / 96, 0, 1);
+  return dark ? 0.583 + 0.489 * t : 0.466 + 0.534 * t;
+}
+
+/**
+ * How bright dark regular glass gets, as a share of white luma: macOS caps it (0.45 for glass 104 px and larger, up to
+ * 0.6 at 64 px and smaller), as fitted to what it draws, where a clamp applied to the luma of the coloured backdrop
+ * keeps the hue.
+ */
+export function macMaxLuma(s: number) {
+  return 0.158 + 0.833 * clamp(0.6 - 0.00375 * (s - 64), 0.45, 0.6);
 }
 
 /** The bevel's height gradient at (x, y), over ±2 px as liquidglass's shader takes it (inward), and the depth there. */
@@ -97,6 +153,13 @@ export function shiftAt(x: number, y: number, f: Field, o: Optics): [number, num
     const t = clamp(d / zR, 0, 1), k = o.refraction * 0.5 * (1 - t) ** 2;
     const [tx, ty] = f.toward(x, y);
     return [tx * k, ty * k];
+  }
+  if (o.mac) {
+    // inward along the edge's normal, by the measured profile
+    const e = 0.05;
+    const nx = f.sdf(x + e, y) - f.sdf(x - e, y), ny = f.sdf(x, y + e) - f.sdf(x, y - e), l = Math.hypot(nx, ny) || 1;
+    const p = macLens(d, o.mac.amount, o.mac.height) * o.refraction;
+    return [(-nx / l) * p, (-ny / l) * p];
   }
   if (o.minify) {
     // Outward along the edge's normal, by the measured profile; and along the long side a little more, as the switch's
@@ -206,6 +269,18 @@ export function boxShadowAlpha(d: number, opacity: number, spread: number): numb
   const s = Math.max(spread, 1), out = Math.max(-d - 1, 0) / s;
   const a = (0.65 * Math.exp(-out * out) + 0.35 * Math.exp(-2 * out)) * opacity;
   return a * a;
+}
+
+/**
+ * macOS's outline: a line one device pixel wide just outside the edge, black at `outline` opacity where the edge faces
+ * sideways and `outlineTop` where it faces up or down (as measured, over grey and white, from SwiftUI's glass), times
+ * `strength`. As box-shadows the size of the element moved a device pixel each way, so it follows the corners and is
+ * painted once, like the shadow.
+ */
+export function outlineShadow(o: { outline: number; outlineTop: number }, strength = 1, dpr = typeof devicePixelRatio === 'number' ? devicePixelRatio : 1): string {
+  const side = o.outline * strength, top = o.outlineTop * strength, px = `${+(1 / Math.max(dpr, 1)).toFixed(3)}px`;
+  const c = (a: number) => `rgb(0 0 0 / ${+a.toFixed(3)})`;
+  return [side > 0 && `-${px} 0 0 0 ${c(side)}, ${px} 0 0 0 ${c(side)}`, top > 0 && `0 -${px} 0 0 ${c(top)}, 0 ${px} 0 0 ${c(top)}`].filter(Boolean).join(', ') || 'none';
 }
 
 /**

@@ -53,7 +53,7 @@ Options can also come from data attributes (`data-glass-refraction="0.4"`, `data
 | Bars over scrolling content | glass on a fixed/sticky bar; `scrollEdge(scroller, { style: 'soft' })` | `demo/demos/scroll.js` |
 | Apple's button styles | `glassButton(el, 'glass' \| 'prominent')`; accent from `--glass-accent` | `demo/demos/buttons.js` |
 | Glass over video, canvas, CSS animation | Nothing special: it bends whatever is drawn behind it, live | `demo/demos/video.js`, `demo/demos/drag.js` |
-| Frosted vs clear | `variant: 'regular'` (frost) or `'clear'`; `blurAmount` for your own | `demo/demos/appearance.js` |
+| Apple's glass as macOS 27 draws it | `variant: 'regular'` or `'clear'` (both frosted, `clear` more so with less colour, a lens along the rim; measured against SwiftUI's own, `pnpm test:native`); no variant for liquidglass's sharp bending; `blurAmount` for your own frost | `demo/demos/appearance.js`, `native/Glass.swift` |
 | Dark mode, Tinted, accessibility | `setEnvironment({ dark, appearance: 'tinted', reduceTransparency, increaseContrast, reduceMotion })` | `demo/demos/appearance.js` |
 | Every knob at once | the playground: it prints the `glass()` call for what you set | `demo/demos/playground.js` |
 

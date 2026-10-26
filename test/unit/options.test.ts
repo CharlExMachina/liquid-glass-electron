@@ -39,7 +39,7 @@ test('Libre Hub\'s short names still work', () => {
 });
 
 test('data-glass takes a variant or JSON; flags read as booleans', () => {
-  assert.equal(resolve([fromData(element({ 'data-glass': 'regular' }))], env).blurAmount, 0.5);
+  assert.equal(resolve([fromData(element({ 'data-glass': 'regular' }))], env).variant, 'regular');
   assert.equal(resolve([fromData(element({ 'data-glass': '{"refraction": 1.2}' }))], env).refraction, 1.2);
   assert.equal(resolve([fromData(element({ 'data-glass-floating': '' }))], env).floating, true);
   assert.equal(resolve([fromData(element({ 'data-glass': 'identity' }))], env).refraction, 0);
@@ -60,4 +60,30 @@ test('the system\'s settings: tinted, reduce transparency, increase contrast', (
   assert.ok(contrast.edgeHighlight >= 0.6 && contrast.chromAberration === 0);
   // opting out
   assert.equal(resolve([{ adaptive: false }], { ...env, reduceTransparency: true }).blurAmount, 0);
+});
+
+test('Apple\'s variants are macOS 27\'s glass: its lens, frost and colour, no fringe, light or shadow', () => {
+  for (const v of ['regular', 'clear'] as const) {
+    const o = resolve([{ variant: v }], env);
+    assert.equal(o.bevelMode, 4);
+    assert.equal(o.chromAberration, 0);
+    assert.equal(o.fresnel + o.edgeHighlight + o.specular + o.shadowOpacity, 0);
+    assert.ok(Array.isArray(o.colorMatrix) && o.colorMatrix.length === 12);
+  }
+  // clear glass is the more frosted
+  assert.ok(resolve([{ variant: 'clear' }], env).blurAmount > resolve([{ variant: 'regular' }], env).blurAmount);
+  // a colour matrix for light and dark, and for a wide-gamut display or an sRGB one
+  const m = (e: Partial<Environment>) => resolve([{ variant: 'regular' }], { ...env, ...e }).colorMatrix;
+  assert.notDeepEqual(m({}), m({ dark: true }));
+  assert.notDeepEqual(m({}), m({ wideGamut: false }));
+  // greys stay grey: each row's gains add up to the same
+  for (const e of [{}, { dark: true }, { wideGamut: false }]) {
+    const c = m(e) as number[], sums = [0, 1, 2].map((r) => c[r * 4] + c[r * 4 + 1] + c[r * 4 + 2]);
+    assert.ok(Math.max(...sums) - Math.min(...sums) < 0.02, String(sums));
+  }
+  // the outline is darker in the dark; one of your own stays
+  assert.ok(resolve([{ variant: 'regular' }], { ...env, dark: true }).outline > resolve([{ variant: 'regular' }], env).outline);
+  assert.equal(resolve([{ variant: 'regular', outline: 0.1 }], { ...env, dark: true }).outline, 0.1);
+  // a matrix of your own, as CSS gives it
+  assert.deepEqual(resolve([fromCss(css({ '--glass-color-matrix': '1 0 0 0 0 1 0 0 0 0 1 0.1' }))], env).colorMatrix, [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0.1]);
 });
