@@ -82,14 +82,16 @@
     scale 0.3s var(--ios-bounce), left 0.42s var(--ios-spring);
 }
 
-/* the slider */
+/* The slider, measured from iOS 26's UISlider as the switch is (below): 34 high, the track 6 (white at 10% where it's
+   empty, the accent blue where it's filled), and its knob the switch's own, 37 × 24 at rest and the same lens held, on
+   the same spot; the knob's edges reach the track's ends. */
+.ios-scene { --ios-slider-track: rgb(255 255 255 / 0.1); }
+:root[data-theme='light'] .ios-scene { --ios-slider-track: var(--ios-track); }
 .ios-slider-row { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 14px; font-size: 16px; }
-/* An iPhone's sizes, measured from a recording (pt): the track 12 high, the knob 77 × 50 at rest and 113 × 83 held. */
-.ios-slider { position: relative; height: 60px; touch-action: none; cursor: pointer; outline: none; }
-.ios-track { position: absolute; left: 0; right: 0; top: 24px; height: 12px; border-radius: 6px; background: var(--ios-track); overflow: hidden; }
-.ios-fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 6px; background: var(--ios-blue); }
-.ios-slider .ios-knob { width: 113px; height: 83px; margin: -41.5px 0 0 -56.5px; border-radius: 41.5px; scale: 0.681 0.602; }
-.ios-slider.held .ios-knob { scale: 1; transition-property: --glass-strength, --ios-glass, --glass-blur-amount, --ios-solid, scale; }
+.ios-slider { position: relative; height: 34px; touch-action: none; cursor: pointer; outline: none; }
+.ios-track { position: absolute; left: 0; right: 0; top: 14px; height: 6px; border-radius: 3px; background: var(--ios-slider-track); overflow: hidden; }
+.ios-fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 3px; background: var(--ios-switch-on); }
+.ios-slider .ios-knob { top: 17px; }
 
 /* The switch, measured from iOS 26's UISwitch (an iPhone app on the Mac, frame by frame at 120 fps): the track 63 × 28,
    white at 24% when off (black at 26% in light) and the accent blue when on; the knob 37 × 24, 2 px in, centred 11 px
@@ -98,19 +100,21 @@
    and turns white. The knob element is the lens, 58 × 37.5, scaled to 0.64 at rest. */
 .ios-scene { --ios-switch-off: rgb(255 255 255 / 0.243); --ios-switch-on: rgb(0 145 255); }
 :root[data-theme='light'] .ios-scene { --ios-switch-off: rgb(0 0 0 / 0.26); --ios-switch-on: rgb(0 136 255); }
-.ios-switch {
-  /* the press's spring (68% of the way at 32 ms, there at 68, 14% past at 110, settled at 200) and the slide's (there
-     at 245 ms, 6.5% past at 360, settled at 600) */
+.ios-scene {
+  /* the knob's press spring (68% of the way at 32 ms, there at 68, 14% past at 110, settled at 200) and the switch's
+     slide (there at 245 ms, 6.5% past at 360, settled at 600) */
   --ios-press: linear(0, 0.1 6%, 0.4 10.5%, 0.68 13.5%, 0.86 21%, 1 28%, 1.1 36%, 1.14 46%, 1.11 60%, 1.04 72%, 1.01 85%, 1);
   --ios-slide: linear(0, 0.06 1.5%, 0.25 4.5%, 0.47 10%, 0.62 15%, 0.76 21%, 0.87 27%, 0.95 33%, 0.995 39%, 1.03 45%, 1.055 51%, 1.065 57%, 1.062 65%, 1.048 74%, 1.025 82%, 1.008 91%, 1);
+}
+.ios-switch {
   position: relative; width: 63px; height: 28px; border-radius: 14px; background: var(--ios-switch-off); cursor: pointer; outline: none;
   transition: background-color 0.28s cubic-bezier(0.2, 0, 0.3, 1) 0.02s;
 }
 .ios-switch[aria-checked='true'] { background-color: var(--ios-switch-on); }
-/* At rest its glass is all but off (2‰, under the solid white): the filter stays live, so a press doesn't wait a frame
-   or two for it to start. */
-.ios-switch .ios-knob {
-  width: 58px; height: 37.5px; margin: -18.75px 0 0 -29px; border-radius: 18.75px; left: 20.5px; scale: 0.64;
+/* The knob (the switch's and the slider's): at rest its glass is all but off (2‰, under the solid white), so the
+   filter stays live and a press doesn't wait a frame or two for it to start. */
+:is(.ios-switch, .ios-slider) .ios-knob {
+  width: 58px; height: 37.5px; margin: -18.75px 0 0 -29px; border-radius: 18.75px; scale: 0.64;
   --glass-strength: 0.002; --glass-blur-amount: 0.4;
   /* release: the frost comes up and the outline goes from 50 to 110 ms, the knob shrinks back over 200 ms from 80, the
      white comes up through the frost from 70 ms to 260, and the glass goes once it's covered */
@@ -118,14 +122,15 @@
     --ios-solid 0.19s cubic-bezier(0.3, 0, 0.5, 1) 0.07s, scale 0.2s cubic-bezier(0.35, 0, 0.3, 1) 0.08s, filter 0.1s linear 0.1s,
     left 0.63s var(--ios-slide) 0.03s;
 }
+.ios-switch .ios-knob { left: 20.5px; }
 .ios-switch[aria-checked='true'] .ios-knob { left: 42.5px; }
-.ios-switch .ios-knob::before { box-shadow: none; }
-.ios-switch .ios-knob::after {
+:is(.ios-switch, .ios-slider) .ios-knob::before { box-shadow: none; }
+:is(.ios-switch, .ios-slider) .ios-knob::after {
   /* the lens's surface, measured (see surface() in ios.js): shading, the rim's light, a dark hairline and the shadow */
   inset: -16px; border-radius: 0; box-shadow: none; background: var(--ios-surface) center / 100% 100% no-repeat;
 }
-:root[data-theme='light'] .ios-switch .ios-knob::after { background-image: var(--ios-surface-light); }
-.ios-switch.held .ios-knob {
+:root[data-theme='light'] :is(.ios-switch, .ios-slider) .ios-knob::after { background-image: var(--ios-surface-light); }
+:is(.ios-switch, .ios-slider).held .ios-knob {
   scale: 1; --glass-strength: 1; --glass-blur-amount: 0.04; --ios-solid: 0; --ios-glass: 1; filter: saturate(1.2);
   /* press: the white gives way to frosted glass over 65 ms, the frost clears by 100, the outline comes in at 45 to 85,
      and the lens springs up. A trace of frost stays (0.04, σ 0.3 px, about the smoothing glass gets without any): at 0
@@ -134,6 +139,8 @@
   transition: --glass-strength 0.02s linear, --ios-solid 0.065s cubic-bezier(0.3, 0, 0.6, 1) 0.008s, --glass-blur-amount 0.07s linear 0.03s,
     --ios-glass 0.04s linear 0.045s, scale 0.24s var(--ios-press), filter 0.04s linear, left 0.63s var(--ios-slide);
 }
+/* dragged, the slider's knob follows the pointer */
+.ios-slider.held .ios-knob { transition-property: --glass-strength, --ios-solid, --glass-blur-amount, --ios-glass, scale, filter; }
 /* sliding while held (a quick click), the lens stretches along the way it goes */
 .ios-switch.stretch .ios-knob { animation: ios-stretch 0.3s ease-out; }
 @keyframes ios-stretch { 35% { transform: scale(1.07, 0.97); } }

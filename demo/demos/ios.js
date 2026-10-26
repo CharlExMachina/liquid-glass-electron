@@ -7,7 +7,7 @@ import { css, drag, h, icon, photo, ready, sleep, tap } from './lib.js';
 // release the frost comes up first, then the white, so the in-between frames are frosted, as Apple's are.
 
 const SVG = 'http://www.w3.org/2000/svg';
-const KNOB_W = 77; // the resting knob's width (see ios.css)
+const KNOB_W = 37; // the resting knob's width (see ios.css)
 
 /** The up-and-down chevrons of a pop-up button. */
 function chevrons() {
@@ -188,7 +188,7 @@ export default {
       h('div.ios-card', {}, h('div.ios-label', { text: 'Size' }), h('div.ios-slider-row', {}, h('span', { text: 'Small' }), size.el, h('span', { text: 'Large' }))),
       h('div.ios-card.ios-row', {}, h('span', { text: 'Enabled' }), enabled.el),
       h('div.ios-card', {}, h('div.ios-label', { text: 'Mode' }), mode.el),
-      h('p.ios-note', { text: 'Solid at rest, glass while touched. Each knob is glass whose --glass-strength is 0 until it’s pressed: a CSS transition takes it to 1 while the knob’s own white fades out and it grows; on release the frost comes back first, then the white. The slider’s knob is Apple’s lens (bevelMode 2): the rim magnifies toward the middle, so the track flares where it enters. The switch’s is Apple’s switch lens (bevelMode 3), measured from iOS’s: it shrinks what’s behind it.' }),
+      h('p.ios-note', { text: 'Solid at rest, glass while touched. Each knob is glass whose --glass-strength is 0 until it’s pressed: a CSS transition takes it to 1 while the knob’s own white fades out and it grows; on release the frost comes back first, then the white. Both are sized and drawn as iOS’s, measured from them. The switch’s knob is Apple’s switch lens (bevelMode 3): it shrinks what’s behind it. The slider’s (bevelMode 2, a narrow rim) leaves the track its width and flares it where it enters.' }),
     );
     const right = h('div.ios-col.ios-right', {},
       h('div.ios-card.ios-field', {}, h('div.ios-label', { text: 'Options' }), field),
@@ -199,17 +199,21 @@ export default {
     await ready(img);
 
     // ---- the glass. Strength and frost come from CSS (ios.css) so transitions drive them; the rest is set here.
-    // The slider's knob is Apple's lens (bevelMode 2): the rim magnifies toward the middle, so the track flares out where it
-    // enters the knob, and the middle is flat. No brightening (baseBrightness 0: liquidglass's 6% would turn a light page white) and none
-    // of the glass's own light: the knob's rim and shading are CSS (.ios-knob::after), as measured from an iPhone.
-    const knob = { bevelMode: 2, zRadius: 24, refraction: 1.15, chromAberration: 0, baseBrightness: 0, edgeHighlight: 0, fresnel: 0, specular: 0, fill: 'rgb(255 255 255 / 0.05)', shadowOpacity: 0.25, shadowSpread: 8, shadowOffsetY: 3 };
-    // The switch's knob is Apple's switch lens (bevelMode 3), with its 10% white fill; its surface and shadow are an
-    // image (surface()), and it's saturated in CSS (.ios-switch.held .ios-knob)
-    enabled.knob.style.setProperty('--ios-surface', `url(${surface(58, 37.5, Math.max(devicePixelRatio, 2), false)})`);
-    enabled.knob.style.setProperty('--ios-surface-light', `url(${surface(58, 37.5, Math.max(devicePixelRatio, 2), true)})`);
+    // The knobs are drawn alike (same size, surface and choreography) but bend differently. The switch's is Apple's
+    // switch lens (bevelMode 3): it shrinks what's behind it. The slider's leaves the track its own width and flares it
+    // at the rim (bevelMode 2, a narrow rim), as iOS's does. Both have a 10% white fill and none of the glass's own
+    // light (baseBrightness 0: liquidglass's 6% would turn a light page white); their surface and shadow are an image
+    // (surface()), and they're saturated in CSS (.held .ios-knob).
+    const knob = { bevelMode: 3, refraction: 1, chromAberration: 0, baseBrightness: 0, edgeHighlight: 0, fresnel: 0, specular: 0, fill: 'rgb(255 255 255 / 0.102)', shadowOpacity: 0 };
+    const sliderKnob = { ...knob, bevelMode: 2, zRadius: 6, refraction: 1.4 };
+    const surfaces = [surface(58, 37.5, Math.max(devicePixelRatio, 2), false), surface(58, 37.5, Math.max(devicePixelRatio, 2), true)];
+    for (const k of [enabled.knob, size.knob]) {
+      k.style.setProperty('--ios-surface', `url(${surfaces[0]})`);
+      k.style.setProperty('--ios-surface-light', `url(${surfaces[1]})`);
+    }
     const handles = [
-      glass(size.knob, knob),
-      glass(enabled.knob, { bevelMode: 3, refraction: 1, chromAberration: 0, baseBrightness: 0, edgeHighlight: 0, fresnel: 0, specular: 0, fill: 'rgb(255 255 255 / 0.102)', shadowOpacity: 0 }),
+      glass(size.knob, sliderKnob),
+      glass(enabled.knob, knob),
       glass(mode.lens, { shape: 'capsule', zRadius: 12, refraction: 0.6, chromAberration: 0, edgeHighlight: 0.2, fresnel: 0.6, shadowOpacity: 0.45, shadowSpread: 8, shadowOffsetY: 2 }),
       glass(menu, { variant: 'regular', cornerRadius: 26, blurAmount: 1.6, saturation: 0.6, refraction: 0.55, zRadius: 22, shadowOpacity: 0.5, shadowSpread: 18, shadowOffsetY: 6 }),
     ];
