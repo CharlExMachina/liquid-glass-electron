@@ -61,26 +61,75 @@ function slider(value) {
   return { el, knob };
 }
 
-/** A switch: pressed, the knob swells into a lens about as wide as the track; it slides, then shrinks back to white. */
+/**
+ * The switch lens's surface, drawn once (it doesn't bend), as measured from iOS's switch over a white and a dark
+ * backdrop: inside, a dark band that follows the outline (3.3 px in at the sides, 9.8 at the top, none where the edge
+ * faces down) and white along the top and bottom rim; outside, a hairline of dark and the shadow (the shape grown
+ * 2.4 px, 8.1 px down, blurred σ 1.8 px: seen only outside the glass). Light mode has the same, the band, hairline and
+ * shadow fainter. A data URL for the knob's box and 16 px around it, at `k` pixels per px.
+ */
+function surface(w, h, k, light) {
+  const PAD = 16, W = Math.round((w + 2 * PAD) * k), H = Math.round((h + 2 * PAD) * k), r = h / 2, half = w / 2 - r;
+  const canvas = document.createElement('canvas');
+  canvas.width = W;
+  canvas.height = H;
+  const ctx = canvas.getContext('2d'), img = ctx.createImageData(W, H), px = img.data;
+  const smooth = (t) => t * t * (3 - 2 * t), clamp01 = (t) => Math.min(Math.max(t, 0), 1);
+  const [band, sides, ends, shadow] = light ? [0.45, 0.32, 0.05, 0.074] : [1, 0.23, 0.57, 0.174];
+  for (let j = 0; j < H; j++) {
+    for (let i = 0; i < W; i++) {
+      const x = (i + 0.5) / k - PAD - w / 2, y = (j + 0.5) / k - PAD - h / 2;
+      const qx = Math.max(Math.abs(x) - half, 0), len = Math.hypot(qx, y) || 1e-9, d = r - len;
+      const ny = y / len, up = Math.max(0, -ny);
+      let dark = 0, white = 0;
+      if (d > 0) {
+        const t = clamp01((ny + 0.056) / 1.159), c = 3.344 + 6.478 * up, sg = 5.46 - 0.631 * up;
+        dark = band * (0.202 * (1 - smooth(t)) * Math.exp(-(((d - c) / sg) ** 2)) + 0.079 * up * Math.exp(-d / 3.878));
+      } else {
+        // the hairline, flat from 0.12 to 0.95 px out (darkest at the sides), and the shadow
+        const line = (ends + sides * (1 - ny * ny)) * smooth(clamp01((d + 1.1) / 0.15)) * (1 - smooth(clamp01((d + 0.12) / 0.12)));
+        const below = r + 2.42 - Math.hypot(qx, y - 8.14);
+        dark = 1 - (1 - line) * (1 - shadow / (1 + Math.exp((-1.702 * below) / 1.76)));
+      }
+      if (d > -0.33) white = ny * ny * (0.5 * Math.exp(-Math.max(d, 0) / 0.4) + 0.06 * Math.exp(-Math.max(d, 0) / 2.2)) * clamp01((d + 0.33) / 0.12);
+      // black under white: the alpha and colour of the one layer they make
+      const a = 1 - (1 - dark) * (1 - white), o = (j * W + i) * 4;
+      px[o] = px[o + 1] = px[o + 2] = a > 0 ? Math.round((255 * white) / a) : 0;
+      px[o + 3] = Math.round(255 * a);
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  return canvas.toDataURL();
+}
+
+/**
+ * A switch, as iOS 26's: pressed, the knob turns into a lens on the same spot; it toggles on release, and the lens
+ * frosts, slides and shrinks back to white. A release sooner than the press's spring settles (a quick click) waits for
+ * it, and the lens stretches along the way it slides meanwhile.
+ */
 function toggle(on) {
+  const SETTLE = 200;
   const knob = h('div.ios-knob');
   const el = h('div.ios-switch', { role: 'switch', tabindex: 0, 'aria-checked': String(on) }, knob);
-  let timer = 0;
-  const release = (ms) => {
+  let timer = 0, pressedAt = -1e9;
+  const release = () => {
     clearTimeout(timer);
-    timer = setTimeout(() => el.classList.remove('held'), ms);
+    timer = setTimeout(() => el.classList.remove('held', 'stretch'), Math.max(0, SETTLE - (performance.now() - pressedAt)));
   };
   el.addEventListener('pointerdown', (e) => {
     if (e.button !== 0) return;
     clearTimeout(timer);
+    pressedAt = performance.now();
     el.classList.add('held');
-    addEventListener('pointerup', () => release(300), { once: true });
+    addEventListener('pointerup', release, { once: true });
   });
   el.addEventListener('click', () => {
     el.setAttribute('aria-checked', String(el.getAttribute('aria-checked') !== 'true'));
+    if (!el.classList.contains('held')) pressedAt = performance.now();
+    if (performance.now() - pressedAt < SETTLE) el.classList.add('stretch');
     // it stays glass while it slides
     el.classList.add('held');
-    release(300);
+    release();
   });
   el.addEventListener('keydown', (e) => {
     if (e.key === ' ' || e.key === 'Enter') {
@@ -139,7 +188,7 @@ export default {
       h('div.ios-card', {}, h('div.ios-label', { text: 'Size' }), h('div.ios-slider-row', {}, h('span', { text: 'Small' }), size.el, h('span', { text: 'Large' }))),
       h('div.ios-card.ios-row', {}, h('span', { text: 'Enabled' }), enabled.el),
       h('div.ios-card', {}, h('div.ios-label', { text: 'Mode' }), mode.el),
-      h('p.ios-note', { text: 'Solid at rest, glass while touched. Each knob is glass whose --glass-strength is 0 until it’s pressed: a CSS transition takes it to 1 while the knob’s own white fades out and it grows; on release the frost comes back first, then the white. The knobs are Apple’s lens (bevelMode 2): the rim magnifies toward the middle, so the track flares where it enters.' }),
+      h('p.ios-note', { text: 'Solid at rest, glass while touched. Each knob is glass whose --glass-strength is 0 until it’s pressed: a CSS transition takes it to 1 while the knob’s own white fades out and it grows; on release the frost comes back first, then the white. The slider’s knob is Apple’s lens (bevelMode 2): the rim magnifies toward the middle, so the track flares where it enters. The switch’s is Apple’s switch lens (bevelMode 3), measured from iOS’s: it shrinks what’s behind it.' }),
     );
     const right = h('div.ios-col.ios-right', {},
       h('div.ios-card.ios-field', {}, h('div.ios-label', { text: 'Options' }), field),
@@ -150,13 +199,17 @@ export default {
     await ready(img);
 
     // ---- the glass. Strength and frost come from CSS (ios.css) so transitions drive them; the rest is set here.
-    // Knobs are Apple's lens (bevelMode 2): the rim magnifies toward the middle, so the track flares out where it
+    // The slider's knob is Apple's lens (bevelMode 2): the rim magnifies toward the middle, so the track flares out where it
     // enters the knob, and the middle is flat. No brightening (baseBrightness 0: liquidglass's 6% would turn a light page white) and none
     // of the glass's own light: the knob's rim and shading are CSS (.ios-knob::after), as measured from an iPhone.
     const knob = { bevelMode: 2, zRadius: 24, refraction: 1.15, chromAberration: 0, baseBrightness: 0, edgeHighlight: 0, fresnel: 0, specular: 0, fill: 'rgb(255 255 255 / 0.05)', shadowOpacity: 0.25, shadowSpread: 8, shadowOffsetY: 3 };
+    // The switch's knob is Apple's switch lens (bevelMode 3), with its 10% white fill; its surface and shadow are an
+    // image (surface()), and it's saturated in CSS (.ios-switch.held .ios-knob)
+    enabled.knob.style.setProperty('--ios-surface', `url(${surface(58, 37.5, Math.max(devicePixelRatio, 2), false)})`);
+    enabled.knob.style.setProperty('--ios-surface-light', `url(${surface(58, 37.5, Math.max(devicePixelRatio, 2), true)})`);
     const handles = [
       glass(size.knob, knob),
-      glass(enabled.knob, { ...knob, zRadius: 14 }),
+      glass(enabled.knob, { bevelMode: 3, refraction: 1, chromAberration: 0, baseBrightness: 0, edgeHighlight: 0, fresnel: 0, specular: 0, fill: 'rgb(255 255 255 / 0.102)', shadowOpacity: 0 }),
       glass(mode.lens, { shape: 'capsule', zRadius: 12, refraction: 0.6, chromAberration: 0, edgeHighlight: 0.2, fresnel: 0.6, shadowOpacity: 0.45, shadowSpread: 8, shadowOffsetY: 2 }),
       glass(menu, { variant: 'regular', cornerRadius: 26, blurAmount: 1.6, saturation: 0.6, refraction: 0.55, zRadius: 22, shadowOpacity: 0.5, shadowSpread: 18, shadowOffsetY: 6 }),
     ];
