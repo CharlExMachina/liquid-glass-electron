@@ -1,5 +1,5 @@
 // The README's media: a screenshot, an MP4 and a GIF of each demo, in docs/media/ (ignored here: they live on the
-// repository's media branch, so that installing from GitHub doesn't download them). npm run media (needs ffmpeg).
+// repository's media branch, so that installing from GitHub doesn't download them). pnpm media (needs ffmpeg).
 //
 //   node scripts/media.mjs [--only=toolbar,morph] [--seconds=n] [--recorder=fast|demo] [--no-shots] [--no-video]
 //                          [--fps=30] [--gif-mb=4] [--out=docs/media] [--keep]

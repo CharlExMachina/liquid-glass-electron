@@ -4,7 +4,7 @@ You can build whatever you want with this library. It's a primitive, not a set o
 the glass can have any shape, come and go within an animation, flow into other glass, and every visual parameter can
 change every frame. The demos are working reference code for all of it; read them before inventing your own approach.
 They're in the repository, not the npm package: https://github.com/CharlExMachina/liquid-glass-electron/tree/main/demo/demos
-(clone it and `npm run demo` to see them; `npm run playground` for every option).
+(clone it and `pnpm demo` to see them; `pnpm playground` for every option).
 
 ## The whole API
 
@@ -12,7 +12,7 @@ They're in the repository, not the npm package: https://github.com/CharlExMachin
 import {
   glass, unglass, glassOf, autoGlass,            // glass on an element
   container, uncontainer, union,                  // several shapes as one piece of glass
-  glassGroup,                                     // many glass elements, one backdrop filter (cheaper, same look)
+  glassGroup,                                     // many glass elements, one backdrop filter (sibling glass gets one by itself)
   morph, materialize,                             // glass flowing from one element to another, appearing, leaving
   glassButton, scrollEdge,                        // Apple's button styles, scroll edges
   setEnvironment, getEnvironment, refreshAll,     // theme, Clear/Tinted, accessibility
@@ -44,7 +44,7 @@ Options can also come from data attributes (`data-glass-refraction="0.4"`, `data
 | A pop-up menu that swells out of a small blob | The menu is glass; animate its own `scale` from small with a spring while `g.animate({ strength: 1 })` runs, items fading in after (the glass is in the element's space, so it follows the transform) | `demo/demos/ios.js` |
 | Any option driven by CSS transitions | `--glass-strength` is registered as a number already; register others yourself so they interpolate: `@property --glass-blur-amount { syntax: '<number>'; inherits: false; initial-value: 0; }`, then transition it. Don't also pass that option to `glass()`: options passed there win over CSS | `demo/demos/ios.css` |
 | Notifications, popovers appearing | `materialize(el, 'in')`, `materialize(el, 'out')` | `demo/demos/toasts.js` |
-| Many glass elements on screen at once (a grid of tiles, a long toolbar, a dock) | `const g = glassGroup(parentOrElements, options)`: each member is still glass of its own (`glassOf(el)`, its own options and pointer behaviour) and looks the same, but one filter bends them all, which is most of the cost per frame. `g.set()`/`g.animate()` change every member together and keep them one filter; a member changed on its own gets its own filter while it differs. See the rules for groups below | `demo/demos/many.js` |
+| Many glass elements on screen at once (a grid of tiles, a long toolbar, a dock) | Nothing: sibling glass that doesn't overlap shares one backdrop filter by itself (each element stays glass of its own and looks the same). To change them together and keep them one filter, `const g = glassGroup(parentOrElements, options)`: `g.set()`/`g.animate()` change every member at once; a member changed on its own gets its own filter while it differs. `group: false` keeps an element out. See the rules for groups below | `demo/demos/many.js` |
 | Grouped buttons on one piece of glass | Make the group element glass (`shape: 'capsule'`), buttons plain inside | `demo/demos/toolbar.js` |
 | Shapes that flow together like liquid, and split | `container(parent, { spacing })`; members are children with `data-glass-member`; move them with CSS (transitions are followed) | `demo/demos/container.js` |
 | Any shape | `shape: 'path', path: 'M…Z', pathBox: '0 0 100 100'`; or `shape: 'squircle'`, `'capsule'`, `'circle'`, `'concentric'` | `demo/demos/playground.js` (shape menu) |
@@ -69,10 +69,10 @@ Options can also come from data attributes (`data-glass-refraction="0.4"`, `data
 - **A rebuild of the filter (the same):** fringe on or off (`chromAberration` 0 ↔ above 0), frost on or off
   (`blurAmount` 0 ↔ above 0), `bevelMode`, `distortion` on/off, `smooth`, `magnify`, `opacity` 1 ↔ below 1, `refraction` 0 ↔ above 0, a free shape (`squircle`, `path`) on or
   off, `backdrop`.
-- **Per frame while anything on the page changes, every glass element costs a little** (Chromium re-runs every
-  backdrop filter). Glass at `strength: 0` and `refraction: 0` costs nothing. For many elements, put them in a
-  `glassGroup` (they look the same, one filter bends them all: 30 capsules cost 6.5× less) or, for shapes that may flow
-  together, one `container`.
+- **Per frame while anything on the page changes, every backdrop filter costs a little** (Chromium re-runs every
+  one). Glass at `strength: 0` and `refraction: 0` costs nothing. Sibling glass shares one filter by itself (see the
+  rules for groups); keep many glass elements siblings, not overlapping, and they cost about one. Shapes that may flow
+  together go in one `container`.
 
 ## Rules that silently break glass
 
@@ -88,24 +88,28 @@ Options can also come from data attributes (`data-glass-refraction="0.4"`, `data
 
 ## Rules for groups (glassGroup)
 
-A group's layer bends the backdrop for all its members at once, before any of them paints. So:
+`glass()` puts sibling glass in a group by itself; `glassGroup()` makes one you control. A group's layer bends the
+backdrop for all its members at once, before any of them paints. So:
 
 1. **Members are siblings that don't overlap.** Elements in another parent, or overlapping one already in, keep a
    filter of their own.
 2. **Nothing may be painted between members near their edges.** The rim samples the backdrop up to a few dozen px past
    the edge (more with high `refraction`); separate glass would bend another member's glass, shadow or a sibling drawn
-   there, the group bends what's behind all of them. Leave the gaps empty, or don't group those.
-3. **Moves the group can see are fine:** inline style or class changes on a member, its transitions and animations
-   (CSS or `--glass-*`), a size change, hover, press, drag. The member gets its own filter at once, in the same frame,
-   and goes back into the group once it has stayed put for ~120 ms. **Moves it can't see** leave the layer's glass
-   behind: a member moved by an ancestor's class, a stylesheet rule (`:hover { translate }` with no transition), or
-   `el.animate()` from script. Call `g.refresh()` after those, or keep those elements out of the group.
+   there, the group bends what's behind all of them (Apple's rule too: glass doesn't sample glass). A group made by
+   `glass()` checks: a member with a positioned sibling or stacking context between it and the layer, over what it
+   bends, keeps its own filter. A `glassGroup` trusts you: leave the gaps empty, or don't group those.
+3. **Moves are fine.** Inline style or class changes on a member, its transitions and animations (CSS or `--glass-*`),
+   a size change, hover, press, drag: the member gets its own filter at once, in the same frame. A move that touches
+   nothing on it (a stylesheet rule, a layout shift, `el.animate()`) is seen a frame later. It goes back into the group
+   once it has stayed put for ~120 ms; one that keeps moving keeps its own filter meanwhile.
 4. **What stays out on its own** (glass of its own, still correct): free shapes (`squircle`, `path`), `bevelMode: 1`
-   with fringing, `distortion`, `backdrop`, glass that doesn't bend, `position: sticky`, and members with `opacity`,
-   `filter`, `mask`, `clip-path`, `mix-blend-mode`, a rotation or a scale on them.
+   with fringing, `distortion`, `backdrop`, glass that doesn't bend, `position: sticky`, `group: false`, and members
+   with `opacity`, `filter`, `mask`, `clip-path`, `mix-blend-mode`, a rotation or a scale on them. A group made by
+   `glass()` also leaves out glass far from the rest (its layer would be over 3× the glass in it).
 5. In-flow members (`static`/`relative`) make their parent `position: relative` if it's static, so the layer moves
-   with them; members are `isolation: isolate` while the group draws them (a backdrop filter made them stacking
-   contexts too).
+   with them (a group made by `glass()` only if that moves nothing else in the parent; otherwise they keep their own
+   filters); members are `isolation: isolate` while the group draws them (a backdrop filter made them stacking contexts
+   too).
 
 ## Checking your work
 

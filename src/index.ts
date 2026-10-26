@@ -130,7 +130,11 @@ function observe(lens: Lens) {
   attrs.observe(lens.el, { attributes: true, attributeFilter: filter });
 }
 
-/** Make an element glass. Calling it again on the same element updates its options. */
+/**
+ * Make an element glass. Calling it again on the same element updates its options. Glass next to other glass (siblings
+ * that don't overlap) shares one backdrop filter with it wherever that draws the same pixels, which costs a fraction
+ * per frame; `group: false` keeps it on a filter of its own.
+ */
 export function glass(el: HTMLElement, options: Partial<GlassOptions> = {}): GlassHandle {
   installStyles();
   watchEnvironment();
@@ -140,6 +144,7 @@ export function glass(el: HTMLElement, options: Partial<GlassOptions> = {}): Gla
     lens = new Lens(el, options, host);
     lenses.set(el, lens);
     observe(lens);
+    autoGroup(el);
   }
   const l = lens;
   return {
@@ -220,8 +225,7 @@ function tween(ls: Lens[], to: Partial<GlassOptions>, { duration = 300, easing =
 export function unglass(el: HTMLElement) {
   const lens = lenses.get(el);
   if (!lens) return;
-  groups.get(el)?.remove(el);
-  groups.delete(el);
+  leaveGroup(el);
   sizes?.unobserve(el);
   lens.destroy();
   lenses.delete(el);
@@ -283,6 +287,43 @@ export function autoGlass(selector = '[data-glass]', options: Partial<GlassOptio
 // ---------------------------------------------------------------- groups
 
 const groups = new Map<HTMLElement, GlassGroup>();
+// the implicit groups glass() makes, by parent
+const implicit = new Map<HTMLElement, GlassGroup>();
+
+/**
+ * Sibling glass shares one filter wherever it can: a new glass element joins its siblings' implicit group (made once
+ * there are two). The group decides, member by member and change by change, which it can draw the same as their own
+ * filters would; the rest keep their own (and `group: false` always does).
+ */
+function autoGroup(el: HTMLElement) {
+  const parent = el.parentElement;
+  if (!parent || groups.has(el)) return;
+  let group = implicit.get(parent);
+  if (!group) {
+    const siblings = [...parent.children].filter((c): c is HTMLElement => c !== el && c instanceof HTMLElement && lenses.has(c) && !groups.has(c));
+    if (!siblings.length) return;
+    group = new GlassGroup({ lensOf: (e) => lenses.get(e) }, true);
+    implicit.set(parent, group);
+    for (const s of siblings) {
+      groups.set(s, group);
+      group.add(s);
+    }
+  }
+  groups.set(el, group);
+  group.add(el);
+}
+
+/** Take an element out of its group; an implicit group with one member left goes away. */
+function leaveGroup(el: HTMLElement) {
+  const group = groups.get(el);
+  if (!group) return;
+  group.remove(el);
+  groups.delete(el);
+  if (!group.implicit || group.elements.length > 1) return;
+  for (const [parent, g] of implicit) if (g === group) implicit.delete(parent);
+  for (const m of group.elements) groups.delete(m);
+  group.destroy();
+}
 
 export interface GlassGroupHandle {
   /** the members */
@@ -309,16 +350,19 @@ export interface GlassGroupHandle {
  * Many glass elements, one backdrop filter: each element is glass as glass() makes it (its own options, light, shadow,
  * pointer behaviour; a handle from glassOf()), and one layer behind them bends the backdrop for all of them, which is
  * what costs per frame. Pass the elements, or their parent (its children with data-glass or data-glass-member).
- * The members must be siblings that don't overlap, with nothing painted between them near their edges; a member that
- * moves or changes on its own gets a filter of its own while it does, and joins again once it settles.
+ * glass() groups siblings by itself; this makes a group you control: set() and animate() change every member at once
+ * and keep them one filter, and it trusts you with the rules glass() checks. The members must be siblings that don't
+ * overlap, with nothing painted between them near their edges; a member that moves or changes on its own gets a filter
+ * of its own while it does, and joins again once it settles.
  */
 export function glassGroup(target: HTMLElement | Iterable<HTMLElement>, options: Partial<GlassOptions> = {}): GlassGroupHandle {
   const els = target instanceof HTMLElement ? [...target.children].filter((c): c is HTMLElement => c instanceof HTMLElement && c.matches('[data-glass], [data-glass-member]')) : [...target];
   const group = new GlassGroup({ lensOf: (el) => lenses.get(el) });
   const add = (el: HTMLElement, o: Partial<GlassOptions> = {}) => {
-    groups.get(el)?.remove(el);
-    const handle = glass(el, { ...options, ...o });
+    leaveGroup(el);
+    // marked first, so glass() doesn't put it in an implicit group
     groups.set(el, group);
+    const handle = glass(el, { ...options, ...o });
     group.add(el);
     return handle;
   };

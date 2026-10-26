@@ -30,11 +30,34 @@ export interface TableMap extends Pixels {
     tableB: number[];
     /** the largest shift, px: the displacement channel's range 0..1 stands for −rimPx..+rimPx */
     rimPx: number;
-    /** how far the image reaches past the element on each side, px */
+    /** how far the image reaches past the element on each side, px (at least) */
     margin: number;
     /** what each table value has added to it, so that Chromium's truncation when it bakes the table rounds */
     bias: number;
+    /** where the image goes, in the field's px: `margin` past it on each side, or the grid's rectangle */
+    rect: {
+        x: number;
+        y: number;
+        w: number;
+        h: number;
+    };
+    /** the grid it's drawn on */
+    grid: MapGrid;
 }
+/**
+ * A map's pixels on a given grid: its top-left corner (in the field's px), the size of a map pixel (px) and how many
+ * there are. Maps of glass of the same size on one grid, whole map pixels apart, can be copied into one image.
+ */
+export interface MapGrid {
+    x: number;
+    y: number;
+    px: number;
+    py: number;
+    width: number;
+    height: number;
+}
+/** The grid a map of `f` gets on its own: `margin` px past it on each side, about `scale` pixels per px. */
+export declare function ownGrid(w: number, h: number, scale: number, margin: number): MapGrid;
 /**
  * A displacement map that stays exact at a quarter of the resolution. The bevel's shift rises steeply within a few px
  * of the edge, which a small map stretched back up can't follow; but the distance from the edge is linear there, and
@@ -46,7 +69,7 @@ export interface TableMap extends Pixels {
  * straight edges is the point itself. The image reaches `margin` px past the edge, so the outermost pixels are
  * interpolated rather than clamped.
  */
-export declare function tableMap(f: Field, o: Optics, scale: number, N?: number, fringe?: number, profile?: Field): TableMap;
+export declare function tableMap(f: Field, o: Optics, scale: number, N?: number, fringe?: number, profile?: Field, grid?: MapGrid | null): TableMap;
 export interface FieldLight {
     /** the light inside the shape, its shadow outside it, and its coverage (for mask-image), all the same size */
     light: Pixels;

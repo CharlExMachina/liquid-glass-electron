@@ -82,6 +82,11 @@ export interface GlassOptions {
     magnify: boolean;
     /** follow the system's Clear/Tinted setting and the accessibility settings (true) */
     adaptive: boolean;
+    /**
+     * share one filter with the glass next to it (true): sibling glass is bent by one backdrop filter wherever that draws
+     * the same pixels, which costs a fraction per frame. false = a filter of its own, always
+     */
+    group: boolean;
 }
 export declare const DEFAULTS: GlassOptions;
 /** Apple's glass variants, as option sets. `fill` values that depend on light or dark are resolved later. */

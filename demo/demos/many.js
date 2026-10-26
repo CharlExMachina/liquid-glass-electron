@@ -1,10 +1,10 @@
 import { glass, glassGroup } from '../../dist/liquid-glass.js';
 import { css, h, icon, ready, sleep, tap } from './lib.js';
 
-// Lots of glass at once: 24 glass tiles over a scrolling feed, as separate glass() or as one glassGroup(). They look the
-// same; the group bends all of them with one backdrop filter, which is most of what glass costs per frame. The readout
-// counts the tiles' backdrop filters: hover or press a tile and it gets a filter of its own while it differs, then
-// goes back into the group.
+// Lots of glass at once: 24 glass tiles over a scrolling feed, each glass() with a filter of its own (group: false),
+// glass() as it is (siblings share one filter by themselves), or one glassGroup(). They look the same; a group bends all
+// of them with one backdrop filter, which is most of what glass costs per frame. The readout counts the tiles' backdrop
+// filters: hover or press a tile and it gets a filter of its own while it differs, then goes back into the group.
 const POSTS = [
   ['coast', 'Zapata Peninsula', 'Mangroves and reefs on Cuba’s southern coast.'], ['ponds', 'Lop Nur', 'Potash evaporation ponds in the Tarim Basin.'],
   ['alps', 'The Alps', 'Clouds over the peaks, looking south to Italy.'], ['night', 'Moscow at night', 'City lights, the aurora and the moon.'],
@@ -33,7 +33,8 @@ export default {
 
     let mode = 'group', group = null, handles = [];
     const count = h('b', { text: '–' }), noun = h('span', { text: ' backdrop filters' });
-    const buttons = ['separate', 'group'].map((m) => h('button', { text: m === 'group' ? 'glassGroup()' : 'glass() each', 'aria-pressed': String(m === mode), on: { click: () => use(m) } }));
+    const MODES = { separate: 'group: false', auto: 'glass()', group: 'glassGroup()' };
+    const buttons = Object.entries(MODES).map(([m, label]) => h('button', { text: label, 'aria-pressed': String(m === mode), on: { click: () => use(m) } }));
     const panel = h('div.many-panel', {}, h('div.many-seg', {}, ...buttons), h('span', {}, count, noun));
     stage.append(h('div.scene', {}, feed, overlay, panel));
 
@@ -43,9 +44,9 @@ export default {
       group = null;
       handles = [];
       mode = m;
-      buttons.forEach((b, i) => b.setAttribute('aria-pressed', String(['separate', 'group'][i] === m)));
+      buttons.forEach((b, i) => b.setAttribute('aria-pressed', String(Object.keys(MODES)[i] === m)));
       if (m === 'group') group = glassGroup(tiles, OPTIONS);
-      else handles = tiles.map((t) => glass(t, OPTIONS));
+      else handles = tiles.map((t) => glass(t, { ...OPTIONS, group: m === 'auto' }));
     }
     // how many backdrop filters the tiles take: one each, or the group's layer and any tile changing on its own
     const filters = () => [...grid.children].filter((el) => getComputedStyle(el).backdropFilter !== 'none').length;

@@ -1,4 +1,4 @@
-// The gallery: every demo, and the playground. npm run demo (or: npm run demo -- --page=playground).
+// The gallery: every demo, and the playground. pnpm demo (or: pnpm demo --page=playground).
 //
 // Sandboxed, context-isolated, no preload, and a strict Content-Security-Policy in the page: liquid-glass-electron
 // works without loosening any of it.

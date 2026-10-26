@@ -3,7 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { roundedRect, union } from '../../src/field.ts';
-import { fieldLight, lightImage, tableMap } from '../../src/maps.ts';
+import { fieldLight, lightImage, ownGrid, tableMap } from '../../src/maps.ts';
 import { shiftAt } from '../../src/optics.ts';
 
 const optics = { refraction: 0.69, bevel: 40, dome: false, magnify: true };
@@ -71,6 +71,29 @@ test('a dome\'s map stores the shift as it is', () => {
   const at = reconstruct(m, 200, 200);
   const [a] = shiftAt(60, 100, f, { ...optics, dome: true });
   assert.ok(Math.abs(at(60, 100)[0] - a) < 1);
+});
+
+test('a map on its own grid is the map drawn without one', () => {
+  const f = roundedRect(300, 160, [40, 40, 40, 40]);
+  const a = tableMap(f, optics, 0.29), g = ownGrid(300, 160, 0.29, a.margin);
+  const b = tableMap(f, optics, 0.29, 256, 0, f, g);
+  assert.deepEqual(b.data, a.data);
+  assert.deepEqual(b.rect, { x: -a.margin, y: -a.margin, w: 300 + 2 * a.margin, h: 160 + 2 * a.margin });
+});
+
+test('a map on a group\'s grid covers the glass and its margin, and is the same wherever its grid lines fall the same', () => {
+  // a 300 × 160 panel 380 px right of the grid's start, 7 px before the first panel: the grid line at or before its own
+  // margin is 2 px further out than the margin
+  const f = roundedRect(300, 160, [40, 40, 40, 40]);
+  const own = tableMap(f, optics, 0.29);
+  const grid = { x: -7 + 126 * 3 - 380, y: -7, px: 3, py: 3, width: Math.ceil((300 + 7 + 9) / 3), height: Math.ceil((160 + 14) / 3) };
+  const m = tableMap(f, optics, 0.29, 256, 0, f, grid);
+  assert.equal(m.rect.x, -9);
+  assert.ok(m.rect.x <= -own.margin && m.rect.x + m.rect.w >= 300 + own.margin && m.rect.y + m.rect.h >= 160 + own.margin);
+  // the same grid lines relative to the glass (a panel 3 grid pixels further on): the same map
+  const later = tableMap(f, optics, 0.29, 256, 0, f, { ...grid });
+  assert.deepEqual(later.data, m.data);
+  assert.deepEqual([m.tableX, m.tableY], [own.tableX, own.tableY]);
 });
 
 test('the light is a 9-slice image with a uniform middle, and a fill is painted under it', () => {

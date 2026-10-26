@@ -3,9 +3,9 @@
 // of the edge), the interior, and the shadow (within 25 px outside). Writes the captures, a ×3 difference image and
 // zoomed crops of the rim to bench/compare/out/.
 //
-//   npm run compare                      liquidglass's defaults, over the coast photo
-//   npm run compare -- --cfg='{"blurAmount":0.5}' --photo=alps
-//   npm run compare -- --engine=librehub --file=/abs/path/to/LibreHub/src/renderer/glass.js   (Libre Hub's old engine)
+//   pnpm compare                         liquidglass's defaults, over the coast photo
+//   pnpm compare --cfg='{"blurAmount":0.5}' --photo=alps
+//   pnpm compare --engine=librehub --file=/abs/path/to/LibreHub/src/renderer/glass.js   (Libre Hub's old engine)
 // It also measures liquidglass against itself moved by 1 px: how much a difference that small adds up to.
 import { app, BrowserWindow, nativeImage, screen } from 'electron';
 import { mkdirSync, writeFileSync } from 'node:fs';
