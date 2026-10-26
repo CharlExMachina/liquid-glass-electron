@@ -2,8 +2,8 @@
 // Electron's app.getAppMetrics() reports it), as a % of one core, over `--seconds` after a warm-up. Runs are
 // interleaved (every library once, then again) and the median is reported.
 //
-//   npm run bench                                   everything
-//   npm run bench -- --libs=ours,liquidglass --scenes=move --reps=5 --seconds=10
+//   pnpm bench                                      everything
+//   pnpm bench --libs=ours,liquidglass --scenes=move --reps=5 --seconds=10
 //   ... --drawn                                     also the frames drawn per second (renderer / viz), after each run
 //
 // Windows go on the second display, never focused (WebGL libraries only render in a visible window).

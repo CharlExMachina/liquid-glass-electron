@@ -1,0 +1,5 @@
+# Dependencies allowed to run install scripts (pnpm runs none unless allowed). esbuild's fetches its binary;
+# @ybouane/liquidglass (only for bench/compare) runs patch-package without depending on it, and fails.
+allowBuilds:
+  '@ybouane/liquidglass': false
+  esbuild: true
