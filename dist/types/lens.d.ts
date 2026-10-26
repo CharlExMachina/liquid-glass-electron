@@ -1,4 +1,5 @@
 import { type Field } from './field.js';
+import { type MapGrid } from './maps.js';
 import { type Environment, type GlassOptions } from './options.js';
 export interface LensHost {
     env(): Environment;
@@ -49,6 +50,9 @@ export declare class Lens {
     private h;
     private radii;
     private margin;
+    private mapRect;
+    private mapGrid;
+    private grid;
     private reach;
     private region;
     private mapKey;
@@ -93,6 +97,8 @@ export declare class Lens {
         shift: SVGFEOffsetElement | null;
         side: number;
         margin: number;
+        grid: MapGrid;
+        mapMargin: number;
     } | null;
     /** What, in the options, decides which filter nodes there are. */
     private structureKey;
@@ -110,6 +116,12 @@ export declare class Lens {
     private cssBackdrop;
     /** The border-box size, as the ResizeObserver reported it. */
     resize(w: number, h: number): void;
+    /**
+     * Draw the map on a group's grid (or its own again, with null): glass of the same size on one grid, whole map pixels
+     * apart, shares one image in the group. The element draws that same map itself, so it looks the same in the group or
+     * out of it. Resolves once it's on screen.
+     */
+    setGrid(grid: MapGrid | null): Promise<void>;
     private measure;
     private build;
     /** The colour matrix: saturation, brightness (baseBrightness, 6% as liquidglass's glass is, plus a button's hover) and tint. */

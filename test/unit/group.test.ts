@@ -1,7 +1,7 @@
 // A group's geometry: the clip (each member's rounded box) and which maps can share an image.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { classify, roundedBox } from '../../src/group.ts';
+import { classify, near, roundedBox } from '../../src/group.ts';
 
 const radii = (tl: string, tr = tl, br = tl, bl = tl) => ({ borderTopLeftRadius: tl, borderTopRightRadius: tr, borderBottomRightRadius: br, borderBottomLeftRadius: bl });
 
@@ -35,4 +35,16 @@ test('maps share an image when they sit at whole map pixels from each other, wit
   // touching maps (no map pixel between them) don't share
   assert.deepEqual(classify([map(0, 0), map(178, 0)]), [[0], [1]]);
   assert.deepEqual(classify([map(0, 0), map(182, 0)]), [[0, 1]]);
+});
+
+test('glass grouped by itself shares a layer only with glass near it', () => {
+  const at = (x: number, y: number, w = 170, h = 64) => ({ rect: { left: x, top: y, right: x + w, bottom: y + h, width: w, height: h } as DOMRect });
+  // a grid of capsules 20 px apart: their box is under twice their area, all of them
+  const grid = [0, 190, 380].flatMap((x) => [0, 120].map((y) => at(x, y)));
+  assert.equal(near(grid).length, 6);
+  // a bar at the top and one at the bottom of a tall window: their box is mostly empty, so neither shares
+  assert.equal(near([at(0, 0, 1000, 50), at(0, 900, 1000, 50)]).length, 1);
+  // a toolbar's buttons and one far away: the far one goes
+  const bar = [0, 60, 120, 180].map((x) => at(x, 0, 50, 40));
+  assert.deepEqual(near([...bar, at(900, 700, 50, 40)]).map((l) => l.rect.left), [0, 60, 120, 180]);
 });

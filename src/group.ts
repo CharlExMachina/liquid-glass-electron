@@ -12,11 +12,18 @@
 // their own; members that don't line up with each other (different sizes, odd offsets) get an image each. Every image
 // goes through its own lookup table before anything is merged: the table turns a stretched value into a steep shift,
 // and it has to see the stretched value itself, not one rounded to 8 bits by a merge first.
+//
+// glass() puts sibling glass in a group of its own accord (an implicit one), which is stricter: a member is drawn by
+// the layer only if nothing is painted between the layer and it over what it bends, and the parent is never made a
+// containing block if that would move anything else.
 import type { Lens } from './lens.ts';
+import type { MapGrid } from './maps.ts';
 import { filterDefs, predecode, setAttrs, svgEl } from './dom.ts';
 
 /** How long a member has to keep its place before its map goes into the group's image, ms. */
 const SETTLE = 120;
+/** How much bigger than the glass in it an implicit group's layer may be (it bends all of its box). */
+const MAX_SPREAD = 3;
 let nextGroup = 0;
 // a member's transitions and animations: it leaves while one runs
 const EVENTS = ['transitionrun', 'transitionend', 'transitioncancel', 'animationstart', 'animationend', 'animationcancel'];
@@ -31,16 +38,26 @@ interface Source {
   href: string;
 }
 
+interface Box {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+type Radii = Pick<CSSStyleDeclaration, 'borderTopLeftRadius' | 'borderTopRightRadius' | 'borderBottomRightRadius' | 'borderBottomLeftRadius'>;
+
 interface Member {
   el: HTMLElement;
   lens: Lens;
   version: number;
   source: Source | null;
   // how it was when last measured (for the lens's version), or null to measure again
-  look: { version: number; ok: boolean; fixed: boolean; z: string; box: { x: number; y: number; w: number; h: number }; clip: string } | null;
+  look: { version: number; ok: boolean; fixed: boolean; z: string; box: Box; radii: Radii } | null;
   saved: string;
   observer: MutationObserver;
   touch: () => void;
+  // while the layer draws it: what tells the group it has moved (see watch())
+  watching: { io: IntersectionObserver; at: string; look: Member['look'] } | null;
 }
 
 /** The group's image of maps: the layer's size, each member's map in it (by where its box is), and the images. */
@@ -71,12 +88,18 @@ export class GlassGroup {
   private queued = false;
   private settleTimer = 0;
   private building: Promise<void> | null = null;
-  // where each member that waits to join was last seen: the image is drawn once none has moved for SETTLE ms
-  private moved = new Map<HTMLElement, string>();
+  // where each member that waits to join was last seen, and since when: the image is drawn again once one of them has
+  // held still for SETTLE ms, with those that have
+  private moved = new Map<HTMLElement, { at: string; since: number }>();
+  // the members the layer could draw, when last looked at
+  private sharing = new Set<HTMLElement>();
   private sizes: ResizeObserver;
   private parent: HTMLElement | null = null;
   private savedParentPosition: string | null = null;
   private destroyed = false;
+  // made by glass() for siblings, not asked for: see unobstructed() and canPosition()
+  readonly implicit: boolean;
+  private children: MutationObserver | null = null;
   private clip = '';
   private filter = '';
   // anything may have changed (the window, the parent's size): every member is measured again
@@ -85,14 +108,17 @@ export class GlassGroup {
     this.schedule();
   };
 
-  constructor(host: GroupHost) {
+  constructor(host: GroupHost, implicit = false) {
     this.host = host;
+    this.implicit = implicit;
     this.layer = document.createElement('div');
     this.layer.setAttribute('aria-hidden', 'true');
     this.layer.dataset.lgLayer = 'group';
     this.layer.style.cssText = 'position:absolute;left:0;top:0;width:0;height:0;pointer-events:none;margin:0;padding:0;border:0;';
     this.sizes = new ResizeObserver(this.onEvent);
     addEventListener('resize', this.onEvent);
+    // an implicit group also looks again when something is put between its members
+    if (implicit) this.children = new MutationObserver(this.onEvent);
   }
 
   /** The members, in no particular order. */
@@ -109,7 +135,7 @@ export class GlassGroup {
     if (!lens || this.has(el)) return;
     // A change to a member the layer draws is looked at before the frame is drawn (it may have to leave at once); a
     // change to one with a filter of its own can wait until it has stopped changing.
-    const m: Member = { el, lens, version: -1, source: null, look: null, saved: el.style.getPropertyValue('isolation'), observer: null!, touch: () => {
+    const m: Member = { el, lens, version: -1, source: null, look: null, saved: el.style.getPropertyValue('isolation'), observer: null!, watching: null, touch: () => {
       m.look = null;
       if (this.batch.has(el)) this.schedule();
       else this.later();
@@ -134,6 +160,7 @@ export class GlassGroup {
   }
 
   private release(m: Member) {
+    this.watch(m, false);
     m.lens.onChange = null;
     m.lens.setBatched(false);
     m.observer.disconnect();
@@ -182,6 +209,7 @@ export class GlassGroup {
     for (const m of this.members) this.release(m);
     this.members = [];
     this.sizes.disconnect();
+    this.children?.disconnect();
     removeEventListener('resize', this.onEvent);
     this.layer.remove();
     this.pre?.remove();
@@ -216,7 +244,6 @@ export class GlassGroup {
       }
       parts.push('|');
     }
-    parts.push(`margin=${src.margin}`);
     const num = (a: string) => Number(src.image.getAttribute(a));
     const tables = [...src.table.children].map((f) => f.getAttribute('tableValues')).join('|');
     return (m.source = { key: parts.join(' '), tables, src, map: { x: num('x') - src.side, y: num('y'), w: num('width'), h: num('height') }, href: src.image.getAttribute('href')! });
@@ -238,20 +265,26 @@ export class GlassGroup {
   }
 
   private reconcile() {
-    this.parent = this.members[0]?.el.parentElement ?? null;
+    const parent = this.members[0]?.el.parentElement ?? null;
+    if (parent !== this.parent) {
+      this.children?.disconnect();
+      if (parent) this.children?.observe(parent, { childList: true });
+    }
+    this.parent = parent;
     if (!this.parent) return;
     // the members' boxes relative to the layer's corner (scrolling moves both); only those that changed are measured
     const lr = this.layer.getBoundingClientRect();
     const look = this.members.map((m) => {
       const source = this.sourceOf(m);
-      if (!source) return { m, source, ok: false, fixed: false, z: '', box: null, clip: '' };
+      if (!source) return { m, source, ok: false, fixed: false, z: '', box: null, radii: null };
       if (!m.look || m.look.version !== m.version) {
         const cs = getComputedStyle(m.el), rect = m.el.getBoundingClientRect();
         const box = { x: rect.left - lr.left, y: rect.top - lr.top, w: rect.width, h: rect.height };
+        const { borderTopLeftRadius, borderTopRightRadius, borderBottomRightRadius, borderBottomLeftRadius } = cs;
         m.look = {
-          version: m.version, ok: this.eligible(m.el, cs, rect), fixed: cs.position === 'fixed', z: cs.zIndex, box,
-          // its own rounded box, as Chromium clips its backdrop filter
-          clip: roundedBox(box.x, box.y, box.w, box.h, cs),
+          version: m.version, ok: m.lens.options.group && this.eligible(m.el, cs, rect), fixed: cs.position === 'fixed', z: cs.zIndex, box,
+          // its rounded box, as Chromium clips its backdrop filter
+          radii: { borderTopLeftRadius, borderTopRightRadius, borderBottomRightRadius, borderBottomLeftRadius },
         };
       }
       return { m, source, ...m.look };
@@ -263,30 +296,31 @@ export class GlassGroup {
     const first = look.find((l) => l.ok && l.source!.key === key);
     const candidates = look.filter((l) => l.ok && l.source!.key === key && l.fixed === first!.fixed && l.z === first!.z);
     // no two overlapping
-    const boxes: { x: number; y: number; w: number; h: number }[] = [];
-    const sharing = candidates.filter((l) => {
+    const boxes: Box[] = [];
+    const apart = candidates.filter((l) => {
       const r = l.box!;
       if (boxes.some((b) => r.x < b.x + b.w && b.x < r.x + r.w && r.y < b.y + b.h && b.y < r.y + r.h)) return false;
       boxes.push(r);
       return true;
     });
+    const sharing = this.implicit ? this.unobstructed(apart, lr) : apart;
+    this.sharing = new Set(sharing.map((l) => l.m.el));
 
     const atlas = this.atlas;
     const sig = (l: (typeof look)[number]) => placeSig(l.source!, l.box!);
     const inLayer = atlas && first && atlas.fixed === first.fixed ? sharing.filter((l) => atlas.placed.get(l.m.el) === sig(l)) : [];
-    // a member that should be drawn by the layer but isn't in its image yet: the image is drawn again once it holds still
+    // a member that should be drawn by the layer but isn't in its image yet: the image is drawn again once one of them
+    // holds still (one that keeps moving keeps its own filter meanwhile, and doesn't hold the others up)
     const waiting = sharing.filter((l) => !inLayer.includes(l));
     this.waiting = sharing.length > 1 ? waiting.length : 0;
-    let restart = false;
+    const now = performance.now();
     for (const l of waiting) {
-      const s = sig(l);
-      if (this.moved.get(l.m.el) !== s) {
-        this.moved.set(l.m.el, s);
-        restart = true;
-      }
+      const at = boxKey(l.box!);
+      if (this.moved.get(l.m.el)?.at !== at) this.moved.set(l.m.el, { at, since: now });
     }
     for (const el of this.moved.keys()) if (!waiting.some((l) => l.m.el === el)) this.moved.delete(el);
-    if (waiting.length && (restart || !this.settleTimer) && !this.building && sharing.length > 1) {
+    if (waiting.length && !this.building && sharing.length > 1) {
+      const ready = Math.min(...waiting.map((l) => this.moved.get(l.m.el)!.since)) + SETTLE;
       clearTimeout(this.settleTimer);
       this.settleTimer = window.setTimeout(() => {
         this.settleTimer = 0;
@@ -296,7 +330,7 @@ export class GlassGroup {
           for (const m of this.members) m.look = null;
           this.schedule();
         });
-      }, SETTLE);
+      }, Math.max(ready - now, 0));
     }
 
     const batch = inLayer.length > 1 ? inLayer : [];
@@ -308,7 +342,36 @@ export class GlassGroup {
         this.render(src, atlas!);
       }
     }
-    this.apply(new Set(batch.map((l) => l.m.el)), batch.map((l) => l.clip).join(' '));
+    this.apply(new Set(batch.map((l) => l.m.el)), batch.map((l) => roundedBox(l.box!.x, l.box!.y, l.box!.w, l.box!.h, l.radii!)).join(' '));
+  }
+
+  /**
+   * The members nothing is painted between: the layer goes just before the first of them, and paints the backdrop as it
+   * is there, so something painted after it but before a member (a positioned sibling between them, or a stacking
+   * context) would be bent by that member on its own but not by the layer. Content in flow is painted before both.
+   */
+  private unobstructed<T extends { m: Member; box: Box | null; source: Source | null }>(list: T[], lr: DOMRect): T[] {
+    if (list.length < 2) return list;
+    const members = new Set(this.members.map((m) => m.el));
+    const inDomOrder = (a: Element, b: Element) => (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1);
+    const ordered = [...list].sort((a, b) => inDomOrder(a.m.el, b.m.el));
+    const kept: T[] = [];
+    // what is painted with the glass after the layer (just before the first member) and before each member, as boxes
+    // relative to the layer
+    const between: Box[] = [];
+    let node: Element | null = [...members].filter((el) => el.parentElement === this.parent).sort(inDomOrder)[0] ?? null;
+    for (const l of ordered) {
+      for (; node && node !== l.m.el; node = node.nextElementSibling) {
+        if (members.has(node as HTMLElement) || node === this.layer) continue;
+        for (const r of paintedWithGlass(node)) between.push({ x: r.left - lr.left, y: r.top - lr.top, w: r.width, h: r.height });
+      }
+      node = l.m.el.nextElementSibling;
+      // what the member bends: its box and as far past it as its filter reaches
+      const e = l.source!.src.margin, b = l.box!;
+      const x = b.x - e, y = b.y - e, w = b.w + 2 * e, h = b.h + 2 * e;
+      if (!between.some((r) => r.x < x + w && x < r.x + r.w && r.y < y + h && y < r.y + r.h)) kept.push(l);
+    }
+    return kept.length > 1 ? kept : [];
   }
 
   private atlasIds = new WeakMap<Atlas, number>();
@@ -324,6 +387,7 @@ export class GlassGroup {
     for (const m of this.members) {
       const on = now.has(m.el);
       m.lens.setBatched(on);
+      this.watch(m, on);
       // each member stays a stacking context, as its backdrop filter made it
       const iso = on ? 'isolate' : m.saved;
       if (m.el.style.getPropertyValue('isolation') !== iso) {
@@ -343,15 +407,111 @@ export class GlassGroup {
     }
   }
 
+  /**
+   * Watch where a member the layer draws is. Most moves come through its style, class, size or events, which the group
+   * listens to; the rest (a stylesheet rule, a layout shift among its siblings, an animation from script) would leave
+   * the layer's glass behind. An IntersectionObserver whose root box is the member's own box (as Floating UI watches
+   * for layout shifts) fires as soon as it moves by a px, for nothing per frame meanwhile.
+   */
+  private watch(m: Member, on: boolean) {
+    if (!on) {
+      m.watching?.io.disconnect();
+      m.watching = null;
+      return;
+    }
+    // not measured again since: where it was
+    if (m.watching && m.watching.look === m.look) return;
+    const cs = getComputedStyle(m.el), r = m.el.getBoundingClientRect();
+    // the root: what it's positioned against (its parent, its positioned ancestor), or the viewport
+    const cb = cs.position === 'absolute' ? m.el.offsetParent : cs.position === 'fixed' ? null : m.el.parentElement;
+    const root = cb && cb !== document.body && cb !== document.documentElement ? cb : null;
+    const box = root ? root.getBoundingClientRect() : { left: 0, top: 0 };
+    // its padding box (the root's box when it clips; a little smaller than its border box when it doesn't)
+    const rx = box.left + (root?.clientLeft ?? 0), ry = box.top + (root?.clientTop ?? 0);
+    const rw = root ? root.clientWidth : document.documentElement.clientWidth, rh = root ? root.clientHeight : document.documentElement.clientHeight;
+    const at = [r.left - rx, r.top - ry, r.right - rx, r.bottom - ry, rw, rh].map((v) => Math.round(v)).join(',');
+    if (m.watching?.at === at && m.watching.io.root === root) {
+      m.watching.look = m.look;
+      return;
+    }
+    m.watching?.io.disconnect();
+    // a px of room on each side, so rounding doesn't put it partly out at the start
+    const px = (v: number) => `${Math.floor(v) + 1}px`;
+    let first = true;
+    const io = new IntersectionObserver((entries) => {
+      if (first) {
+        first = false;
+        return;
+      }
+      if (entries.some((e) => e.intersectionRatio < 1)) m.touch();
+    }, { root, threshold: 1, rootMargin: [-(r.top - ry), -(rx + rw - r.right), -(ry + rh - r.bottom), -(r.left - rx)].map(px).join(' ') });
+    io.observe(m.el);
+    m.watching = { io, at, look: m.look };
+  }
+
   // ---------------------------------------------------------------- the layer's image and filter
+
+  /**
+   * The members the layer could draw that have held still for SETTLE ms (or are in its image already), as they are
+   * now. A member that changes on its own is looked at only once it stops, so one that has moved since it was last
+   * looked at starts waiting again here.
+   */
+  private sharers(key: string) {
+    const lr = this.layer.getBoundingClientRect(), now = performance.now();
+    const out: { m: Member; source: Source; cs: CSSStyleDeclaration; rect: DOMRect; box: Box }[] = [];
+    for (const m of this.members) {
+      const source = this.sourceOf(m);
+      if (!source || source.key !== key || !this.sharing.has(m.el) || !m.lens.options.group) continue;
+      const cs = getComputedStyle(m.el), rect = m.el.getBoundingClientRect();
+      if (!this.eligible(m.el, cs, rect)) continue;
+      const box = { x: rect.left - lr.left, y: rect.top - lr.top, w: rect.width, h: rect.height }, at = boxKey(box);
+      const seen = this.moved.get(m.el);
+      if (seen && seen.at !== at) this.moved.set(m.el, { at, since: now });
+      if (seen && (seen.at !== at || now - seen.since < SETTLE - 1)) continue;
+      out.push({ m, source, cs, rect, box });
+    }
+    return out;
+  }
+
+  /**
+   * Members of the same size draw their maps on one grid, whole map pixels apart (each on its own too: see
+   * Lens.setGrid), so one image holds all of them. The grid's pixels are a whole number of px, as close to the maps'
+   * own as can be, and it starts `mapMargin` px before the first member: on elements at whole px, every map's
+   * rectangle is then at whole px too (Skia takes another pass for an image whose place and size both aren't).
+   */
+  private async align(looks: ReturnType<GlassGroup['sharers']>) {
+    const grids: { tables: string; px: number; py: number; x: number; y: number }[] = [];
+    await Promise.all(looks.map((l) => {
+      const s = l.source!, g = s.src.grid, mm = s.src.mapMargin;
+      const px = Math.max(1, Math.floor(g.px + 1e-6)), py = Math.max(1, Math.floor(g.py + 1e-6));
+      let ref = grids.find((r) => r.tables === s.tables && r.px === px && r.py === py);
+      if (!ref) grids.push((ref = { tables: s.tables, px, py, x: l.rect.left - mm, y: l.rect.top - mm }));
+      // the grid's first line at or before `mm` px past the element, and as many pixels as reach `mm` past its far side
+      const ix = Math.floor((l.rect.left - mm - ref.x) / px + 1e-6), iy = Math.floor((l.rect.top - mm - ref.y) / py + 1e-6);
+      const x = ref.x + ix * px, y = ref.y + iy * py;
+      const grid: MapGrid = {
+        x: x - l.rect.left, y: y - l.rect.top, px, py,
+        width: Math.ceil((l.rect.right + mm - x) / px - 1e-6), height: Math.ceil((l.rect.bottom + mm - y) / py - 1e-6),
+      };
+      return l.m.lens.setGrid(grid);
+    }));
+  }
 
   /** Draw the members that share a filter into the group's image, and put the layer over them. */
   private async build(key: string) {
     const parent = this.parent;
     if (!parent) return;
-    const plan = this.members.map((m) => ({ m, source: this.sourceOf(m) })).filter((p) => p.source && p.source.key === key);
-    const looks = plan.map((p) => ({ ...p, cs: getComputedStyle(p.m.el), rect: p.m.el.getBoundingClientRect() })).filter((l) => this.eligible(l.m.el, l.cs, l.rect));
+    if (this.sharers(key).length < 2) return;
+    await this.align(this.sharers(key));
+    if (this.destroyed) return;
+    let looks = this.sharers(key);
+    // an implicit group draws only glass near together: the layer bends everything in its box, so far-apart glass in one
+    // would cost the GPU more pixels than separate filters do (the farthest from the others keeps its own)
+    if (this.implicit) looks = near(looks);
     if (looks.length < 2) return;
+    // nothing new to draw (those waiting are still moving)
+    const atlas = this.atlas;
+    if (atlas && looks.every((l) => atlas.placed.get(l.m.el) === placeSig(l.source, l.box))) return;
     const fixed = looks[0].cs.position === 'fixed';
     const x0 = Math.min(...looks.map((l) => l.rect.left)), y0 = Math.min(...looks.map((l) => l.rect.top));
     const w = Math.max(...looks.map((l) => l.rect.right)) - x0, h = Math.max(...looks.map((l) => l.rect.bottom)) - y0;
@@ -380,7 +540,9 @@ export class GlassGroup {
     const mapMargin = Math.max(...looks.map((l) => -l.source!.map.y));
     // where the layer goes: over the members, in its containing block's px
     if (!fixed && getComputedStyle(parent).position === 'static' && looks.every((l) => l.cs.position === 'static' || l.cs.position === 'relative')) {
-      // in-flow members: the layer is positioned within their parent, so it scrolls and moves with them
+      // in-flow members: the layer is positioned within their parent, so it scrolls and moves with them (an implicit
+      // group only if that moves nothing else)
+      if (this.implicit && this.savedParentPosition === null && !canPosition(parent, new Set(looks.map((l) => l.m.el)))) return;
       this.savedParentPosition ??= parent.style.position;
       parent.style.position = 'relative';
     }
@@ -430,9 +592,12 @@ export class GlassGroup {
       for (const a of own.attributes) if (a.name !== 'id') f.setAttribute(a.name, a.value);
       f.replaceChildren(...[...own.children].map((n) => n.cloneNode(true) as Element));
     });
+    // as far as a member's filters reach, or the images (on a group's grid, a map reaches a little further), in whole px
+    const ext = (f: (c: Atlas['classes'][number]) => number) => Math.max(0, ...atlas.classes.map(f));
+    const e = Math.ceil(Math.max(src.margin, ext((c) => -c.x), ext((c) => -c.y), ext((c) => c.y + c.h - atlas.h)) - 1e-6);
+    const m = Math.ceil(Math.max(atlas.mapMargin, ext((c) => c.x + c.w - atlas.w)) - 1e-6);
     // the stash: past the layer and its reach, at a whole number of device pixels (at 1.25× that rounds fewer pixels
     // differently from separate glass than any other offset)
-    const e = src.margin, m = atlas.mapMargin;
     let side = 0;
     if (src.shift) {
       side = Math.ceil(atlas.w + m + e) + 8;
@@ -476,6 +641,41 @@ export class GlassGroup {
 let atlasCount = 0;
 
 /**
+ * Where an element, or anything in it, is painted along with glass (positioned, or a stacking context) rather than
+ * before it, as client rects. An element with a lot inside counts as painted along with glass all over its box.
+ */
+function paintedWithGlass(el: Element): DOMRect[] {
+  const own = (e: Element) => {
+    const cs = getComputedStyle(e);
+    return cs.position !== 'static' || cs.zIndex !== 'auto' || cs.opacity !== '1' || cs.transform !== 'none' || cs.filter !== 'none' || cs.backdropFilter !== 'none'
+      || cs.isolation === 'isolate' || cs.mixBlendMode !== 'normal' || cs.willChange !== 'auto' || cs.clipPath !== 'none' || cs.maskImage !== 'none' || /paint|strict|content/.test(cs.contain);
+  };
+  const inside = el.getElementsByTagName('*');
+  if (inside.length > 64) return [el.getBoundingClientRect()];
+  return [el, ...inside].filter(own).map((e) => e.getBoundingClientRect());
+}
+
+/** Whether making `parent` a containing block (position: relative) moves nothing in it but the group's members. */
+function canPosition(parent: HTMLElement, members: Set<HTMLElement>): boolean {
+  // a member is a containing block of its own (its backdrop filter makes it one): what's in it never moves
+  const walk = document.createTreeWalker(parent, NodeFilter.SHOW_ELEMENT, { acceptNode: (n) => (members.has(n as HTMLElement) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT) });
+  for (let e = walk.nextNode() as Element | null; e; e = walk.nextNode() as Element | null) {
+    if (getComputedStyle(e).position !== 'absolute') continue;
+    // positioned against something outside the parent now: it would be against the parent
+    let inside = false;
+    for (let a = e.parentElement; a && a !== parent; a = a.parentElement) {
+      const cs = getComputedStyle(a);
+      if (cs.position !== 'static' || cs.transform !== 'none' || cs.filter !== 'none' || cs.backdropFilter !== 'none' || cs.perspective !== 'none' || /layout|paint|strict|content/.test(cs.contain)) {
+        inside = true;
+        break;
+      }
+    }
+    if (!inside) return false;
+  }
+  return true;
+}
+
+/**
  * Which maps can share an image: the same lookup tables and map pixels per px, at whole map pixels from each other (so
  * each is drawn exactly as it would be on its own), with a map pixel of room between them. Returns the indices, image
  * by image.
@@ -497,6 +697,24 @@ export function classify(items: { x: number; y: number; w: number; h: number; kx
   });
   return classes;
 }
+
+/** As many of `list` as fit in a box at most MAX_SPREAD times their area: the farthest from the rest go first. */
+export function near<T extends { rect: DOMRect }>(list: T[]): T[] {
+  const kept = [...list];
+  for (;;) {
+    const x0 = Math.min(...kept.map((l) => l.rect.left)), y0 = Math.min(...kept.map((l) => l.rect.top));
+    const x1 = Math.max(...kept.map((l) => l.rect.right)), y1 = Math.max(...kept.map((l) => l.rect.bottom));
+    if (kept.length < 2 || (x1 - x0) * (y1 - y0) <= MAX_SPREAD * kept.reduce((a, l) => a + l.rect.width * l.rect.height, 0)) return kept;
+    // the middle of the glass (by area), not of its box: the box's middle can be as far from the many as from the one
+    const area = (l: T) => l.rect.width * l.rect.height, total = kept.reduce((a, l) => a + area(l), 0);
+    const cx = kept.reduce((a, l) => a + (l.rect.left + l.rect.width / 2) * area(l), 0) / total;
+    const cy = kept.reduce((a, l) => a + (l.rect.top + l.rect.height / 2) * area(l), 0) / total;
+    const d = (l: T) => Math.hypot(l.rect.left + l.rect.width / 2 - cx, l.rect.top + l.rect.height / 2 - cy);
+    kept.splice(kept.indexOf(kept.reduce((a, b) => (d(b) > d(a) ? b : a))), 1);
+  }
+}
+
+const boxKey = (b: Box) => `${b.x.toFixed(2)},${b.y.toFixed(2)},${b.w.toFixed(2)},${b.h.toFixed(2)}`;
 
 /** A member's map and where its box is in the layer: equal when the layer's image holds that map there. */
 function placeSig(s: Source, b: { x: number; y: number; w: number; h: number }) {

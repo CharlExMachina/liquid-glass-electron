@@ -86,8 +86,31 @@ export interface TableMap extends Pixels {
   tableB: number[];
   /** the largest shift, px: the displacement channel's range 0..1 stands for −rimPx..+rimPx */
   rimPx: number;
-  /** how far the image reaches past the element on each side, px */
+  /** how far the image reaches past the element on each side, px (at least) */
   margin: number;
+  /** where the image goes, in the field's px: `margin` past it on each side, or the grid's rectangle */
+  rect: { x: number; y: number; w: number; h: number };
+  /** the grid it's drawn on */
+  grid: MapGrid;
+}
+
+/**
+ * A map's pixels on a given grid: its top-left corner (in the field's px), the size of a map pixel (px) and how many
+ * there are. Maps of glass of the same size on one grid, whole map pixels apart, can be copied into one image.
+ */
+export interface MapGrid {
+  x: number;
+  y: number;
+  px: number;
+  py: number;
+  width: number;
+  height: number;
+}
+
+/** The grid a map of `f` gets on its own: `margin` px past it on each side, about `scale` pixels per px. */
+export function ownGrid(w: number, h: number, scale: number, margin: number): MapGrid {
+  const width = Math.max(2, Math.round((w + 2 * margin) * scale)), height = Math.max(2, Math.round((h + 2 * margin) * scale));
+  return { x: -margin, y: -margin, px: (w + 2 * margin) / width, py: (h + 2 * margin) / height, width, height };
 }
 
 /**
@@ -101,7 +124,7 @@ export interface TableMap extends Pixels {
  * straight edges is the point itself. The image reaches `margin` px past the edge, so the outermost pixels are
  * interpolated rather than clamped.
  */
-export function tableMap(f: Field, o: Optics, scale: number, N = 256, fringe = 0, profile: Field = f): TableMap {
+export function tableMap(f: Field, o: Optics, scale: number, N = 256, fringe = 0, profile: Field = f, grid: MapGrid | null = null): TableMap {
   // `fringe` ≠ 0: this channel's map, sampled liquidglass's colour fringe further out (red, > 0) or in (blue, < 0)
   const shift = (x: number, y: number): [number, number] => {
     const [sx, sy] = shiftAt(x, y, f, o);
@@ -111,7 +134,8 @@ export function tableMap(f: Field, o: Optics, scale: number, N = 256, fringe = 0
   };
   const zR = Math.min(Math.max(o.bevel, 1), f.shortHalf);
   const margin = Math.ceil(2 / scale);
-  if (o.dome || o.rim) return smoothMap(f, shift, scale, margin, N);
+  const g = grid ?? ownGrid(f.w, f.h, scale, margin);
+  if (o.dome || o.rim) return smoothMap(f, shift, g, margin, N);
   // Per axis: the shift d px in from a straight edge (left, top), d from the bevel's end to `margin` outside.
   // Outside the element the shift stays what it is at the edge.
   const edgeShift = (axis: 0 | 1, d: number) => {
@@ -172,7 +196,7 @@ export function tableMap(f: Field, o: Optics, scale: number, N = 256, fringe = 0
   // far outside the shape nothing is seen (a container's mask, or the box's edge): only a pixel or two out matters,
   // for the stretching between the last inside value and the first outside one
   const far = -(1.5 / scale + 1);
-  const { width, height, data } = sampleBox(f, scale, margin, (x, y, d) => {
+  const { width, height, data } = sampleBox(f, g, (x, y, d) => {
     if (d >= 0.5) return valueAt(x, y);
     if (d < far) return [0.5, 0.5];
     // step in along the inward normal to 0.5 and 1.5 px, and carry the line on
@@ -187,8 +211,10 @@ export function tableMap(f: Field, o: Optics, scale: number, N = 256, fringe = 0
     const v = k / (N - 1), t = Math.sign(2 * v - 1) * tables[axis].forward(Math.abs(2 * v - 1));
     return +Math.min(0.5 + 0.5 * t / rimPx + 1 / 255, 1).toFixed(5);
   });
-  return { width, height, data, tableX: table(0), tableY: table(1), tableB: SHAPE_TABLE, rimPx, margin };
+  return { width, height, data, tableX: table(0), tableY: table(1), tableB: SHAPE_TABLE, rimPx, margin, rect: gridRect(g), grid: g };
 }
+
+const gridRect = (g: MapGrid) => ({ x: g.x, y: g.y, w: g.width * g.px, h: g.height * g.py });
 
 /**
  * The blue channel: the distance in from the edge, 8 levels a px around 128 (so ±16 px), which stretches back up
@@ -199,16 +225,15 @@ const shapeByte = (d: number) => Math.round(Math.min(Math.max(128 + SHAPE_STEPS 
 const SHAPE_TABLE = Array.from({ length: 256 }, (_, k) => +Math.min(Math.max((k - 128) / SHAPE_STEPS + 0.5, 0), 1).toFixed(4));
 
 /**
- * The map's pixels: the field's box and `margin` px around it, at `scale` pixels per px, red and green from
- * `value(x, y, d)` (d: distance in from the edge), blue 128, opaque.
+ * The map's pixels on grid `g`, red and green from `value(x, y, d)` (d: distance in from the edge), blue the distance
+ * (see shapeByte), opaque.
  */
-function sampleBox(f: Field, scale: number, margin: number, value: (x: number, y: number, d: number) => [number, number], byte: (v: number) => number): Pixels {
-  const width = Math.max(2, Math.round((f.w + 2 * margin) * scale)), height = Math.max(2, Math.round((f.h + 2 * margin) * scale));
-  const fx = (f.w + 2 * margin) / width, fy = (f.h + 2 * margin) / height;
+function sampleBox(f: Field, g: MapGrid, value: (x: number, y: number, d: number) => [number, number], byte: (v: number) => number): Pixels {
+  const { width, height } = g;
   const data = new Uint8ClampedArray(width * height * 4);
   for (let j = 0; j < height; j++) {
     for (let i = 0; i < width; i++) {
-      const x = (i + 0.5) * fx - margin, y = (j + 0.5) * fy - margin;
+      const x = g.x + (i + 0.5) * g.px, y = g.y + (j + 0.5) * g.py;
       const d = -f.sdf(x, y);
       const v = value(x, y, d);
       const k = (j * width + i) * 4;
@@ -225,7 +250,7 @@ function sampleBox(f: Field, scale: number, margin: number, value: (x: number, y
  * A dome's shift has no steep rim, so its map stores the shift as it is (with tables that change nothing), and
  * carries it on past the edge.
  */
-function smoothMap(f: Field, shift: (x: number, y: number) => [number, number], scale: number, margin: number, N: number): TableMap {
+function smoothMap(f: Field, shift: (x: number, y: number) => [number, number], g: MapGrid, margin: number, N: number): TableMap {
   // outside, the value at the edge
   const at = (x: number, y: number, d: number): [number, number] => {
     if (d >= 0.5) return shift(x, y);
@@ -233,18 +258,18 @@ function smoothMap(f: Field, shift: (x: number, y: number) => [number, number], 
     return shift(x - n[0] * (0.5 - d), y - n[1] * (0.5 - d));
   };
   let rimPx = 1e-6;
-  sampleBox(f, scale, margin, (x, y, d) => {
+  sampleBox(f, g, (x, y, d) => {
     const [sx, sy] = at(x, y, d);
     rimPx = Math.max(rimPx, Math.abs(sx), Math.abs(sy));
     return [0, 0];
   }, () => 0);
-  const { width, height, data } = sampleBox(f, scale, margin, (x, y, d) => {
+  const { width, height, data } = sampleBox(f, g, (x, y, d) => {
     const [sx, sy] = at(x, y, d);
     return [128 + 127 * sx / rimPx, 128 + 127 * sy / rimPx];
   }, (v) => Math.round(Math.min(Math.max(v, 0), 255)));
   // identity, with the same step as tableMap's (Chromium truncates when it bakes the table)
   const identity = Array.from({ length: N }, (_, k) => +Math.min(k / (N - 1) + 0.5 / 255, 1).toFixed(5));
-  return { width, height, data, tableX: identity, tableY: identity, tableB: SHAPE_TABLE, rimPx, margin };
+  return { width, height, data, tableX: identity, tableY: identity, tableB: SHAPE_TABLE, rimPx, margin, rect: gridRect(g), grid: g };
 }
 
 /** The outward normal of a field's edge at (x, y), from the gradient of its distance. */
