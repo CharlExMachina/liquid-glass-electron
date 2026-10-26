@@ -46,6 +46,76 @@ export function toDataURL(p: Pixels): string {
   return canvas.toDataURL();
 }
 
+/** One channel of pixels (0 red, 1 green, 2 blue) as a grey PNG data URL. */
+export function greyDataURL(p: Pixels, channel: number): string {
+  const data = new Uint8ClampedArray(p.data.length);
+  for (let k = 0; k < data.length; k += 4) {
+    data[k] = data[k + 1] = data[k + 2] = p.data[k + channel];
+    data[k + 3] = 255;
+  }
+  return toDataURL({ width: p.width, height: p.height, data });
+}
+
+/**
+ * A map's filter nodes. Chromium composites in the display's colour space (Display P3 on a wide-gamut Mac) and turns
+ * a map that isn't grey into it before bending: red is mixed into green and what's dark is lifted, so up and left fall
+ * short by as much as a fifth. A grey is the same in both spaces (the same white, the same curve), and alpha is never
+ * converted: the shift down travels as a grey, the shift across as alpha. Each comes as a grey image (`raw`_0 across,
+ * `raw`_1 down) and goes through its own lookup table at full precision (see encodeTables): across comes out at
+ * 0.75 ± ¼ and is put into alpha (at least 0.5, so the grey premultiplied by it keeps its precision), down at 0.5 ± ¼
+ * as a grey; together they're `out`, read by a displacement with xChannelSelector A, yChannelSelector R, a scale of 4 ×
+ * the largest shift, and its source moved right by a quarter of the scale. A free shape's coverage (`raw`_2, a grey
+ * too) goes through its own table into `out`_cover.
+ *
+ * `stash`: the map is stashed beside the element in this filter's output for the next filter to read (stashNodes),
+ * which carries neither alpha (merged over the backdrop, it's lost) nor colour (it's converted on the way): each
+ * channel is left as an opaque grey of its own, `out`_0, `out`_1 (and `out`_2), each where its image is.
+ */
+export function mapNodes(raw: string, out: string, channels: 2 | 3, stash = false) {
+  const images = Array.from({ length: channels }, (_, c) => svgEl('feImage', { preserveAspectRatio: 'none', x: 0, y: 0, width: 1, height: 1, result: `${raw}_${c}` }));
+  const table = (c: number, result: string) => svgEl('feComponentTransfer', { in: `${raw}_${c}`, result },
+    ...(['feFuncR', 'feFuncG', 'feFuncB'] as const).map((f) => svgEl(f, { type: 'table', tableValues: '0 1' })));
+  const across = table(0, stash ? `${out}_0` : `${raw}_x`), down = table(1, stash ? `${out}_1` : `${raw}_y`);
+  const cover = channels === 3 ? table(2, stash ? `${out}_2` : `${out}_c`) : null;
+  const nodes: Element[] = [...images, across, down, ...(cover ? [cover] : [])];
+  if (!stash) nodes.push(...joinNodes(`${raw}_x`, `${raw}_y`, cover ? `${out}_c` : null, out));
+  return { images, nodes, tables: [across, down] as [SVGFEComponentTransferElement, SVGFEComponentTransferElement], cover };
+}
+
+/** Across (a grey) into alpha under down (a grey): the map a displacement reads; and a coverage grey into alpha. */
+function joinNodes(across: string, down: string, cover: string | null, out: string): Element[] {
+  const ALPHA = '0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  1 0 0 0 0';
+  return [
+    svgEl('feColorMatrix', { in: across, type: 'matrix', values: ALPHA, result: `${out}_a` }),
+    svgEl('feComposite', { in: down, in2: `${out}_a`, operator: 'in', result: out }),
+    ...(cover ? [svgEl('feColorMatrix', { in: cover, type: 'matrix', values: ALPHA, result: `${out}_cover` })] : []),
+  ];
+}
+
+/**
+ * A stashed map (mapNodes with `stash`), read back from beside the element in the next filter: each channel moved
+ * into place (`shifts`, whose dx the caller sets) and joined into what a displacement reads.
+ */
+export function stashNodes(out: string, channels: 2 | 3) {
+  const shifts = Array.from({ length: channels }, (_, c) => svgEl('feOffset', { in: 'SourceGraphic', dx: 0, dy: 0, result: `${out}s${c}` }));
+  return { shifts, nodes: [...shifts, ...joinNodes(`${out}s0`, `${out}s1`, channels === 3 ? `${out}s2` : null, out)] };
+}
+
+/**
+ * A map's tables (maps.ts: 0..1 for −largest..+largest shift, `bias` added against Chromium's truncation) for the
+ * channels mapNodes puts them in: across at 0.75 ± ¼, down at 0.5 ± ¼. 256 entries each, one per byte of the map's
+ * grey, as Chromium bakes them; each a step of a half byte more, so that baking rounds.
+ */
+export function encodeTables(tableX: number[], tableY: number[], bias: number): { across: string; down: string } {
+  const at = (t: number[], u: number) => {
+    const k = u * (t.length - 1), i = Math.min(Math.floor(k), t.length - 2);
+    return t[i] + (t[i + 1] - t[i]) * (k - i) - bias;
+  };
+  const encode = (t: number[], from: number) =>
+    Array.from({ length: 256 }, (_, k) => +Math.min(Math.max(from + at(t, k / 255) / 2 + 0.5 / 255, 0), 1).toFixed(5)).join(' ');
+  return { across: encode(tableX, 0.5), down: encode(tableY, 0.25) };
+}
+
 const decoded = new Set<string>();
 
 /**

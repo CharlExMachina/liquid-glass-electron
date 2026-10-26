@@ -94,3 +94,18 @@ test('a union\'s light covers its shape, and its shadow is outside it', () => {
   assert.ok(alpha(out.shadow, 70, 103) > 0, 'shadow just below');
   assert.equal(alpha(out.shadow, 70, 70), 0, 'none under the glass');
 });
+
+test('a map\'s tables, as its channels carry them: across at 0.75 ± ¼, down at 0.5 ± ¼, rounding when baked', async () => {
+  const { encodeTables } = await import('../../src/dom.ts');
+  const m = tableMap(roundedRect(200, 80, [40, 40, 40, 40]), { ...optics, dome: true }, 0.3);
+  const { across, down } = encodeTables(m.tableX, m.tableY, m.bias);
+  const a = across.split(' ').map(Number), d = down.split(' ').map(Number);
+  assert.equal(a.length, 256);
+  // Chromium bakes a table into a byte per entry by truncating: no shift (the map's 128) comes out as the bytes
+  // nearest 0.75 and 0.5
+  assert.equal(Math.floor(a[128] * 255), 191);
+  assert.equal(Math.floor(d[128] * 255), 128);
+  // the full range: −largest..+largest shift is 0.5..1 across, 0.25..0.75 down
+  assert.ok(Math.abs(a[1] - 0.5) < 3 / 255 && Math.abs(a[255] - 1) < 3 / 255, `${a[1]} … ${a[255]}`);
+  assert.ok(Math.abs(d[1] - 0.25) < 3 / 255 && Math.abs(d[255] - 0.75) < 3 / 255, `${d[1]} … ${d[255]}`);
+});

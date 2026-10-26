@@ -41,8 +41,33 @@ export interface Optics {
    * and the middle is flat
    */
   rim?: boolean;
+  /**
+   * Apple's switch lens (bevelMode 3): the glass shrinks what's behind it, every point sampling outward along the
+   * edge's normal, and its outermost px fold back
+   */
+  minify?: boolean;
   /** the slight magnification toward the middle of a pill */
   magnify: boolean;
+}
+
+/**
+ * Apple's switch lens, measured from an iOS 26 switch's knob held over lines of known places (a 58 × 37.5 capsule): the
+ * shift outward along the edge's normal, as a share of half the shorter side, every 0.02 of the way from the edge (0)
+ * to the middle (1). It shrinks what's behind the glass: about 5% at the middle (so a sliver along the middle line is
+ * never seen; the two halves part there), rising to 20% a sixth of the way in, then falling through 0 to −28% at the
+ * edge, where the glass folds back like thick glass and shows what's further in, mirrored.
+ */
+const SWITCH_LENS = [
+  -0.2758, -0.1876, -0.1091, -0.0361, 0.0094, 0.0632, 0.0725, 0.1335, 0.1415, 0.1598, 0.175, 0.187, 0.1954, 0.201, 0.2042,
+  0.2049, 0.2036, 0.2004, 0.1954, 0.1893, 0.1828, 0.1764, 0.1705, 0.1648, 0.1589, 0.1528, 0.1469, 0.1413, 0.1361, 0.1314,
+  0.1269, 0.1222, 0.1176, 0.1132, 0.1089, 0.1047, 0.1009, 0.0971, 0.0927, 0.088, 0.0838, 0.0805, 0.0772, 0.0733, 0.0696,
+  0.0663, 0.0628, 0.0594, 0.0567, 0.0554, 0.055,
+];
+
+/** The switch lens's shift outward, px, at `d` px in from the edge, for a glass whose shorter side is 2 × `half` px. */
+export function switchLens(d: number, half: number) {
+  const t = clamp(d / half, 0, 1) * (SWITCH_LENS.length - 1), i = Math.min(Math.floor(t), SWITCH_LENS.length - 2);
+  return (SWITCH_LENS[i] + (SWITCH_LENS[i + 1] - SWITCH_LENS[i]) * (t - i)) * half;
 }
 
 /** The bevel's height gradient at (x, y), over ±2 px as liquidglass's shader takes it (inward), and the depth there. */
@@ -72,6 +97,18 @@ export function shiftAt(x: number, y: number, f: Field, o: Optics): [number, num
     const t = clamp(d / zR, 0, 1), k = o.refraction * 0.5 * (1 - t) ** 2;
     const [tx, ty] = f.toward(x, y);
     return [tx * k, ty * k];
+  }
+  if (o.minify) {
+    // Outward along the edge's normal, by the measured profile; and along the long side a little more, as the switch's
+    // knob shrinks its middle sideways too: rising across the straight part to 4.9% of the half-side where the round
+    // ends begin, and fading into them as the edge turns to face the long way (as the cube of the normal's other part).
+    const half = f.shortHalf, e = 0.05;
+    const nx = f.sdf(x + e, y) - f.sdf(x - e, y), ny = f.sdf(x, y + e) - f.sdf(x, y - e), l = Math.hypot(nx, ny) || 1;
+    const p = switchLens(d, half) * o.refraction;
+    const wide = f.w >= f.h, u = wide ? x - f.w / 2 : y - f.h / 2, straight = Math.max(f.w, f.h) / 2 - half;
+    const across = Math.abs(wide ? ny / l : nx / l);
+    const side = straight <= 0 ? 0 : Math.sign(u) * 0.0489 * half * Math.min(Math.abs(u) / straight, 1) * across ** 3 * o.refraction;
+    return [(nx / l) * p + (wide ? side : 0), (ny / l) * p + (wide ? 0 : side)];
   }
   // Biconvex: light bends where it enters and where it leaves, a little more the thicker the glass.
   const k = (1 - 1 / IOR) * (2 + 0.5 * height(d, zR) / zR) * o.refraction * 30;

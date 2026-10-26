@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { roundedRect } from '../../src/field.ts';
-import { blurSigma, boxShadow, boxShadowAlpha, colorMatrix, fringeAt, height, shiftAt, slope, tintGains } from '../../src/optics.ts';
+import { blurSigma, boxShadow, boxShadowAlpha, colorMatrix, fringeAt, height, shiftAt, slope, switchLens, tintGains } from '../../src/optics.ts';
 
 const near = (a: number, b: number, eps = 1e-6, msg?: string) => assert.ok(Math.abs(a - b) <= eps, msg ?? `${a} ≉ ${b}`);
 const defaults = { refraction: 0.69, bevel: 40, dome: false, magnify: true };
@@ -106,4 +106,43 @@ test('Apple\'s lens (bevelMode 2) pulls the rim toward the middle and leaves the
   assert.deepEqual(shiftAt(56.5, 41.5, f, o).map((v) => Math.abs(v)), [0, 0]);
   // linear in refraction
   near(shiftAt(4, 41.5, f, { ...o, refraction: 2 })[0], 2 * shiftAt(4, 41.5, f, o)[0], 1e-9);
+});
+
+test('Apple\'s switch lens (bevelMode 3) shrinks what\'s behind it, parts at the middle and folds at the rim', () => {
+  // the knob as measured: 58 × 37.5, a capsule
+  const f = roundedRect(58, 37.5, [18.75, 18.75, 18.75, 18.75]);
+  const o = { refraction: 1, bevel: 24, dome: false, minify: true, magnify: false };
+  const mid = 18.75;
+  // across the middle column, every sample is further out than the point: what's behind looks smaller
+  for (const y of [2, 6, 10, 14, 17]) {
+    const [sx, sy] = shiftAt(29, mid - y, f, o);
+    near(sx, 0, 1e-9);
+    near(sy, -switchLens(mid - y, mid), 1e-6);
+    assert.ok(sy < 0, `outward ${y} px above the middle`);
+  }
+  // the two halves part at the middle line: about 1 px each way
+  const above = shiftAt(29, mid - 0.25, f, o)[1], below = shiftAt(29, mid + 0.25, f, o)[1];
+  assert.ok(above < -0.9 && below > 0.9, `${above}, ${below}`);
+  // most a sixth of the way in, about a fifth of the half-side
+  near(switchLens(mid * 0.3, mid), 0.2049 * mid, 1e-9);
+  // the outermost px fold back inward
+  assert.ok(shiftAt(29, 0.3, f, o)[1] > 3);
+  // the samples stay on the glass: nothing from beyond its edge
+  for (let x = 0.5; x < 58; x += 1.5) {
+    for (let y = 0.5; y < 37.5; y += 1.5) {
+      if (f.sdf(x, y) > -0.5) continue;
+      const [sx, sy] = shiftAt(x, y, f, o);
+      assert.ok(f.sdf(x + sx, y + sy) < 0.6, `(${x}, ${y}) samples off the glass`);
+    }
+  }
+  // sideways, the straight part shrinks too: 4.9% of the half-side where the round ends begin, none in the middle,
+  // and less where the edge turns to face sideways
+  near(shiftAt(29 + 10.25, 6, f, o)[0], 0.0489 * mid, 0.01);
+  // near a round end's tip the edge faces sideways: the shift there is the profile's, along the normal, and next to
+  // nothing more
+  const tip = [29 + 10.25 + 12, mid - 1], depth = -f.sdf(tip[0], tip[1]), r = Math.hypot(12, 1);
+  near(shiftAt(tip[0], tip[1], f, o)[0], switchLens(depth, mid) * (12 / r) + 0.0489 * mid * (1 / r) ** 3, 0.02);
+  near(shiftAt(29, 6, f, o)[0], 0, 1e-9);
+  // linear in refraction
+  near(shiftAt(20, 8, f, { ...o, refraction: 0.5 })[1], 0.5 * shiftAt(20, 8, f, o)[1], 1e-9);
 });

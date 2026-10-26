@@ -32,6 +32,8 @@ export interface TableMap extends Pixels {
     rimPx: number;
     /** how far the image reaches past the element on each side, px */
     margin: number;
+    /** what each table value has added to it, so that Chromium's truncation when it bakes the table rounds */
+    bias: number;
 }
 /**
  * A displacement map that stays exact at a quarter of the resolution. The bevel's shift rises steeply within a few px

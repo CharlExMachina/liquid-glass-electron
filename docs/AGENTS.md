@@ -37,7 +37,7 @@ Options can also come from data attributes (`data-glass-refraction="0.4"`, `data
 
 | You want | Do this | See |
 |---|---|---|
-| A control that turns to glass only while touched (iOS 26 slider and switch knobs) | The element's own CSS background is the solid look; animate `strength` 0 → 1 (or transition `--glass-strength`) while fading that background out, and `scale` it up. For Apple's look use `bevelMode: 2` (the rim magnifies toward the middle, so a track flares where it enters), `baseBrightness: 0` on light pages, and draw the rim's line and shading in CSS (`.ios-knob::after`) | `demo/demos/ios.js`, `demo/demos/controls.js` |
+| A control that turns to glass only while touched (iOS 26 slider and switch knobs) | The element's own CSS background is the solid look; animate `strength` 0 → 1 (or transition `--glass-strength`) while fading that background out, and `scale` it up. For Apple's look use `bevelMode: 2` on a slider's knob (the rim magnifies toward the middle, so a track flares where it enters) and `bevelMode: 3` on a switch's (it shrinks what's behind, as iOS's does), `baseBrightness: 0` on light pages, and draw the rim's line and shading in CSS (`.ios-knob::after`; the switch's is an image, `surface()`). Keep a trace of frost (`blurAmount` above 0) on glass whose frost is transitioned: 0 → above 0 changes the filter's structure, which costs a frame | `demo/demos/ios.js`, `demo/demos/controls.js` |
 | Glass that comes and goes within any animation | `g.set({ strength })` each frame, `g.animate({ strength })`, or a CSS transition/keyframes on `--glass-strength` | `demo/demos/ios.js` |
 | A lens that slides between positions (segmented control) | One glass element moved with `translate`; `strength` up while it moves, down when it lands | `demo/demos/ios.js` |
 | A menu or sheet that grows out of its button | `await morph(button, menu)` (menu laid out, `visibility: hidden`); back: `morph(menu, button)` | `demo/demos/morph.js` |
@@ -66,8 +66,8 @@ Options can also come from data attributes (`data-glass-refraction="0.4"`, `data
 - **A new map (a few ms on the CPU; fine now and then, not every frame):** `zRadius`, `cornerRadius`, switching
   between `rect`, `capsule`, `circle`, `concentric`, a new `path`. Maps are cached, so going back and forth between two
   values is cheap after the first time.
-- **A rebuild of the filter (the same):** fringe on or off (`chromAberration` 0 ↔ above 0), `bevelMode`, `distortion`
-  on/off, `smooth`, `magnify`, `opacity` 1 ↔ below 1, `refraction` 0 ↔ above 0, a free shape (`squircle`, `path`) on or
+- **A rebuild of the filter (the same):** fringe on or off (`chromAberration` 0 ↔ above 0), frost on or off
+  (`blurAmount` 0 ↔ above 0), `bevelMode`, `distortion` on/off, `smooth`, `magnify`, `opacity` 1 ↔ below 1, `refraction` 0 ↔ above 0, a free shape (`squircle`, `path`) on or
   off, `backdrop`.
 - **Per frame while anything on the page changes, every glass element costs a little** (Chromium re-runs every
   backdrop filter). Glass at `strength: 0` and `refraction: 0` costs nothing. For many elements, put them in a
