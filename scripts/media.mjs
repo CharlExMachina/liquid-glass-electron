@@ -184,7 +184,7 @@ async function recordFast(id, seconds, fps, tmp, cfr) {
   const bytes = width * height * 4;
   const end = times.at(-1) + HOLD * 1000;
   const count = Math.ceil((end * fps) / 1000);
-  const ff = spawn('/usr/bin/ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'rawvideo', '-pix_fmt', 'bgr0', '-s', `${width}x${height}`,
+  const ff = spawn('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'rawvideo', '-pix_fmt', 'bgr0', '-s', `${width}x${height}`,
     '-r', String(fps), '-i', '-', '-c:v', 'ffv1', '-threads', '8', '-slices', '16', cfr], { stdio: ['pipe', 'inherit', 'inherit'] });
   const done = exited(ff, 'ffmpeg (intermediate)');
   const fd = openSync(join(tmp, 'frames.bgra'), 'r');
@@ -269,7 +269,7 @@ function electron(args) {
 }
 
 function ffmpeg(args) {
-  return exited(spawn('/usr/bin/ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', ...args], { stdio: ['ignore', 'inherit', 'inherit'] }), 'ffmpeg');
+  return exited(spawn('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', ...args], { stdio: ['ignore', 'inherit', 'inherit'] }), 'ffmpeg');
 }
 
 function exited(child, what) {
