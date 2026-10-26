@@ -69,5 +69,6 @@
     "react-dom": "^19.3.1",
     "simple-liquid-glass": "^5.4.0",
     "typescript": "^7.0.2"
-  }
+  },
+  "packageManager": "pnpm@11.16.0"
 }

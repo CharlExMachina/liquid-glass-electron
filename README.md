@@ -31,12 +31,12 @@ nothing on screen changes it costs nothing at all.
 From GitHub (not on npm yet):
 
 ```bash
-npm install github:CharlExMachina/liquid-glass-electron
+pnpm add github:CharlExMachina/liquid-glass-electron   # or: npm install github:CharlExMachina/liquid-glass-electron
 ```
 
-`dist/` is committed, so there's nothing to build (`npm run bundle` rebuilds it; the script isn't called `build`,
-because npm would then install the dev dependencies to prepare the package). To use it without a bundler, see
-[docs/ELECTRON.md](docs/ELECTRON.md#loading-it).
+`dist/` is committed, so there's nothing to build (`pnpm bundle` rebuilds it; the script isn't called `build`, because
+a package manager installing from GitHub would then install the dev dependencies to prepare the package). To use it
+without a bundler, see [docs/ELECTRON.md](docs/ELECTRON.md#loading-it).
 
 ## Use
 
@@ -190,8 +190,8 @@ so changing them, even every frame, rebuilds nothing.
 ## The demos
 
 ```bash
-npm run demo          # the gallery
-npm run playground    # every option, live
+pnpm demo             # the gallery
+pnpm playground       # every option, live
 ```
 
 The gallery runs sandboxed, context-isolated and under a strict Content-Security-Policy. Photos and video are NASA's
@@ -212,7 +212,7 @@ Also in the gallery: **Lots of glass**, 24 glass tiles over a scrolling feed, ea
 
 ## Performance
 
-Measured with `npm run bench` ([bench/run.mjs](bench/run.mjs)): every library below in the same scenes, in an Electron
+Measured with `pnpm bench` ([bench/run.mjs](bench/run.mjs)): every library below in the same scenes, in an Electron
 window of 1180 × 800 on a second display, unfocused. The number is the CPU time of Chromium's GPU process (where backdrop
 filters and WebGL are drawn), as Electron's `app.getAppMetrics()` reports it, in % of one core: over 8 seconds after a
 2-second warm-up, three runs per library interleaved with the others, the median. The renderer process's time and the
@@ -310,7 +310,7 @@ fires as soon as it moves, for nothing per frame meanwhile. What a group needs (
 
 ## Compared with liquidglass
 
-`npm run compare` ([bench/compare/run.mjs](bench/compare/run.mjs)) draws the same scene with
+`pnpm compare` ([bench/compare/run.mjs](bench/compare/run.mjs)) draws the same scene with
 [@ybouane/liquidglass](https://github.com/ybouane/liquidglass) (WebGL) and with this library, at the same options
 (liquidglass's defaults) and a device scale factor of 1, and measures the mean difference per channel (0–255) in three
 zones: the rim (within 40 px of the edge), the interior, and the shadow (25 px outside). As a yardstick it also
@@ -375,14 +375,17 @@ before the bend, not a blur after it) and the interior a little further, still w
 
 ## Tests
 
+With [pnpm](https://pnpm.io) (`pnpm install`; it runs esbuild's install script and not a benchmark dependency's broken
+one, see `pnpm-workspace.yaml`) and Node 22.18 or later, which runs the unit tests' TypeScript as it is:
+
 ```bash
-npm test               # the optics, fields, maps, options and groups' geometry (node:test)
-npm run test:visual    # screenshots in Electron against test/visual/baseline/
-npm run typecheck
+pnpm test              # the optics, fields, maps, options and groups' geometry (node:test)
+pnpm test:visual       # screenshots in Electron against test/visual/baseline/
+pnpm typecheck
 ```
 
 The visual baselines are drawn by the GPU, so they belong to a machine (these are from Linux, Mesa, AMD). On another,
-write your own first with `npm run test:visual -- --update`, then the test catches changes from there.
+write your own first with `pnpm test:visual --update`, then the test catches changes from there.
 
 ## Credits
 

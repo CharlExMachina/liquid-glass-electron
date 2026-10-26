@@ -1,4 +1,4 @@
-// npm run bench: builds the library, bundles the React adapter (liquid-glass-react needs React), runs bench/run.mjs.
+// pnpm bench: builds the library, bundles the React adapter (liquid-glass-react needs React), runs bench/run.mjs.
 import { build } from 'esbuild';
 import { execFileSync, spawnSync } from 'node:child_process';
 execFileSync(process.execPath, ['scripts/build.mjs'], { stdio: 'inherit' });

@@ -1,5 +1,5 @@
 // Visual regression tests: each case in cases.js, captured at a device scale factor of 1 and compared with
-// baseline/<case>.png. npm run test:visual (-- --update to write the baselines, -- --case=name for one).
+// baseline/<case>.png. pnpm test:visual (--update to write the baselines, --case=name for one).
 //
 // Baselines are drawn by the GPU, so they belong to a machine: they were made on Linux with Mesa (AMD). On another
 // setup, write your own with --update first, then the test catches changes from there.
