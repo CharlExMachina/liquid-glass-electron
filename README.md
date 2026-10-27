@@ -344,6 +344,25 @@ same scene with this library; both windows are captured with `screencapture`, at
 Without glass the two captures differ by 0.2 levels of 255 on average (a level at most), so what differs with glass is
 the glass. AppKit's `NSGlassEffectView` draws the same pixels as SwiftUI's, to the bit.
 
+The same scenes, each captured from a real window: macOS's own glass on the left, this library's on the right
+(photos from NASA, [credits](demo/assets/CREDITS.md)):
+
+<table>
+<tr><th>macOS 27 (SwiftUI <code>glassEffect</code>)</th><th>liquid-glass-electron</th></tr>
+<tr><td width="50%"><img src="docs/native/panel-regular-light-coast-macos.jpg" alt=".regular, light, a 340 × 200 panel on macOS"></td><td width="50%"><img src="docs/native/panel-regular-light-coast-ours.jpg" alt=".regular, light, a 340 × 200 panel drawn by liquid-glass-electron"></td></tr>
+<tr><td colspan="2"><code>.regular</code>, light, a 340 × 200 panel: a mean difference of 1.3 levels of 255 inside the glass</td></tr>
+<tr><td width="50%"><img src="docs/native/panel-clear-dark-night-macos.jpg" alt=".clear, dark, a 340 × 200 panel on macOS"></td><td width="50%"><img src="docs/native/panel-clear-dark-night-ours.jpg" alt=".clear, dark, a 340 × 200 panel drawn by liquid-glass-electron"></td></tr>
+<tr><td colspan="2"><code>.clear</code>, dark, a 340 × 200 panel: a mean difference of 0.5 levels of 255 inside the glass</td></tr>
+<tr><td width="50%"><img src="docs/native/circle-clear-light-coast-macos.jpg" alt=".clear, light, a 200 px circle on macOS"></td><td width="50%"><img src="docs/native/circle-clear-light-coast-ours.jpg" alt=".clear, light, a 200 px circle drawn by liquid-glass-electron"></td></tr>
+<tr><td colspan="2"><code>.clear</code>, light, a 200 px circle: a mean difference of 0.5 levels of 255 inside the glass</td></tr>
+<tr><td width="50%"><img src="docs/native/small-regular-light-coast-macos.jpg" alt=".regular, light, a 120 × 44 capsule on macOS"></td><td width="50%"><img src="docs/native/small-regular-light-coast-ours.jpg" alt=".regular, light, a 120 × 44 capsule drawn by liquid-glass-electron"></td></tr>
+<tr><td colspan="2"><code>.regular</code>, light, a 120 × 44 capsule: a mean difference of 1.4 levels of 255 inside the glass</td></tr>
+<tr><td width="50%"><img src="docs/native/capsule-clear-light-coast-macos.jpg" alt=".clear, light, a 300 × 80 capsule on macOS"></td><td width="50%"><img src="docs/native/capsule-clear-light-coast-ours.jpg" alt=".clear, light, a 300 × 80 capsule drawn by liquid-glass-electron"></td></tr>
+<tr><td colspan="2"><code>.clear</code>, light, a 300 × 80 capsule: a mean difference of 0.6 levels of 255 inside the glass</td></tr>
+<tr><td width="50%"><img src="docs/native/capsule-regular-dark-night-macos.jpg" alt=".regular, dark, a 300 × 80 capsule on macOS"></td><td width="50%"><img src="docs/native/capsule-regular-dark-night-ours.jpg" alt=".regular, dark, a 300 × 80 capsule drawn by liquid-glass-electron"></td></tr>
+<tr><td colspan="2"><code>.regular</code>, dark, a 300 × 80 capsule: a mean difference of 4.5 levels of 255 inside the glass</td></tr>
+</table>
+
 How each part was measured (details in [docs/APPLE.md](docs/APPLE.md#how-macos-27-draws-it-and-how-this-was-measured)):
 flat colours and nine greys for the colour, an edge for the frost, linear ramps across the rim for the lens (a ramp
 blurred stays a ramp, so the level under the glass says where it was sampled from, to a pixel), and the inputs of the
