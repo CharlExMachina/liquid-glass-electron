@@ -36,6 +36,9 @@ export declare class Lens {
     private main;
     private maps;
     private colour;
+    private capNode;
+    private fillBlur;
+    private fillAlpha;
     private blurNode;
     private mixNode;
     private filterCss;
@@ -88,7 +91,8 @@ export declare class Lens {
      * What a group needs to draw this element's glass in a filter of its own, or null if it can't: glass that doesn't
      * bend, a free shape, a dome's per-channel maps, noise (it's in the filter's coordinates), CSS filters in front, or no
      * map yet. `filters` are the element's own filter elements (the group copies them), `images` its map's (a grey per
-     * channel), `side` how far the map is stashed beside the element, `margin` how far the filters reach past it.
+     * channel), `side` how far the map is stashed beside the element, `margin` how far the filters reach past it (and
+     * `right`, past its right side, which can be further).
      */
     batchSource(): {
         filters: SVGFilterElement[];
@@ -97,6 +101,7 @@ export declare class Lens {
         shifts: SVGFEOffsetElement[];
         side: number;
         margin: number;
+        right: number;
         grid: MapGrid;
         mapMargin: number;
     } | null;
@@ -124,8 +129,19 @@ export declare class Lens {
     setGrid(grid: MapGrid | null): Promise<void>;
     private measure;
     private build;
-    /** The colour matrix: saturation, brightness (baseBrightness, 6% as liquidglass's glass is, plus a button's hover) and tint. */
+    /**
+     * The colour matrix: saturation, brightness (baseBrightness, 6% as liquidglass's glass is, plus a button's hover) and
+     * tint, after `colorMatrix` if there is one; with macOS's cap on brightness, the luma in alpha too (see build).
+     */
     private matrix;
+    /** Whether macOS's blur fill applies (regular glass, bevelMode 4). */
+    private filled;
+    /** Whether macOS's cap on dark regular glass's brightness applies. */
+    private capped;
+    /** The cap's table: from 0.5 + luma / 2 (in alpha) to the share of the colour kept, at the current strength. */
+    private capTable;
+    /** The frost, σ px: blurAmount's, and for macOS's glass (bevelMode 4) sized by the element as macOS sizes it. */
+    private frost;
     /** The shape changed (a container's members moved): draw it again now. */
     reshape(): void;
     private layout;

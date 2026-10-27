@@ -17,9 +17,9 @@
 // Light doesn't bend: Fresnel, specular and edge light are a border-image, painted once and kept.
 import { gridField, roundedRect, signedDistance, squircle, type Field } from './field.ts';
 import { fieldLight, lightImage, tableMap, type MapGrid, type RGBA } from './maps.ts';
-import { ABERRATION, blurSigma, boxShadow, clampRadii, colorMatrix, tintGains, type Radii } from './optics.ts';
+import { ABERRATION, blurSigma, boxShadow, clampRadii, colorMatrix, MAC_LENS_REACH, macFrost, macLensSize, macMaxLuma, outlineShadow, tintGains, type Radii } from './optics.ts';
 import { encodeTables, filterDefs, greyDataURL, mapNodes, predecode, setAttrs, stashNodes, supportsSvgBackdrop, svgEl, toDataURL } from './dom.ts';
-import { fromCss, fromData, resolve, type Environment, type GlassOptions } from './options.ts';
+import { fromCss, fromData, MACOS_COLOUR, MACOS_SMALL_DARK, resolve, type Environment, type GlassOptions } from './options.ts';
 
 // Map pixels per CSS px: about this many pixels in a map (per-frame cost follows its bytes), between 0.08 and 0.5 per
 // px. Small glass gets a finer map, which is cheap, and its corners are most of it. The switch lens (bevelMode 3) has
@@ -30,6 +30,9 @@ const mapScale = (w: number, h: number, moving: boolean, fine = false) =>
   Math.min(Math.max(Math.sqrt((fine ? FINE_MAP_PIXELS : MAP_PIXELS) / (w * h)), 0.08), fine ? Math.max(devicePixelRatio, 2) : 0.5) / (moving ? 2 : 1);
 // How far filter 2's region reaches past the element, px (less than any map's margin: see place())
 const EDGE = 2;
+// macOS's blur fill: its radius (8) as a Gaussian here, px, and its opacity (see filled)
+const MAC_FILL_SIGMA = 15.6, MAC_FILL_OPACITY = 0.675;
+const fillAlpha = (s: number) => `1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 ${+(MAC_FILL_OPACITY * s).toFixed(4)} 0`;
 // How long a size has to hold before the map and light are drawn for it, ms.
 const SETTLE = 120;
 // Keeps the green channel only, and so on: the fringe's three passes are added up.
@@ -79,6 +82,11 @@ export class Lens {
   // One map, or with a dome's fringe three (red, green, blue: liquidglass's fringe doesn't follow the dome's shift)
   private maps: { images: SVGFEImageElement[]; tables: [SVGFEComponentTransferElement, SVGFEComponentTransferElement]; cover: SVGFEComponentTransferElement | null; shifts: SVGFEOffsetElement[]; fringe: number; rimPx: number }[] = [];
   private colour: SVGFEColorMatrixElement | null = null;
+  // macOS's cap on dark glass's brightness: a table from the luma (in the colour's alpha) to how much it's dimmed
+  private capNode: SVGFEComponentTransferElement | null = null;
+  // macOS's blur fill: the wider blur, and its opacity
+  private fillBlur: SVGFEGaussianBlurElement | null = null;
+  private fillAlpha: SVGFEColorMatrixElement | null = null;
   private blurNode: SVGFEGaussianBlurElement | null = null;
   private mixNode: SVGFECompositeElement | null = null;
   // what backdrop-filter is while there's glass, the filter's structure (rebuilt only when it changes), and whether
@@ -197,9 +205,10 @@ export class Lens {
    * What a group needs to draw this element's glass in a filter of its own, or null if it can't: glass that doesn't
    * bend, a free shape, a dome's per-channel maps, noise (it's in the filter's coordinates), CSS filters in front, or no
    * map yet. `filters` are the element's own filter elements (the group copies them), `images` its map's (a grey per
-   * channel), `side` how far the map is stashed beside the element, `margin` how far the filters reach past it.
+   * channel), `side` how far the map is stashed beside the element, `margin` how far the filters reach past it (and
+   * `right`, past its right side, which can be further).
    */
-  batchSource(): { filters: SVGFilterElement[]; images: SVGFEImageElement[]; tables: [SVGFEComponentTransferElement, SVGFEComponentTransferElement]; shifts: SVGFEOffsetElement[]; side: number; margin: number; grid: MapGrid; mapMargin: number } | null {
+  batchSource(): { filters: SVGFilterElement[]; images: SVGFEImageElement[]; tables: [SVGFEComponentTransferElement, SVGFEComponentTransferElement]; shifts: SVGFEOffsetElement[]; side: number; margin: number; right: number; grid: MapGrid; mapMargin: number } | null {
     const o = this.options;
     if (!this.bends || this.maps.length !== 1 || this.isFree() || this.shape || o.backdrop || o.distortion > 0 || this.amount() <= 0 || !this.main) return null;
     const map = this.maps[0];
@@ -210,6 +219,7 @@ export class Lens {
       images: map.images, tables: map.tables, shifts: map.shifts,
       side: map.shifts.length ? -Number(map.shifts[0].getAttribute('dx')) : 0,
       margin: -Number(first.getAttribute('x')),
+      right: Number(first.getAttribute('width')) - this.w + Number(first.getAttribute('x')),
       grid: this.mapGrid, mapMargin: this.margin,
     };
   }
@@ -218,7 +228,7 @@ export class Lens {
   private structureKey() {
     const o = this.options;
     const bends = supportsSvgBackdrop() && o.refraction > 0 && o.variant !== 'identity';
-    return [bends, o.backdrop, o.chromAberration > 0, o.bevelMode, o.blurAmount > 0, o.smooth, o.distortion > 0, o.opacity < 1, o.variant === 'identity', o.magnify, this.isFree()].join();
+    return [bends, o.backdrop, o.chromAberration > 0, o.bevelMode, o.blurAmount > 0, o.smooth, o.distortion > 0, o.opacity < 1, o.variant === 'identity', o.magnify, this.isFree(), this.capped(), this.filled() ? (this.host.env().dark ? 'darken' : 'lighten') : ''].join();
   }
 
   /** A shape the element's own (rounded) box can't clip: the filter masks itself, and light and shadow are an image. */
@@ -241,7 +251,9 @@ export class Lens {
       this.setBackdrop(o.variant === 'identity' || s <= 0 ? 'none' : this.cssBackdrop());
     } else {
       this.recolour();
-      this.blurNode?.setAttribute('stdDeviation', (blurSigma(o.blurAmount) * s).toFixed(2));
+      this.blurNode?.setAttribute('stdDeviation', (this.frost() * s).toFixed(2));
+      this.fillBlur?.setAttribute('stdDeviation', (MAC_FILL_SIGMA * s).toFixed(2));
+      this.fillAlpha?.setAttribute('values', fillAlpha(s));
       this.mixNode?.setAttribute('k2', String(o.opacity));
       this.mixNode?.setAttribute('k3', String(1 - o.opacity));
       if (this.passes.length === 3 && this.unitMaps) {
@@ -272,8 +284,18 @@ export class Lens {
 
   /** The frost and colour as CSS functions, scaled by the strength (glass that doesn't bend, and other browsers). */
   private cssBackdrop() {
-    const o = this.options, s = this.amount(), sigma = blurSigma(o.blurAmount) * s;
-    return [o.backdrop ?? '', sigma > 0.01 ? `blur(${sigma.toFixed(2)}px)` : '', `saturate(${1 + o.saturation * s})`, `brightness(${(1 + ((1 + o.baseBrightness) * (1 + o.brightness) - 1) * s).toFixed(3)})`].filter(Boolean).join(' ');
+    const o = this.options, s = this.amount(), sigma = this.frost() * s;
+    const fns = [o.backdrop ?? '', sigma > 0.01 ? `blur(${sigma.toFixed(2)}px)` : '', `saturate(${1 + o.saturation * s})`, `brightness(${(1 + ((1 + o.baseBrightness) * (1 + o.brightness) - 1) * s).toFixed(3)})`];
+    const m = Array.isArray(o.colorMatrix) ? o.colorMatrix : null;
+    if (m) {
+      // the colour matrix as near as CSS's functions get: its gain and offset for greys (contrast, then brightness:
+      // b·(c·(x − ½) + ½)) and its saturation (a CSS saturate matrix's trace is 1 + 2s, times the gain)
+      const g = (m[0] + m[1] + m[2] + m[4] + m[5] + m[6] + m[8] + m[9] + m[10]) / 3, off = (m[3] + m[7] + m[11]) / 3;
+      const b = g + 2 * off, c = g / b, sat = ((m[0] + m[5] + m[10]) / g - 1) / 2;
+      const mix = (v: number) => +(1 + (v - 1) * s).toFixed(3);
+      fns.push(`saturate(${mix(sat)})`, `contrast(${mix(c)})`, `brightness(${mix(b)})`);
+    }
+    return fns.filter(Boolean).join(' ');
   }
 
   /** The border-box size, as the ResizeObserver reported it. */
@@ -314,13 +336,13 @@ export class Lens {
     const o = this.options;
     this.pre?.remove();
     this.main?.remove();
-    this.pre = this.main = this.colour = this.blurNode = this.mixNode = null;
+    this.pre = this.main = this.colour = this.blurNode = this.mixNode = this.capNode = this.fillBlur = this.fillAlpha = null;
     this.maps = [];
     this.passes = [];
     this.reach = 0;
     this.mapKey = '';
     this.bends = supportsSvgBackdrop() && o.refraction > 0 && o.variant !== 'identity';
-    const sigma = blurSigma(o.blurAmount);
+    const sigma = this.frost();
 
     if (!this.bends) {
       // No bending: the frost and colour as CSS functions (also what browsers other than Chromium get).
@@ -345,7 +367,17 @@ export class Lens {
     if (o.blurAmount > 0) {
       this.blurNode = svgEl('feGaussianBlur', { in: src, stdDeviation: (sigma * this.amount()).toFixed(2), edgeMode: 'duplicate', result: 'smooth' });
       first.append(this.blurNode);
-      src = 'smooth';
+      if (this.filled()) {
+        // macOS's blur fill (regular glass): a wider blur of the backdrop, laid over the frost at 0.675 by darken in
+        // the dark, lighten in the light (its glassBackground's inputBlurFill*). With the wider blur's alpha at that
+        // opacity, one blend is the mix: (1 − a) × frost + a × min(frost, wide) (or max).
+        this.fillBlur = svgEl('feGaussianBlur', { in: 'SourceGraphic', stdDeviation: (MAC_FILL_SIGMA * this.amount()).toFixed(2), edgeMode: 'duplicate', result: 'wide0' });
+        this.fillAlpha = svgEl('feColorMatrix', { in: 'wide0', type: 'matrix', values: fillAlpha(this.amount()), result: 'wide' });
+        first.append(this.fillBlur, this.fillAlpha, svgEl('feBlend', { in: 'wide', in2: 'smooth', mode: this.host.env().dark ? 'darken' : 'lighten', result: 'filled' }));
+        src = 'filled';
+      } else {
+        src = 'smooth';
+      }
     } else if (o.smooth) {
       // a 3×3 binomial kernel: σ ≈ 0.7 px in one pass (a Gaussian takes two). Its edge is left transparent: duplicating
       // it makes Skia draw the backdrop once more first, to clamp it, every frame. The bend reads that far out only for
@@ -366,6 +398,18 @@ export class Lens {
     this.colour = svgEl('feColorMatrix', { in: src, type: 'matrix', values: this.matrix().join(' '), result: 'coloured' });
     first.append(this.colour);
     src = 'coloured';
+    if (this.capped()) {
+      // macOS keeps dark glass from getting bright, by the luma, keeping the hue: the colour matrix puts 0.5 + luma / 2
+      // in alpha (never so small that the colour, premultiplied by it, loses its precision), a table turns that into
+      // how much to dim, min(1, cap / luma), and laid over black the colour is multiplied by it. Skia folds the matrix
+      // and the table into one colour filter, drawn with the composite.
+      this.capNode = svgEl('feComponentTransfer', { in: src, result: 'dimmed' }, svgEl('feFuncA', { type: 'table', tableValues: this.capTable() }));
+      first.append(this.capNode, svgEl('feFlood', { 'flood-color': '#000', 'flood-opacity': 1, result: 'black' }),
+        svgEl('feComposite', { in: 'dimmed', in2: 'black', operator: 'over', result: 'capped0' }),
+        // where the backdrop is transparent (a transparent or vibrant window's), the glass stays so
+        svgEl('feComposite', { in: 'capped0', in2: 'SourceGraphic', operator: 'in', result: 'capped' }));
+      src = 'capped';
+    }
 
     // The map: the image and its lookup tables; with fringing, beside the element in filter 1's output, which
     // filter 2 reads from there.
@@ -437,14 +481,64 @@ export class Lens {
     this.setBackdrop(this.amount() > 0 ? this.filterCss : 'none');
   }
 
-  /** The colour matrix: saturation, brightness (baseBrightness, 6% as liquidglass's glass is, plus a button's hover) and tint. */
+  /**
+   * The colour matrix: saturation, brightness (baseBrightness, 6% as liquidglass's glass is, plus a button's hover) and
+   * tint, after `colorMatrix` if there is one; with macOS's cap on brightness, the luma in alpha too (see build).
+   */
   private matrix() {
     const o = this.options;
     const gains = tintGains(o.tintStrength, o.tint ? tintRgb(o.tint) : undefined);
     const hover = this.hover && o.button && !this.pressed ? 0.2 : 0;
-    const m = colorMatrix(o.saturation, (1 + o.brightness + hover) * (1 + o.baseBrightness) - 1, gains), s = this.amount();
+    let m = colorMatrix(o.saturation, (1 + o.brightness + hover) * (1 + o.baseBrightness) - 1, gains);
+    let base = Array.isArray(o.colorMatrix) ? o.colorMatrix : null;
+    const env = this.host.env(), gamut = env.wideGamut === false ? 'srgb' : 'p3';
+    if (base && base === MACOS_COLOUR.regular[gamut][1] && o.bevelMode === 4 && this.w) {
+      // macOS's own dark regular colour: small glass's below 104 px (from 64 px down, all of it)
+      const t = Math.min(Math.max((Math.min(this.w, this.h) - 64) / 40, 0), 1), small = MACOS_SMALL_DARK[gamut], large = base;
+      base = small.map((v, i) => v + (large[i] - v) * t);
+    }
+    if (base) {
+      // m after base: each of m's rows of the base's rows, and its offset of their offsets
+      const row = (r: number) => [0, 1, 2, 3].map((j) => m[r * 5] * base[j] + m[r * 5 + 1] * base[4 + j] + m[r * 5 + 2] * base[8 + j] + (j === 3 ? m[r * 5 + 4] : 0));
+      m = [0, 1, 2].flatMap((r) => { const [a, b2, c, d] = row(r); return [a, b2, c, 0, d]; }).concat([0, 0, 0, 1, 0]);
+    }
+    const s = this.amount();
     const id = [1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0];
-    return m.map((v, i) => +(id[i] + (v - id[i]) * s).toFixed(4));
+    const out = m.map((v, i) => id[i] + (v - id[i]) * s);
+    if (this.capped()) {
+      const L = [0.2126, 0.7152, 0.0722];
+      for (const j of [0, 1, 2, 4]) out[15 + j] = 0.5 * (L[0] * out[j] + L[1] * out[5 + j] + L[2] * out[10 + j]) + (j === 4 ? 0.5 : 0);
+      out[18] = 0;
+    }
+    return out.map((v) => +v.toFixed(4));
+  }
+
+  /** Whether macOS's blur fill applies (regular glass, bevelMode 4). */
+  private filled() {
+    const o = this.options;
+    return o.bevelMode === 4 && o.variant === 'regular' && o.blurAmount > 0;
+  }
+
+  /** Whether macOS's cap on dark regular glass's brightness applies. */
+  private capped() {
+    const o = this.options;
+    return o.bevelMode === 4 && o.variant === 'regular' && this.host.env().dark;
+  }
+
+  /** The cap's table: from 0.5 + luma / 2 (in alpha) to the share of the colour kept, at the current strength. */
+  private capTable() {
+    const cap = 1 + (macMaxLuma(Math.min(this.w, this.h)) - 1) * this.amount();
+    return Array.from({ length: 33 }, (_, k) => {
+      const l = 2 * (k / 32) - 1;
+      return +(l <= cap ? 1 : cap / l).toFixed(4);
+    }).join(' ');
+  }
+
+  /** The frost, σ px: blurAmount's, and for macOS's glass (bevelMode 4) sized by the element as macOS sizes it. */
+  private frost() {
+    const o = this.options, sigma = blurSigma(o.blurAmount);
+    if (o.bevelMode !== 4 || !this.w) return sigma;
+    return sigma * macFrost(Math.min(this.w, this.h), o.variant === 'clear', this.host.env().dark);
   }
 
   // ---------------------------------------------------------------- size, map and light
@@ -469,9 +563,17 @@ export class Lens {
       const radiusCss = own ? this.saved['border-radius'] : radii.map((r) => `${+r.toFixed(2)}px`).join(' ');
       if (this.el.style.borderRadius !== radiusCss) this.el.style.borderRadius = radiusCss;
       const deeper = this.pressed && o.press === 'flatten' ? 1.2 : 1;
-      this.el.style.setProperty('--lg-shadow', boxShadow(o.shadowOpacity * o.opacity * this.amount(), o.shadowSpread * deeper, o.shadowOffsetY));
+      const shadow = boxShadow(o.shadowOpacity * o.opacity * this.amount(), o.shadowSpread * deeper, o.shadowOffsetY), line = outlineShadow(o, this.amount());
+      this.el.style.setProperty('--lg-shadow', [shadow, line].filter((v) => v !== 'none').join(', ') || 'none');
     }
     this.place();
+    // macOS's frost and cap follow the size (and a group's copy of the filter has to follow them)
+    if (o.bevelMode === 4) {
+      if (!this.bends) this.setBackdrop(o.variant === 'identity' || this.amount() <= 0 ? 'none' : this.cssBackdrop());
+      const set = (node: Element | null | undefined, k: string, v: string) => (node && node.getAttribute(k) !== v ? (node.setAttribute(k, v), 1) : 0);
+      if (set(this.blurNode, 'stdDeviation', (this.frost() * this.amount()).toFixed(2)) + set(this.capNode?.firstElementChild, 'tableValues', this.capTable())
+        + set(this.colour, 'values', this.matrix().join(' '))) this.changed();
+    }
     // The map and light are drawn for the settled size; meanwhile the old ones stretch.
     clearTimeout(this.settleTimer);
     if (now || !this.mapKey) this.draw();
@@ -506,6 +608,15 @@ export class Lens {
     }));
     // An image's rectangle is also its region, which Chromium clips to the filter's before fitting the image in it:
     // the filter that draws the maps reaches past the element by the margin too.
+    if (this.options.bevelMode === 4 && !stashed) {
+      // macOS's lens only samples inward: past the left, top and bottom the filter reaches only as far as the map and
+      // the frosts' tails do (2σ, at full strength, so a tween of it doesn't move the region); only to the right as far
+      // as the displacement reads its moved source. A reach on every side would treble the region.
+      const tail = Math.ceil(2 * Math.max(this.frost(), this.filled() ? MAC_FILL_SIGMA : 0));
+      const s = Math.ceil(Math.max(left, -(r.y + rect.y), r.y + rect.y + rect.h - h, tail) - 1e-6);
+      setAttrs(this.main!, { x: -s, y: -s, width: w + s + Math.ceil(Math.max(right, this.reach, tail) - 1e-6), height: h + 2 * s });
+      return;
+    }
     setAttrs((this.pre ?? this.main)!, { x: -e, y: -e, width: (stashed ? slot * this.maps.length * channels : 0) + w + Math.max(right, this.reach) + e, height: h + 2 * e });
   }
 
@@ -543,7 +654,9 @@ export class Lens {
     const free = this.isFree();
     const field = this.shape ? this.shape.field(w, h) : free ? this.freeField(w, h) : roundedRect(w, h, radii);
     const moving = !!this.shape?.moving();
-    const zR = Math.min(o.zRadius * (this.flat ? 0.8 : 1), field.shortHalf);
+    // macOS's lens is sized by the element; it reaches a few × its height in
+    const mac = o.bevelMode === 4 ? macLensSize(2 * field.shortHalf, o.variant === 'clear', o.zRadius * (this.flat ? 0.8 : 1)) : undefined;
+    const zR = Math.min(mac ? mac.height * MAC_LENS_REACH : o.zRadius * (this.flat ? 0.8 : 1), field.shortHalf);
     // the map covers the shape's part of the box (all of it, for a rounded rectangle)
     const region = this.shape?.bounds() ?? { x: 0, y: 0, w, h };
     const sub = region.x || region.y || region.w !== w || region.h !== h ? within(field, region) : field;
@@ -551,7 +664,7 @@ export class Lens {
       const scale = mapScale(region.w / Math.sqrt(this.shape?.detail() ?? 1), region.h, moving, o.bevelMode === 3);
       const refraction = this.unitMaps ? 1 : o.refraction;
       const grid = this.shape || free ? null : this.grid;
-      const key = [w, h, ...radii, zR, refraction, o.bevelMode, +o.magnify, scale, ...this.maps.map((m) => m.fringe)].map((v) => Math.round(v * 400) / 400).join(':')
+      const key = [w, h, ...radii, zR, refraction, o.bevelMode, +o.magnify, scale, mac?.amount ?? 0, mac?.height ?? 0, ...this.maps.map((m) => m.fringe)].map((v) => Math.round(v * 400) / 400).join(':')
         + (this.shape ? `|${this.shape.key()}` : '') + (free ? `|${o.shape}|${o.path}|${o.pathBox}|${o.cornerRadius}` : '') + (grid ? `|${Object.values(grid).join(',')}` : '');
       if (key !== this.mapKey) {
         this.mapKey = key;
@@ -560,7 +673,7 @@ export class Lens {
           return mapCache.get(k) ?? remember(mapCache, k, (() => {
             // a path's edges are anywhere: its tables come from a plain box's straight edges
             const profile = free && o.shape === 'path' ? roundedRect(w, h, [0, 0, 0, 0]) : sub;
-            const m = tableMap(sub, { refraction, bevel: zR, dome: o.bevelMode === 1, rim: o.bevelMode === 2, minify: o.bevelMode === 3, magnify: o.magnify }, scale, moving ? 64 : 256, map.fringe, profile, grid);
+            const m = tableMap(sub, { refraction, bevel: zR, dome: o.bevelMode === 1, rim: o.bevelMode === 2, minify: o.bevelMode === 3, mac, magnify: o.magnify }, scale, moving ? 64 : 256, map.fringe, profile, grid);
             return { urls: [0, 1, 2].slice(0, free ? 3 : 2).map((c) => greyDataURL(m, c)), rimPx: m.rimPx, margin: m.margin, rect: m.rect, grid: m.grid, tables: { ...encodeTables(m.tableX, m.tableY, m.bias), cover: m.tableB.join(' ') } };
           })());
         });
@@ -761,6 +874,7 @@ export class Lens {
 
   private recolour() {
     this.colour?.setAttribute('values', this.matrix().join(' '));
+    this.capNode?.firstElementChild?.setAttribute('tableValues', this.capTable());
     this.changed();
   }
 

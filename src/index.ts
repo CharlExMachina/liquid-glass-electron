@@ -58,13 +58,15 @@ const queries = {
   reduceTransparency: media('(prefers-reduced-transparency: reduce)'),
   increaseContrast: media('(prefers-contrast: more)'),
   reduceMotion: media('(prefers-reduced-motion: reduce)'),
+  wideGamut: media('(color-gamut: p3)'),
 };
 let overrides: Partial<Environment> = {};
 
 /**
  * What the glass adapts to. Each comes from the page unless set with setEnvironment(): dark from
  * prefers-color-scheme (or <html data-glass-theme="dark">), appearance from <html data-glass-appearance="tinted">,
- * the accessibility settings from prefers-reduced-transparency, prefers-contrast and prefers-reduced-motion.
+ * the accessibility settings from prefers-reduced-transparency, prefers-contrast and prefers-reduced-motion, and
+ * whether the display is wide-gamut from color-gamut (macOS's colour is fitted for either).
  */
 export function getEnvironment(): Environment {
   const root = typeof document !== 'undefined' ? document.documentElement.dataset : {};
@@ -75,6 +77,7 @@ export function getEnvironment(): Environment {
     reduceTransparency: overrides.reduceTransparency ?? !!queries.reduceTransparency?.matches,
     increaseContrast: overrides.increaseContrast ?? !!queries.increaseContrast?.matches,
     reduceMotion: overrides.reduceMotion ?? !!queries.reduceMotion?.matches,
+    wideGamut: overrides.wideGamut ?? (queries.wideGamut ? queries.wideGamut.matches : true),
   };
 }
 

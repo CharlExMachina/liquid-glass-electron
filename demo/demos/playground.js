@@ -1,11 +1,11 @@
-import { DEFAULTS, glass } from '../../dist/liquid-glass.js';
+import { DEFAULTS, VARIANTS, glass } from '../../dist/liquid-glass.js';
 import { css, h, ready, sleep } from './lib.js';
 
 // Every option, live. Drag the glass around; the code below is the glass() call for what's set (only what differs
 // from the defaults).
 const NUM = [
-  ['Bending', [['refraction', 0, 2, 0.01], ['zRadius', 1, 120, 1], ['bevelMode', 0, 2, 1], ['chromAberration', 0, 0.4, 0.005], ['distortion', 0, 2, 0.05]]],
-  ['Light', [['edgeHighlight', 0, 1, 0.01], ['fresnel', 0, 3, 0.05], ['specular', 0, 2, 0.05]]],
+  ['Bending', [['refraction', 0, 2, 0.01], ['zRadius', 1, 120, 1], ['bevelMode', 0, 4, 1], ['chromAberration', 0, 0.4, 0.005], ['distortion', 0, 2, 0.05]]],
+  ['Light', [['edgeHighlight', 0, 1, 0.01], ['fresnel', 0, 3, 0.05], ['specular', 0, 2, 0.05], ['outline', 0, 1, 0.01], ['outlineTop', 0, 1, 0.01]]],
   ['Frost and colour', [['blurAmount', 0, 4, 0.05], ['saturation', -1, 2, 0.05], ['brightness', -0.5, 0.8, 0.02], ['baseBrightness', 0, 0.2, 0.01], ['tintStrength', 0, 1, 0.02], ['opacity', 0, 1, 0.02]]],
   ['Shadow', [['shadowOpacity', 0, 1, 0.02], ['shadowSpread', 1, 40, 1], ['shadowOffsetY', -10, 30, 1]]],
   ['Shape', [['cornerRadius', 0, 120, 1]]],
@@ -45,10 +45,14 @@ export default {
       const o = { ...options };
       for (const k of ['variant', 'press', 'tint', 'fill', 'path', 'pathBox']) if (!o[k]) o[k] = null;
       g?.update(o);
-      const changed = Object.entries(o).filter(([k, v]) => v !== DEFAULTS[k] && !(k === 'floating' && v));
+      // what differs from the variant's look (or the defaults)
+      const base = { ...DEFAULTS, ...(VARIANTS[o.variant] ?? {}) };
+      const changed = Object.entries(o).filter(([k, v]) => (k === 'variant' ? v !== null : JSON.stringify(v) !== JSON.stringify(base[k] ?? null)) && !(k === 'floating' && v));
       code.textContent = `glass(el, {\n${changed.map(([k, v]) => `  ${k}: ${JSON.stringify(v)},`).join('\n')}\n});`;
     };
     const rows = [];
+    // each knob, by its option, so a variant can set them all
+    const knobs = {};
     const row = (label, input, out) => h('label.pg-row', {}, h('span', { text: label }), input, out);
     for (const [group, items] of NUM) {
       rows.push(h('h4', { text: group }));
@@ -60,6 +64,10 @@ export default {
           out.textContent = input.value;
           apply();
         });
+        knobs[k] = (v) => {
+          input.value = v;
+          out.textContent = String(+(+v).toFixed(3));
+        };
         rows.push(row(k, input, out));
       }
     }
@@ -69,6 +77,13 @@ export default {
       sel.value = options[k] ?? '';
       sel.addEventListener('change', () => {
         options[k] = sel.value || null;
+        if (k === 'variant') {
+          // the variant's own values, on the knobs (the knobs' values are passed on, and would win over it)
+          const look = { ...DEFAULTS, ...(VARIANTS[sel.value] ?? {}) };
+          for (const [key, set] of Object.entries(knobs)) if (key !== 'cornerRadius' && key !== 'strength') set((options[key] = look[key] ?? 0));
+          options.colorMatrix = look.colorMatrix ?? null;
+          options.magnify = look.magnify;
+        }
         if (k === 'shape') {
           const path = PATHS[sel.value];
           Object.assign(options, path ? { shape: 'path', path, pathBox: '0 0 100 100' } : { path: null, pathBox: null });
@@ -116,6 +131,6 @@ export default {
     };
     await set(0, [0.9, 1.2, 1.5, 0.69]);
     await set(3, [0.15, 0.3, 0.05]);
-    await set(8, [1, 2, 0]);
+    await set(10, [1, 2, 0]);
   },
 };

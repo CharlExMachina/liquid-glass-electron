@@ -6,3 +6,7 @@ out/
 bench/adapters/lgreact.js
 bench/results/*/shots/
 docs/media/
+native/.build/
+test/native/out/
+test/native/.old/
+test/native/backdrops/

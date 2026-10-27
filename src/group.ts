@@ -646,7 +646,7 @@ export class GlassGroup {
       setAttrs(this.main, { x: -edge, y: -edge, width: atlas.w + edge + Math.max(edge, e), height: atlas.h + 2 * edge });
       setAttrs(this.pre!, { x: -e, y: -e, width: side * channels + atlas.w + m + e, height: atlas.h + 2 * e });
     } else {
-      setAttrs(this.main, { x: -e, y: -e, width: atlas.w + 2 * e, height: atlas.h + 2 * e });
+      setAttrs(this.main, { x: -e, y: -e, width: atlas.w + e + Math.max(e, Math.ceil(src.right - 1e-6)), height: atlas.h + 2 * e });
     }
   }
 }

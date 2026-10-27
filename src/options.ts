@@ -49,9 +49,11 @@ export interface GlassOptions {
   /**
    * 0 = a pill with a bevelled rim (liquidglass's), 1 = a dome that magnifies the whole element, 2 = Apple's lens: the
    * rim magnifies toward the middle, most at the edge and fading out `zRadius` px in, and the middle is flat,
-   * 3 = Apple's switch lens: it shrinks what's behind it, and its rim folds back (scaled to the element, not `zRadius`)
+   * 3 = Apple's switch lens: it shrinks what's behind it, and its rim folds back (scaled to the element, not `zRadius`),
+   * 4 = macOS 27's glass: the rim samples inward along its normal, sized by the element as macOS sizes it (`zRadius` is
+   * the most its height can be), and the frost is sized by it too (regular and clear glass are this)
    */
-  bevelMode: 0 | 1 | 2 | 3;
+  bevelMode: 0 | 1 | 2 | 3 | 4;
 
   // ---- beyond liquidglass
   /**
@@ -70,6 +72,15 @@ export interface GlassOptions {
   tint: string | null;
   /** a colour laid over the glass, as Apple's .tint(_:) and tinted buttons are; null = none */
   fill: string | null;
+  /**
+   * the backdrop's colour under the glass as a colour matrix: 12 numbers, three rows of red, green and blue gains and
+   * an offset (0..1), in place of saturation, brightness and tint; 'auto' = macOS 27's, for the variant and light or
+   * dark; null = none
+   */
+  colorMatrix: number[] | string | null;
+  /** a thin dark line around the edge, as macOS draws: its opacity where the edge faces sideways, and up or down */
+  outline: number;
+  outlineTop: number;
   /**
    * rect (cornerRadius), capsule, circle, concentric (the radius of the glass it sits in, less the inset), squircle
    * (Apple's continuous corners, of cornerRadius), or path (any shape: `path`)
@@ -125,6 +136,9 @@ export const DEFAULTS: GlassOptions = {
   backdrop: null,
   tint: null,
   fill: null,
+  colorMatrix: null,
+  outline: 0,
+  outlineTop: 0,
   shape: 'rect',
   path: null,
   pathBox: null,
@@ -137,21 +151,29 @@ export const DEFAULTS: GlassOptions = {
   group: true,
 };
 
-/** Apple's glass variants, as option sets. `fill` values that depend on light or dark are resolved later. */
+// What macOS 27 draws (SwiftUI's glassEffect, measured in test/native): no colour fringe, no light but a thin dark line
+// around the edge, no shadow; a lens along the rim and the frost (bevelMode 4, sized by the element), and the colour
+// as a matrix (colorMatrix 'auto', for light or dark).
+const MACOS: Partial<GlassOptions> = {
+  bevelMode: 4, zRadius: 20, chromAberration: 0, edgeHighlight: 0, fresnel: 0, specular: 0, shadowOpacity: 0, baseBrightness: 0,
+  saturation: 0, magnify: false, colorMatrix: 'auto',
+};
+
+/** Apple's glass variants, as option sets. `fill` and `colorMatrix` values that depend on light or dark are resolved later. */
 export const VARIANTS: Record<Variant, Partial<GlassOptions>> = {
-  // frosted, saturated, a faint fill: legible over anything
-  regular: { blurAmount: 0.5, saturation: 0.5, refraction: 0.69, fill: 'auto' },
-  // liquidglass's defaults: clear, sharp bending; wants a dim or simple backdrop for text
-  clear: {},
+  // frosted (σ ≈ 8 px on large glass, and a wider blur laid over it), saturated and lightened (or darkened): legible over anything
+  regular: { ...MACOS, blurAmount: 1.097, refraction: 0.9, outline: 0.295, outlineTop: 0.194 },
+  // more frost (σ ≈ 20 px on large glass), less colour: what's behind shows through as light, not detail
+  clear: { ...MACOS, blurAmount: 2.665, refraction: 0.9, outline: 0.345, outlineTop: 0 },
   // no glass at all: for switching it off without changing the layout
   identity: { refraction: 0, chromAberration: 0, edgeHighlight: 0, fresnel: 0, specular: 0, shadowOpacity: 0 },
 };
 
 const NUMBERS = ['blurAmount', 'refraction', 'chromAberration', 'edgeHighlight', 'specular', 'fresnel', 'distortion', 'cornerRadius',
   'zRadius', 'opacity', 'saturation', 'tintStrength', 'brightness', 'baseBrightness', 'shadowOpacity', 'shadowSpread', 'shadowOffsetY', 'bevelMode',
-  'pressBulge', 'strength', 'elasticity'] as const;
+  'pressBulge', 'strength', 'elasticity', 'outline', 'outlineTop'] as const;
 const BOOLEANS = ['floating', 'button', 'interactive', 'smooth', 'magnify', 'adaptive', 'group'] as const;
-const STRINGS = ['variant', 'tint', 'fill', 'shape', 'press', 'path', 'pathBox', 'backdrop'] as const;
+const STRINGS = ['variant', 'tint', 'fill', 'shape', 'press', 'path', 'pathBox', 'backdrop', 'colorMatrix'] as const;
 const ALL: readonly string[] = [...NUMBERS, ...BOOLEANS, ...STRINGS];
 
 // The names Libre Hub's engine used, for its CSS: --glass-bevel and so on. Its --glass-tint was the app's background
@@ -232,6 +254,8 @@ export interface Environment {
   reduceTransparency: boolean;
   increaseContrast: boolean;
   reduceMotion: boolean;
+  /** the display is wide-gamut (Display P3), where Chromium composites in its colour space; unset counts as wide */
+  wideGamut?: boolean;
 }
 
 /** The options from every source, then adjusted for the system's settings. */
@@ -270,8 +294,59 @@ export function resolve(sources: Partial<GlassOptions>[], env: Environment): Gla
   return finishFill(merged, env);
 }
 
+/**
+ * macOS 27's colour, fitted to what SwiftUI's glass draws over photos, flat colours, greys and lines (test/native): per
+ * variant, light and dark, three rows of red, green and blue gains and an offset. Chromium bends and colours the
+ * backdrop in the display's colour space, so there's a matrix for a wide-gamut (Display P3) display, fitted to what the
+ * filter sees there, and one for an sRGB display.
+ */
+export const MACOS_COLOUR: Record<'regular' | 'clear', Record<'p3' | 'srgb', [number[], number[]]>> = {
+  regular: {
+    p3: [
+      [1.0109, -0.4446, -0.0421, 0.4042, -0.1385, 0.708, -0.0456, 0.4057, -0.1392, -0.4553, 1.1175, 0.4056],
+      [1.0335, -0.2837, 0.0079, 0.0945, -0.0441, 0.7589, 0.0284, 0.0977, -0.07, -0.3057, 1.1334, 0.097],
+    ],
+    srgb: [
+      [1.0352, -0.4969, -0.0143, 0.4039, -0.1223, 0.6788, -0.0302, 0.4021, -0.1298, -0.4899, 1.145, 0.4024],
+      [1.0531, -0.3563, 0.0411, 0.0911, -0.0428, 0.704, 0.0665, 0.0921, -0.0715, -0.3338, 1.1377, 0.0976],
+    ],
+  },
+  clear: {
+    p3: [
+      [0.8511, -0.1598, -0.0136, 0.2778, -0.0474, 0.7405, -0.0154, 0.2783, -0.0498, -0.1609, 0.8886, 0.278],
+      [0.9006, -0.1663, -0.0195, 0.0955, -0.048, 0.7818, -0.0187, 0.0955, -0.0514, -0.1679, 0.9342, 0.0957],
+    ],
+    srgb: [
+      [0.83, -0.1351, -0.0215, 0.2832, -0.0361, 0.7286, -0.0149, 0.2785, -0.053, -0.1526, 0.8823, 0.2793],
+      [0.917, -0.2103, 0.0107, 0.0921, -0.045, 0.7741, -0.013, 0.0941, -0.0407, -0.1883, 0.9461, 0.0931],
+    ],
+  },
+};
+
+/**
+ * Dark regular glass's colour at 64 px and smaller: brighter than large glass's (macOS caps it less, see macMaxLuma);
+ * between 64 and 104 px it goes from this to MACOS_COLOUR's (lens.ts).
+ */
+export const MACOS_SMALL_DARK: Record<'p3' | 'srgb', number[]> = {
+  p3: [1.097, -0.2822, 0.0069, 0.093, -0.035, 0.8139, 0.0322, 0.095, -0.0641, -0.2836, 1.1696, 0.0934],
+  srgb: [1.1322, -0.3705, 0.0417, 0.0906, -0.0471, 0.8063, 0.0327, 0.0978, -0.0684, -0.3061, 1.176, 0.0961],
+};
+
+/** macOS's outline in the dark: darker, where light glass's is lighter. */
+const DARK_OUTLINE: Record<'regular' | 'clear', [number, number]> = { regular: [0.605, 0.41], clear: [0.49, 0] };
+
 /** The automatic fills, for light and dark. */
 function finishFill(o: GlassOptions, env: Environment): GlassOptions {
+  if (o.colorMatrix === 'auto') o.colorMatrix = MACOS_COLOUR[o.variant === 'clear' ? 'clear' : 'regular'][env.wideGamut === false ? 'srgb' : 'p3'][env.dark ? 1 : 0];
+  else if (o.colorMatrix !== null) {
+    const m = typeof o.colorMatrix === 'string' ? o.colorMatrix.split(/[\s,]+/).filter(Boolean).map(Number) : o.colorMatrix;
+    o.colorMatrix = Array.isArray(m) && m.length === 12 && m.every(Number.isFinite) ? m : null;
+  }
+  // the variants' outline, darker in the dark (an outline of your own stays as it is)
+  if (env.dark && (o.variant === 'regular' || o.variant === 'clear')) {
+    const v = VARIANTS[o.variant];
+    if (o.outline === v.outline && o.outlineTop === v.outlineTop) [o.outline, o.outlineTop] = DARK_OUTLINE[o.variant];
+  }
   const fills: Record<string, [string, string]> = {
     auto: ['rgb(255 255 255 / 0.1)', 'rgb(20 20 24 / 0.12)'],
     'auto-tinted': ['rgb(250 250 252 / 0.55)', 'rgb(28 28 32 / 0.55)'],

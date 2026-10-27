@@ -15,8 +15,9 @@ nothing on screen changes it costs nothing at all.
   colour fringing at the rim, and its Fresnel, specular and edge light. At its defaults this library's glass differs
   from liquidglass's about as much as liquidglass differs from itself moved by one pixel (see
   [the comparison](#compared-with-liquidglass)).
-- **Apple's knobs:** regular, clear and identity glass, the lens of iOS 26's small controls (measured from an
-  iPhone), tints, interactive glass, capsules, circles, concentric and continuous ("squircle") corners, containers
+- **Apple's knobs:** regular, clear and identity glass, regular and clear as macOS 27 draws them (measured against
+  SwiftUI's own glass on a Mac: [the comparison](#compared-with-macos)), the lens of iOS 26's small controls (measured
+  from an iPhone), tints, interactive glass, capsules, circles, concentric and continuous ("squircle") corners, containers
   whose glass flows together, morphing, materializing, `.glass` and `.glassProminent` buttons, scroll edges, the
   system's Clear/Tinted setting, Reduce Transparency, Increase Contrast and Reduce Motion. [docs/APPLE.md](docs/APPLE.md) maps each part of Apple's API to this one.
 - **A primitive, not a widget set.** Every visual parameter can change every frame without rebuilding the filter:
@@ -112,7 +113,7 @@ The rest of the API:
 | `materialize(el, 'in' \| 'out')` | glass grows in or fades away in place |
 | `glassButton(el, 'glass' \| 'prominent')` | Apple's `.glass` and `.glassProminent` button styles |
 | `scrollEdge(scroller, { style: 'soft' \| 'hard' })` | content dissolving into a blur under a bar |
-| `setEnvironment({ dark, appearance, reduceTransparency, increaseContrast, reduceMotion })` | what the glass adapts to, if not the page's media queries |
+| `setEnvironment({ dark, appearance, reduceTransparency, increaseContrast, reduceMotion, wideGamut })` | what the glass adapts to, if not the page's media queries |
 | `unglass(el)`, `glassOf(el)`, `refreshAll()` | |
 
 ## If you are an AI agent
@@ -131,7 +132,7 @@ liquidglass's options, with its defaults:
 |---|---|---|
 | `refraction` | 0.69 | How much the bevel bends what's behind it. 0 = no bending at all (light, fill and shadow only, which cost nothing per frame) |
 | `zRadius` | 40 | The bevel's depth, px: how far in from the edge it curves |
-| `bevelMode` | 0 | 0 = a pill with a bevelled rim; 1 = a dome that magnifies the whole element; 2 = Apple's lens (this library's): the rim magnifies toward the middle, most at the edge and fading out `zRadius` px in, and the middle is flat; 3 = Apple's switch lens, measured from iOS's switch: it shrinks what's behind it, and its rim folds back (scaled to the element, not `zRadius`) |
+| `bevelMode` | 0 | 0 = a pill with a bevelled rim; 1 = a dome that magnifies the whole element; 2 = Apple's lens (this library's): the rim magnifies toward the middle, most at the edge and fading out `zRadius` px in, and the middle is flat; 3 = Apple's switch lens, measured from iOS's switch: it shrinks what's behind it, and its rim folds back (scaled to the element, not `zRadius`); 4 = macOS 27's glass, measured against SwiftUI's: the rim samples inward along its normal, by an amount and height that follow the element's shorter side (`zRadius` caps the height), and the frost follows it too (the `regular` and `clear` variants are this) |
 | `chromAberration` | 0.05 | Colour fringing at the rim. Two more passes per frame; 0 for less work |
 | `blurAmount` | 0 | Frost: 1 ≈ a 7.6 px blur |
 | `saturation`, `brightness` | 0, 0 | Boosts (0.5 = 1.5×), on top of `baseBrightness` |
@@ -150,7 +151,9 @@ And this library's:
 |---|---|---|
 | `baseBrightness` | 0.06 | The brightening liquidglass's glass always has (6%); 0 for none |
 | `strength` | 1 | How much glass there is, 0..1: bending, fringe, frost, colour, light, fill and shadow together. Cheap to change every frame; at 0 there's no filter |
-| `variant` | none | `regular` (frosted, saturated, a faint fill), `clear` (liquidglass's defaults), `identity` (no glass) |
+| `variant` | none | `regular` and `clear`, macOS 27's glass ([measured](#compared-with-macos)): frost, a lens along the rim, macOS's colour for light and dark, a thin outline, no fringe, light or shadow (`clear` is twice as frosted, with less colour); `identity` (no glass). None is liquidglass's glass |
+| `colorMatrix` | – | The backdrop's colour as a matrix, 12 numbers (rows of red, green and blue gains and an offset), before saturation, brightness and tint; `'auto'` is macOS's for the variant, light or dark, and the display's gamut |
+| `outline`, `outlineTop` | 0, 0 | macOS's thin dark line around the edge: its opacity where the edge faces sideways, and up or down |
 | `shape` | `rect` | `rect`, `capsule`, `circle`, `concentric` (the radius of the glass it sits in, less the inset), `squircle` (continuous corners), `path` |
 | `path`, `pathBox` | – | For `shape: 'path'`: SVG path data, in the element's px or in a viewBox (`"0 0 100 100"`) stretched over it |
 | `fill` | – | A colour over the glass (Apple's tinted glass, prominent buttons). Painted with the light, so a CSS reset can't remove it |
@@ -190,8 +193,9 @@ so changing them, even every frame, rebuilds nothing.
 ## The demos
 
 ```bash
-pnpm demo             # the gallery
-pnpm playground       # every option, live
+pnpm demo                 # the gallery
+pnpm playground           # every option, live
+pnpm playground:native    # the same playground in SwiftUI, with macOS's own glass (on a Mac with macOS 26+)
 ```
 
 The gallery runs sandboxed, context-isolated and under a strict Content-Security-Policy. Photos and video are NASA's
@@ -332,6 +336,67 @@ before the bend, not a blur after it) and the interior a little further, still w
 
 ![liquidglass and liquid-glass-electron over the same photo, with the rim enlarged](https://raw.githubusercontent.com/CharlExMachina/liquid-glass-electron/media/compare-coast.jpg)
 
+## Compared with macOS
+
+`regular` and `clear` are macOS 27's glass, measured against SwiftUI's own `glassEffect` on a Mac (Apple M4 Max,
+built-in Display P3 screen, macOS 27.0.1). `native/Glass.swift` draws a scene with SwiftUI; `test/native/` draws the
+same scene with this library; both windows are captured with `screencapture`, at 2× in the display's colour space.
+Without glass the two captures differ by 0.2 levels of 255 on average (a level at most), so what differs with glass is
+the glass. AppKit's `NSGlassEffectView` draws the same pixels as SwiftUI's, to the bit.
+
+The same scenes, each captured from a real window: macOS's own glass on the left, this library's on the right
+(photos from NASA, [credits](demo/assets/CREDITS.md)):
+
+<table>
+<tr><th>macOS 27 (SwiftUI <code>glassEffect</code>)</th><th>liquid-glass-electron</th></tr>
+<tr><td width="50%"><img src="docs/native/panel-regular-light-coast-macos.jpg" alt=".regular, light, a 340 × 200 panel on macOS"></td><td width="50%"><img src="docs/native/panel-regular-light-coast-ours.jpg" alt=".regular, light, a 340 × 200 panel drawn by liquid-glass-electron"></td></tr>
+<tr><td colspan="2"><code>.regular</code>, light, a 340 × 200 panel: a mean difference of 1.3 levels of 255 inside the glass</td></tr>
+<tr><td width="50%"><img src="docs/native/panel-clear-dark-night-macos.jpg" alt=".clear, dark, a 340 × 200 panel on macOS"></td><td width="50%"><img src="docs/native/panel-clear-dark-night-ours.jpg" alt=".clear, dark, a 340 × 200 panel drawn by liquid-glass-electron"></td></tr>
+<tr><td colspan="2"><code>.clear</code>, dark, a 340 × 200 panel: a mean difference of 0.5 levels of 255 inside the glass</td></tr>
+<tr><td width="50%"><img src="docs/native/circle-clear-light-coast-macos.jpg" alt=".clear, light, a 200 px circle on macOS"></td><td width="50%"><img src="docs/native/circle-clear-light-coast-ours.jpg" alt=".clear, light, a 200 px circle drawn by liquid-glass-electron"></td></tr>
+<tr><td colspan="2"><code>.clear</code>, light, a 200 px circle: a mean difference of 0.5 levels of 255 inside the glass</td></tr>
+<tr><td width="50%"><img src="docs/native/small-regular-light-coast-macos.jpg" alt=".regular, light, a 120 × 44 capsule on macOS"></td><td width="50%"><img src="docs/native/small-regular-light-coast-ours.jpg" alt=".regular, light, a 120 × 44 capsule drawn by liquid-glass-electron"></td></tr>
+<tr><td colspan="2"><code>.regular</code>, light, a 120 × 44 capsule: a mean difference of 1.4 levels of 255 inside the glass</td></tr>
+<tr><td width="50%"><img src="docs/native/capsule-clear-light-coast-macos.jpg" alt=".clear, light, a 300 × 80 capsule on macOS"></td><td width="50%"><img src="docs/native/capsule-clear-light-coast-ours.jpg" alt=".clear, light, a 300 × 80 capsule drawn by liquid-glass-electron"></td></tr>
+<tr><td colspan="2"><code>.clear</code>, light, a 300 × 80 capsule: a mean difference of 0.6 levels of 255 inside the glass</td></tr>
+<tr><td width="50%"><img src="docs/native/capsule-regular-dark-night-macos.jpg" alt=".regular, dark, a 300 × 80 capsule on macOS"></td><td width="50%"><img src="docs/native/capsule-regular-dark-night-ours.jpg" alt=".regular, dark, a 300 × 80 capsule drawn by liquid-glass-electron"></td></tr>
+<tr><td colspan="2"><code>.regular</code>, dark, a 300 × 80 capsule: a mean difference of 4.5 levels of 255 inside the glass</td></tr>
+</table>
+
+How each part was measured (details in [docs/APPLE.md](docs/APPLE.md#how-macos-27-draws-it-and-how-this-was-measured)):
+flat colours and nine greys for the colour, an edge for the frost, linear ramps across the rim for the lens (a ramp
+blurred stays a ramp, so the level under the glass says where it was sampled from, to a pixel), and the inputs of the
+`glassBackground` filter read from the glass's layers, for what changes with size. Then a model of it was fitted, and
+the library draws that model with the filter nodes it already had.
+
+Mean difference per channel (0–255) inside the glass, over photos no fit ever used (night here, and two macOS
+wallpapers), four shapes from a 120 × 44 capsule to a 340 × 200 panel:
+
+| | before (liquidglass's look, a faint fill) | now | 95th percentile now | edge (±2 px) now |
+|---|---|---|---|---|
+| `regular`, light | 55.5 | **1.4** | 3.5 | 5.0 |
+| `regular`, dark | 18.2 | **4.5** | 7.1 | 5.3 |
+| `clear`, light | 52.7 | **0.7** | 1.8 | 2.4 |
+| `clear`, dark | 19.1 | **0.7** | 1.8 | 1.8 |
+
+Clear glass measures 0.4–0.8 at every size from a 28 px capsule to a 500 × 300 panel; regular glass in the light 1.0–1.4.
+
+- Two blind judges (agents shown each scene as A and B, native on a random side, and four labelled examples of native
+  glass on other photos) told the earlier variants from macOS in 24 of 24 trials, and these in 12 of 24: chance.
+- The test (`pnpm test:native`) holds each of its 18 cases to within a quarter of what it measures now, inside the glass,
+  at its rim, at its edge and just outside it, and `pnpm test:native --self-check` draws the glass wrong on purpose
+  (the lens off, 30% less frost, a little more saturation, no outline) and checks that the cases catch each.
+- Dark regular glass is the furthest from macOS (about 3–5 levels): macOS caps its brightness by luma and blends a
+  wider blur over it by darken, and the fit of both is weakest there.
+
+Measured with `pnpm bench` on the Mac (Electron 44, the built-in display, five runs each, interleaved: the scenes of
+[Performance](#performance)), the variants cost what they did before within the run-to-run noise, which for the same
+code is ±5 points of the GPU process and ±1.5 of the renderer: regular glass the same or less in every scene, clear
+glass the same or less in the GPU process and about 2 points more in the renderer with 10 or 30 elements (macOS's
+frost is wide, where the earlier clear glass had none), and every run at the display's rate
+([results](bench/results/2026-10-26/results.md)). macOS's glass needs no colour fringe, so it's one filter where
+liquidglass's look is two; its blur fill and dark cap add nodes Skia draws with the passes already there.
+
 ## Limitations
 
 - **Chromium only.** Electron, Chrome and Edge bend the backdrop; Firefox and Safari accept the syntax but draw nothing,
@@ -381,7 +446,16 @@ before the bend, not a blur after it) and the interior a little further, still w
   the map a displacement reads is the shift down as a grey and the shift across as alpha, at half the levels of a byte
   each (128 a side). With chromatic aberration (two filters, the maps stashed between them), the shift across still
   comes out about 0.25 px to the right on such a display.
-- Not done: Apple's shimmer on interactive glass, `backgroundExtensionEffect`, glass that thickens with its size.
+- **The variants are macOS 27.0.1's glass, on a wide-gamut display**: its colour is fitted to what Chromium filters
+  there, in the display's colour space. On an sRGB display they use matrices fitted from the same captures converted
+  to sRGB, which no sRGB display has checked. Measured: both variants, light and dark, sizes from 28 to 300 px. Not
+  measured, so this library's own guess: macOS's Liquid Glass tint setting (`appearance: 'tinted'`), Increase Contrast,
+  Reduce Transparency, `.tint(_:)` (here `fill`), glass in a container, a pressed `.interactive()` glass, and macOS
+  versions other than 27.0.1 (`pnpm test:native --update` captures them on yours).
+- **macOS frosts the backdrop around the glass too**; a backdrop filter in Chromium sees only what's under the element,
+  so in the outermost few pixels the frost leans toward the glass's own edge. The outline is box-shadows (rounded
+  rectangles only: free shapes and containers have none).
+- Not done: Apple's shimmer on interactive glass, `backgroundExtensionEffect`.
 
 ## Tests
 
@@ -391,8 +465,19 @@ one, see `pnpm-workspace.yaml`) and Node 22.18 or later, which runs the unit tes
 ```bash
 pnpm test              # the optics, fields, maps, options and groups' geometry (node:test)
 pnpm test:visual       # screenshots in Electron against test/visual/baseline/
+pnpm test:native       # on a Mac: the glass against macOS's own, test/native/reference/ (see below)
 pnpm typecheck
 ```
+
+`pnpm test:native` draws each case of `test/native/cases.js` with this library and compares it with SwiftUI's
+`glassEffect` drawing the same scene, captured on a Mac into `test/native/reference/` (`pnpm test:native --update`
+captures them again, with `native/Glass.swift`). Both windows go through `screencapture`, so where there's no glass they
+match to within a level; inside the glass each case has a limit on how far from macOS it may be, and a report
+(`test/native/out/report.html`) shows macOS's glass, this library's and the difference. `--self-check` draws the
+glass wrong on purpose and fails unless the cases catch it; `--calibrate` writes the limits (`test/native/limits.json`)
+from what the glass measures now, which is for after a change meant to move the glass closer to macOS. It needs Screen
+Recording permission for the terminal, and stops if macOS's version, the display's gamut or its scale differ from the
+references'.
 
 The visual baselines are drawn by the GPU, so they belong to a machine (these are from Linux, Mesa, AMD). On another,
 write your own first with `pnpm test:visual --update`, then the test catches changes from there.

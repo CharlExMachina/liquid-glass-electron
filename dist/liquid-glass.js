@@ -180,6 +180,28 @@ function switchLens(d, half) {
   const t = clamp(d / half, 0, 1) * (SWITCH_LENS.length - 1), i = Math.min(Math.floor(t), SWITCH_LENS.length - 2);
   return (SWITCH_LENS[i] + (SWITCH_LENS[i + 1] - SWITCH_LENS[i]) * (t - i)) * half;
 }
+var MAC_LENS_T = [0, 0.05, 0.1, 0.15, 0.2, 0.3, 0.4, 0.5, 0.6, 0.8, 1, 1.25, 1.5, 2, 3];
+var MAC_LENS = [0.95, 0.65, 0.55, 0.47, 0.41, 0.3, 0.235, 0.185, 0.14, 0.075, 0.04, 0.02, 0.015, 0, 0];
+var MAC_LENS_REACH = 2;
+function macLens(d, amount, height2) {
+  const t = Math.max(d, 0) / Math.max(height2, 0.01);
+  if (t >= MAC_LENS_T[MAC_LENS_T.length - 1]) return 0;
+  let i = 0;
+  while (MAC_LENS_T[i + 1] < t) i++;
+  const u = (t - MAC_LENS_T[i]) / (MAC_LENS_T[i + 1] - MAC_LENS_T[i]);
+  return (MAC_LENS[i] + (MAC_LENS[i + 1] - MAC_LENS[i]) * u) * amount;
+}
+function macLensSize(s, clear, height2) {
+  return { amount: Math.min((clear ? 0.65 : 0.5) * s, 60), height: Math.min((clear ? 0.36 : 0.25) * s, height2) };
+}
+function macFrost(s, clear, dark) {
+  if (clear) return clamp(5 + (s - 48) * 5 / 72, 5, 10) / 10;
+  const t = clamp((s - 64) / 96, 0, 1);
+  return dark ? 0.583 + 0.489 * t : 0.466 + 0.534 * t;
+}
+function macMaxLuma(s) {
+  return 0.158 + 0.833 * clamp(0.6 - 375e-5 * (s - 64), 0.45, 0.6);
+}
 function gradient(f, x, y, zR) {
   const e = 2;
   const gx = (height(-f.sdf(x + e, y), zR) - height(-f.sdf(x - e, y), zR)) / (2 * e);
@@ -198,6 +220,12 @@ function shiftAt(x, y, f, o) {
     const t = clamp(d / zR, 0, 1), k2 = o.refraction * 0.5 * (1 - t) ** 2;
     const [tx, ty] = f.toward(x, y);
     return [tx * k2, ty * k2];
+  }
+  if (o.mac) {
+    const e = 0.05;
+    const nx = f.sdf(x + e, y) - f.sdf(x - e, y), ny = f.sdf(x, y + e) - f.sdf(x, y - e), l = Math.hypot(nx, ny) || 1;
+    const p = macLens(d, o.mac.amount, o.mac.height) * o.refraction;
+    return [-nx / l * p, -ny / l * p];
   }
   if (o.minify) {
     const half = f.shortHalf, e = 0.05;
@@ -263,6 +291,11 @@ function boxShadowAlpha(d, opacity, spread) {
   const s = Math.max(spread, 1), out = Math.max(-d - 1, 0) / s;
   const a = (0.65 * Math.exp(-out * out) + 0.35 * Math.exp(-2 * out)) * opacity;
   return a * a;
+}
+function outlineShadow(o, strength = 1, dpr = typeof devicePixelRatio === "number" ? devicePixelRatio : 1) {
+  const side = o.outline * strength, top = o.outlineTop * strength, px = `${+(1 / Math.max(dpr, 1)).toFixed(3)}px`;
+  const c = (a) => `rgb(0 0 0 / ${+a.toFixed(3)})`;
+  return [side > 0 && `-${px} 0 0 0 ${c(side)}, ${px} 0 0 0 ${c(side)}`, top > 0 && `0 -${px} 0 0 ${c(top)}, 0 ${px} 0 0 ${c(top)}`].filter(Boolean).join(", ") || "none";
 }
 function boxShadow(opacity, spread, offsetY) {
   if (opacity <= 0) return "none";
@@ -648,6 +681,9 @@ var DEFAULTS = {
   backdrop: null,
   tint: null,
   fill: null,
+  colorMatrix: null,
+  outline: 0,
+  outlineTop: 0,
   shape: "rect",
   path: null,
   pathBox: null,
@@ -659,11 +695,24 @@ var DEFAULTS = {
   adaptive: true,
   group: true
 };
+var MACOS = {
+  bevelMode: 4,
+  zRadius: 20,
+  chromAberration: 0,
+  edgeHighlight: 0,
+  fresnel: 0,
+  specular: 0,
+  shadowOpacity: 0,
+  baseBrightness: 0,
+  saturation: 0,
+  magnify: false,
+  colorMatrix: "auto"
+};
 var VARIANTS = {
-  // frosted, saturated, a faint fill: legible over anything
-  regular: { blurAmount: 0.5, saturation: 0.5, refraction: 0.69, fill: "auto" },
-  // liquidglass's defaults: clear, sharp bending; wants a dim or simple backdrop for text
-  clear: {},
+  // frosted (σ ≈ 8 px on large glass, and a wider blur laid over it), saturated and lightened (or darkened): legible over anything
+  regular: { ...MACOS, blurAmount: 1.097, refraction: 0.9, outline: 0.295, outlineTop: 0.194 },
+  // more frost (σ ≈ 20 px on large glass), less colour: what's behind shows through as light, not detail
+  clear: { ...MACOS, blurAmount: 2.665, refraction: 0.9, outline: 0.345, outlineTop: 0 },
   // no glass at all: for switching it off without changing the layout
   identity: { refraction: 0, chromAberration: 0, edgeHighlight: 0, fresnel: 0, specular: 0, shadowOpacity: 0 }
 };
@@ -688,10 +737,12 @@ var NUMBERS = [
   "bevelMode",
   "pressBulge",
   "strength",
-  "elasticity"
+  "elasticity",
+  "outline",
+  "outlineTop"
 ];
 var BOOLEANS = ["floating", "button", "interactive", "smooth", "magnify", "adaptive", "group"];
-var STRINGS = ["variant", "tint", "fill", "shape", "press", "path", "pathBox", "backdrop"];
+var STRINGS = ["variant", "tint", "fill", "shape", "press", "path", "pathBox", "backdrop", "colorMatrix"];
 var ALL = [...NUMBERS, ...BOOLEANS, ...STRINGS];
 var ALIASES = {
   bevel: "zRadius",
@@ -786,7 +837,43 @@ function resolve(sources, env) {
   }
   return finishFill(merged, env);
 }
+var MACOS_COLOUR = {
+  regular: {
+    p3: [
+      [1.0109, -0.4446, -0.0421, 0.4042, -0.1385, 0.708, -0.0456, 0.4057, -0.1392, -0.4553, 1.1175, 0.4056],
+      [1.0335, -0.2837, 79e-4, 0.0945, -0.0441, 0.7589, 0.0284, 0.0977, -0.07, -0.3057, 1.1334, 0.097]
+    ],
+    srgb: [
+      [1.0352, -0.4969, -0.0143, 0.4039, -0.1223, 0.6788, -0.0302, 0.4021, -0.1298, -0.4899, 1.145, 0.4024],
+      [1.0531, -0.3563, 0.0411, 0.0911, -0.0428, 0.704, 0.0665, 0.0921, -0.0715, -0.3338, 1.1377, 0.0976]
+    ]
+  },
+  clear: {
+    p3: [
+      [0.8511, -0.1598, -0.0136, 0.2778, -0.0474, 0.7405, -0.0154, 0.2783, -0.0498, -0.1609, 0.8886, 0.278],
+      [0.9006, -0.1663, -0.0195, 0.0955, -0.048, 0.7818, -0.0187, 0.0955, -0.0514, -0.1679, 0.9342, 0.0957]
+    ],
+    srgb: [
+      [0.83, -0.1351, -0.0215, 0.2832, -0.0361, 0.7286, -0.0149, 0.2785, -0.053, -0.1526, 0.8823, 0.2793],
+      [0.917, -0.2103, 0.0107, 0.0921, -0.045, 0.7741, -0.013, 0.0941, -0.0407, -0.1883, 0.9461, 0.0931]
+    ]
+  }
+};
+var MACOS_SMALL_DARK = {
+  p3: [1.097, -0.2822, 69e-4, 0.093, -0.035, 0.8139, 0.0322, 0.095, -0.0641, -0.2836, 1.1696, 0.0934],
+  srgb: [1.1322, -0.3705, 0.0417, 0.0906, -0.0471, 0.8063, 0.0327, 0.0978, -0.0684, -0.3061, 1.176, 0.0961]
+};
+var DARK_OUTLINE = { regular: [0.605, 0.41], clear: [0.49, 0] };
 function finishFill(o, env) {
+  if (o.colorMatrix === "auto") o.colorMatrix = MACOS_COLOUR[o.variant === "clear" ? "clear" : "regular"][env.wideGamut === false ? "srgb" : "p3"][env.dark ? 1 : 0];
+  else if (o.colorMatrix !== null) {
+    const m = typeof o.colorMatrix === "string" ? o.colorMatrix.split(/[\s,]+/).filter(Boolean).map(Number) : o.colorMatrix;
+    o.colorMatrix = Array.isArray(m) && m.length === 12 && m.every(Number.isFinite) ? m : null;
+  }
+  if (env.dark && (o.variant === "regular" || o.variant === "clear")) {
+    const v = VARIANTS[o.variant];
+    if (o.outline === v.outline && o.outlineTop === v.outlineTop) [o.outline, o.outlineTop] = DARK_OUTLINE[o.variant];
+  }
   const fills = {
     auto: ["rgb(255 255 255 / 0.1)", "rgb(20 20 24 / 0.12)"],
     "auto-tinted": ["rgb(250 250 252 / 0.55)", "rgb(28 28 32 / 0.55)"],
@@ -801,6 +888,9 @@ var MAP_PIXELS = 4096;
 var FINE_MAP_PIXELS = 65536;
 var mapScale = (w, h, moving, fine = false) => Math.min(Math.max(Math.sqrt((fine ? FINE_MAP_PIXELS : MAP_PIXELS) / (w * h)), 0.08), fine ? Math.max(devicePixelRatio, 2) : 0.5) / (moving ? 2 : 1);
 var EDGE = 2;
+var MAC_FILL_SIGMA = 15.6;
+var MAC_FILL_OPACITY = 0.675;
+var fillAlpha = (s) => `1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 ${+(MAC_FILL_OPACITY * s).toFixed(4)} 0`;
 var SETTLE = 120;
 var KEEP = ["1 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 1 0", "0 0 0 0 0  0 1 0 0 0  0 0 0 0 0  0 0 0 1 0", "0 0 0 0 0  0 0 0 0 0  0 0 1 0 0  0 0 0 1 0"];
 var nextId = 0;
@@ -823,6 +913,11 @@ var Lens = class {
   // One map, or with a dome's fringe three (red, green, blue: liquidglass's fringe doesn't follow the dome's shift)
   maps = [];
   colour = null;
+  // macOS's cap on dark glass's brightness: a table from the luma (in the colour's alpha) to how much it's dimmed
+  capNode = null;
+  // macOS's blur fill: the wider blur, and its opacity
+  fillBlur = null;
+  fillAlpha = null;
   blurNode = null;
   mixNode = null;
   // what backdrop-filter is while there's glass, the filter's structure (rebuilt only when it changes), and whether
@@ -930,7 +1025,8 @@ var Lens = class {
    * What a group needs to draw this element's glass in a filter of its own, or null if it can't: glass that doesn't
    * bend, a free shape, a dome's per-channel maps, noise (it's in the filter's coordinates), CSS filters in front, or no
    * map yet. `filters` are the element's own filter elements (the group copies them), `images` its map's (a grey per
-   * channel), `side` how far the map is stashed beside the element, `margin` how far the filters reach past it.
+   * channel), `side` how far the map is stashed beside the element, `margin` how far the filters reach past it (and
+   * `right`, past its right side, which can be further).
    */
   batchSource() {
     const o = this.options;
@@ -945,6 +1041,7 @@ var Lens = class {
       shifts: map.shifts,
       side: map.shifts.length ? -Number(map.shifts[0].getAttribute("dx")) : 0,
       margin: -Number(first.getAttribute("x")),
+      right: Number(first.getAttribute("width")) - this.w + Number(first.getAttribute("x")),
       grid: this.mapGrid,
       mapMargin: this.margin
     };
@@ -953,7 +1050,7 @@ var Lens = class {
   structureKey() {
     const o = this.options;
     const bends = supportsSvgBackdrop() && o.refraction > 0 && o.variant !== "identity";
-    return [bends, o.backdrop, o.chromAberration > 0, o.bevelMode, o.blurAmount > 0, o.smooth, o.distortion > 0, o.opacity < 1, o.variant === "identity", o.magnify, this.isFree()].join();
+    return [bends, o.backdrop, o.chromAberration > 0, o.bevelMode, o.blurAmount > 0, o.smooth, o.distortion > 0, o.opacity < 1, o.variant === "identity", o.magnify, this.isFree(), this.capped(), this.filled() ? this.host.env().dark ? "darken" : "lighten" : ""].join();
   }
   /** A shape the element's own (rounded) box can't clip: the filter masks itself, and light and shadow are an image. */
   isFree() {
@@ -973,7 +1070,9 @@ var Lens = class {
       this.setBackdrop(o.variant === "identity" || s <= 0 ? "none" : this.cssBackdrop());
     } else {
       this.recolour();
-      this.blurNode?.setAttribute("stdDeviation", (blurSigma(o.blurAmount) * s).toFixed(2));
+      this.blurNode?.setAttribute("stdDeviation", (this.frost() * s).toFixed(2));
+      this.fillBlur?.setAttribute("stdDeviation", (MAC_FILL_SIGMA * s).toFixed(2));
+      this.fillAlpha?.setAttribute("values", fillAlpha(s));
       this.mixNode?.setAttribute("k2", String(o.opacity));
       this.mixNode?.setAttribute("k3", String(1 - o.opacity));
       if (this.passes.length === 3 && this.unitMaps) {
@@ -1001,8 +1100,16 @@ var Lens = class {
   }
   /** The frost and colour as CSS functions, scaled by the strength (glass that doesn't bend, and other browsers). */
   cssBackdrop() {
-    const o = this.options, s = this.amount(), sigma = blurSigma(o.blurAmount) * s;
-    return [o.backdrop ?? "", sigma > 0.01 ? `blur(${sigma.toFixed(2)}px)` : "", `saturate(${1 + o.saturation * s})`, `brightness(${(1 + ((1 + o.baseBrightness) * (1 + o.brightness) - 1) * s).toFixed(3)})`].filter(Boolean).join(" ");
+    const o = this.options, s = this.amount(), sigma = this.frost() * s;
+    const fns = [o.backdrop ?? "", sigma > 0.01 ? `blur(${sigma.toFixed(2)}px)` : "", `saturate(${1 + o.saturation * s})`, `brightness(${(1 + ((1 + o.baseBrightness) * (1 + o.brightness) - 1) * s).toFixed(3)})`];
+    const m = Array.isArray(o.colorMatrix) ? o.colorMatrix : null;
+    if (m) {
+      const g = (m[0] + m[1] + m[2] + m[4] + m[5] + m[6] + m[8] + m[9] + m[10]) / 3, off = (m[3] + m[7] + m[11]) / 3;
+      const b = g + 2 * off, c = g / b, sat = ((m[0] + m[5] + m[10]) / g - 1) / 2;
+      const mix = (v) => +(1 + (v - 1) * s).toFixed(3);
+      fns.push(`saturate(${mix(sat)})`, `contrast(${mix(c)})`, `brightness(${mix(b)})`);
+    }
+    return fns.filter(Boolean).join(" ");
   }
   /** The border-box size, as the ResizeObserver reported it. */
   resize(w, h) {
@@ -1036,13 +1143,13 @@ var Lens = class {
     const o = this.options;
     this.pre?.remove();
     this.main?.remove();
-    this.pre = this.main = this.colour = this.blurNode = this.mixNode = null;
+    this.pre = this.main = this.colour = this.blurNode = this.mixNode = this.capNode = this.fillBlur = this.fillAlpha = null;
     this.maps = [];
     this.passes = [];
     this.reach = 0;
     this.mapKey = "";
     this.bends = supportsSvgBackdrop() && o.refraction > 0 && o.variant !== "identity";
-    const sigma = blurSigma(o.blurAmount);
+    const sigma = this.frost();
     if (!this.bends) {
       this.filterCss = o.variant === "identity" ? "none" : this.cssBackdrop();
       this.setBackdrop(this.amount() > 0 ? this.filterCss : "none");
@@ -1057,7 +1164,14 @@ var Lens = class {
     if (o.blurAmount > 0) {
       this.blurNode = svgEl("feGaussianBlur", { in: src, stdDeviation: (sigma * this.amount()).toFixed(2), edgeMode: "duplicate", result: "smooth" });
       first.append(this.blurNode);
-      src = "smooth";
+      if (this.filled()) {
+        this.fillBlur = svgEl("feGaussianBlur", { in: "SourceGraphic", stdDeviation: (MAC_FILL_SIGMA * this.amount()).toFixed(2), edgeMode: "duplicate", result: "wide0" });
+        this.fillAlpha = svgEl("feColorMatrix", { in: "wide0", type: "matrix", values: fillAlpha(this.amount()), result: "wide" });
+        first.append(this.fillBlur, this.fillAlpha, svgEl("feBlend", { in: "wide", in2: "smooth", mode: this.host.env().dark ? "darken" : "lighten", result: "filled" }));
+        src = "filled";
+      } else {
+        src = "smooth";
+      }
     } else if (o.smooth) {
       first.append(svgEl("feConvolveMatrix", { in: src, order: 3, kernelMatrix: "1 2 1 2 4 2 1 2 1", divisor: 16, edgeMode: "none", preserveAlpha: "true", result: "smooth" }));
       src = "smooth";
@@ -1073,6 +1187,17 @@ var Lens = class {
     this.colour = svgEl("feColorMatrix", { in: src, type: "matrix", values: this.matrix().join(" "), result: "coloured" });
     first.append(this.colour);
     src = "coloured";
+    if (this.capped()) {
+      this.capNode = svgEl("feComponentTransfer", { in: src, result: "dimmed" }, svgEl("feFuncA", { type: "table", tableValues: this.capTable() }));
+      first.append(
+        this.capNode,
+        svgEl("feFlood", { "flood-color": "#000", "flood-opacity": 1, result: "black" }),
+        svgEl("feComposite", { in: "dimmed", in2: "black", operator: "over", result: "capped0" }),
+        // where the backdrop is transparent (a transparent or vibrant window's), the glass stays so
+        svgEl("feComposite", { in: "capped0", in2: "SourceGraphic", operator: "in", result: "capped" })
+      );
+      src = "capped";
+    }
     const perChannel = fringe && o.bevelMode === 1;
     this.unitMaps = !perChannel;
     const fringes = perChannel ? [1, 0, -1].map((k) => k * o.chromAberration) : [0];
@@ -1133,14 +1258,61 @@ var Lens = class {
     if (o.backdrop) this.filterCss = `${o.backdrop} ${this.filterCss}`;
     this.setBackdrop(this.amount() > 0 ? this.filterCss : "none");
   }
-  /** The colour matrix: saturation, brightness (baseBrightness, 6% as liquidglass's glass is, plus a button's hover) and tint. */
+  /**
+   * The colour matrix: saturation, brightness (baseBrightness, 6% as liquidglass's glass is, plus a button's hover) and
+   * tint, after `colorMatrix` if there is one; with macOS's cap on brightness, the luma in alpha too (see build).
+   */
   matrix() {
     const o = this.options;
     const gains = tintGains(o.tintStrength, o.tint ? tintRgb(o.tint) : void 0);
     const hover = this.hover && o.button && !this.pressed ? 0.2 : 0;
-    const m = colorMatrix(o.saturation, (1 + o.brightness + hover) * (1 + o.baseBrightness) - 1, gains), s = this.amount();
+    let m = colorMatrix(o.saturation, (1 + o.brightness + hover) * (1 + o.baseBrightness) - 1, gains);
+    let base = Array.isArray(o.colorMatrix) ? o.colorMatrix : null;
+    const env = this.host.env(), gamut = env.wideGamut === false ? "srgb" : "p3";
+    if (base && base === MACOS_COLOUR.regular[gamut][1] && o.bevelMode === 4 && this.w) {
+      const t = Math.min(Math.max((Math.min(this.w, this.h) - 64) / 40, 0), 1), small = MACOS_SMALL_DARK[gamut], large = base;
+      base = small.map((v, i) => v + (large[i] - v) * t);
+    }
+    if (base) {
+      const row = (r) => [0, 1, 2, 3].map((j) => m[r * 5] * base[j] + m[r * 5 + 1] * base[4 + j] + m[r * 5 + 2] * base[8 + j] + (j === 3 ? m[r * 5 + 4] : 0));
+      m = [0, 1, 2].flatMap((r) => {
+        const [a, b2, c, d] = row(r);
+        return [a, b2, c, 0, d];
+      }).concat([0, 0, 0, 1, 0]);
+    }
+    const s = this.amount();
     const id = [1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0];
-    return m.map((v, i) => +(id[i] + (v - id[i]) * s).toFixed(4));
+    const out = m.map((v, i) => id[i] + (v - id[i]) * s);
+    if (this.capped()) {
+      const L = [0.2126, 0.7152, 0.0722];
+      for (const j of [0, 1, 2, 4]) out[15 + j] = 0.5 * (L[0] * out[j] + L[1] * out[5 + j] + L[2] * out[10 + j]) + (j === 4 ? 0.5 : 0);
+      out[18] = 0;
+    }
+    return out.map((v) => +v.toFixed(4));
+  }
+  /** Whether macOS's blur fill applies (regular glass, bevelMode 4). */
+  filled() {
+    const o = this.options;
+    return o.bevelMode === 4 && o.variant === "regular" && o.blurAmount > 0;
+  }
+  /** Whether macOS's cap on dark regular glass's brightness applies. */
+  capped() {
+    const o = this.options;
+    return o.bevelMode === 4 && o.variant === "regular" && this.host.env().dark;
+  }
+  /** The cap's table: from 0.5 + luma / 2 (in alpha) to the share of the colour kept, at the current strength. */
+  capTable() {
+    const cap = 1 + (macMaxLuma(Math.min(this.w, this.h)) - 1) * this.amount();
+    return Array.from({ length: 33 }, (_, k) => {
+      const l = 2 * (k / 32) - 1;
+      return +(l <= cap ? 1 : cap / l).toFixed(4);
+    }).join(" ");
+  }
+  /** The frost, σ px: blurAmount's, and for macOS's glass (bevelMode 4) sized by the element as macOS sizes it. */
+  frost() {
+    const o = this.options, sigma = blurSigma(o.blurAmount);
+    if (o.bevelMode !== 4 || !this.w) return sigma;
+    return sigma * macFrost(Math.min(this.w, this.h), o.variant === "clear", this.host.env().dark);
   }
   // ---------------------------------------------------------------- size, map and light
   /** The shape changed (a container's members moved): draw it again now. */
@@ -1160,9 +1332,15 @@ var Lens = class {
       const radiusCss = own ? this.saved["border-radius"] : radii.map((r) => `${+r.toFixed(2)}px`).join(" ");
       if (this.el.style.borderRadius !== radiusCss) this.el.style.borderRadius = radiusCss;
       const deeper = this.pressed && o.press === "flatten" ? 1.2 : 1;
-      this.el.style.setProperty("--lg-shadow", boxShadow(o.shadowOpacity * o.opacity * this.amount(), o.shadowSpread * deeper, o.shadowOffsetY));
+      const shadow = boxShadow(o.shadowOpacity * o.opacity * this.amount(), o.shadowSpread * deeper, o.shadowOffsetY), line = outlineShadow(o, this.amount());
+      this.el.style.setProperty("--lg-shadow", [shadow, line].filter((v) => v !== "none").join(", ") || "none");
     }
     this.place();
+    if (o.bevelMode === 4) {
+      if (!this.bends) this.setBackdrop(o.variant === "identity" || this.amount() <= 0 ? "none" : this.cssBackdrop());
+      const set = (node, k, v) => node && node.getAttribute(k) !== v ? (node.setAttribute(k, v), 1) : 0;
+      if (set(this.blurNode, "stdDeviation", (this.frost() * this.amount()).toFixed(2)) + set(this.capNode?.firstElementChild, "tableValues", this.capTable()) + set(this.colour, "values", this.matrix().join(" "))) this.changed();
+    }
     clearTimeout(this.settleTimer);
     if (now || !this.mapKey) this.draw();
     else this.settleTimer = window.setTimeout(() => this.draw(), SETTLE);
@@ -1184,6 +1362,12 @@ var Lens = class {
       setAttrs(image2, { x: side + r.x + rect.x, y: r.y + rect.y, width: rect.w, height: rect.h });
       if (map.shifts[c]) setAttrs(map.shifts[c], { dx: -side });
     }));
+    if (this.options.bevelMode === 4 && !stashed) {
+      const tail = Math.ceil(2 * Math.max(this.frost(), this.filled() ? MAC_FILL_SIGMA : 0));
+      const s = Math.ceil(Math.max(left, -(r.y + rect.y), r.y + rect.y + rect.h - h, tail) - 1e-6);
+      setAttrs(this.main, { x: -s, y: -s, width: w + s + Math.ceil(Math.max(right, this.reach, tail) - 1e-6), height: h + 2 * s });
+      return;
+    }
     setAttrs(this.pre ?? this.main, { x: -e, y: -e, width: (stashed ? slot * this.maps.length * channels : 0) + w + Math.max(right, this.reach) + e, height: h + 2 * e });
   }
   /** The corner radii, and whether they're the element's own CSS ones (circular, in px). */
@@ -1215,21 +1399,22 @@ var Lens = class {
     const free = this.isFree();
     const field = this.shape ? this.shape.field(w, h) : free ? this.freeField(w, h) : roundedRect(w, h, radii);
     const moving = !!this.shape?.moving();
-    const zR = Math.min(o.zRadius * (this.flat ? 0.8 : 1), field.shortHalf);
+    const mac = o.bevelMode === 4 ? macLensSize(2 * field.shortHalf, o.variant === "clear", o.zRadius * (this.flat ? 0.8 : 1)) : void 0;
+    const zR = Math.min(mac ? mac.height * MAC_LENS_REACH : o.zRadius * (this.flat ? 0.8 : 1), field.shortHalf);
     const region = this.shape?.bounds() ?? { x: 0, y: 0, w, h };
     const sub = region.x || region.y || region.w !== w || region.h !== h ? within(field, region) : field;
     if (this.bends && this.maps.length) {
       const scale = mapScale(region.w / Math.sqrt(this.shape?.detail() ?? 1), region.h, moving, o.bevelMode === 3);
       const refraction = this.unitMaps ? 1 : o.refraction;
       const grid = this.shape || free ? null : this.grid;
-      const key = [w, h, ...radii, zR, refraction, o.bevelMode, +o.magnify, scale, ...this.maps.map((m) => m.fringe)].map((v) => Math.round(v * 400) / 400).join(":") + (this.shape ? `|${this.shape.key()}` : "") + (free ? `|${o.shape}|${o.path}|${o.pathBox}|${o.cornerRadius}` : "") + (grid ? `|${Object.values(grid).join(",")}` : "");
+      const key = [w, h, ...radii, zR, refraction, o.bevelMode, +o.magnify, scale, mac?.amount ?? 0, mac?.height ?? 0, ...this.maps.map((m) => m.fringe)].map((v) => Math.round(v * 400) / 400).join(":") + (this.shape ? `|${this.shape.key()}` : "") + (free ? `|${o.shape}|${o.path}|${o.pathBox}|${o.cornerRadius}` : "") + (grid ? `|${Object.values(grid).join(",")}` : "");
       if (key !== this.mapKey) {
         this.mapKey = key;
         const entries = this.maps.map((map) => {
           const k = `${key}|${map.fringe}`;
           return mapCache.get(k) ?? remember(mapCache, k, (() => {
             const profile = free && o.shape === "path" ? roundedRect(w, h, [0, 0, 0, 0]) : sub;
-            const m = tableMap(sub, { refraction, bevel: zR, dome: o.bevelMode === 1, rim: o.bevelMode === 2, minify: o.bevelMode === 3, magnify: o.magnify }, scale, moving ? 64 : 256, map.fringe, profile, grid);
+            const m = tableMap(sub, { refraction, bevel: zR, dome: o.bevelMode === 1, rim: o.bevelMode === 2, minify: o.bevelMode === 3, mac, magnify: o.magnify }, scale, moving ? 64 : 256, map.fringe, profile, grid);
             return { urls: [0, 1, 2].slice(0, free ? 3 : 2).map((c) => greyDataURL(m, c)), rimPx: m.rimPx, margin: m.margin, rect: m.rect, grid: m.grid, tables: { ...encodeTables(m.tableX, m.tableY, m.bias), cover: m.tableB.join(" ") } };
           })());
         });
@@ -1425,6 +1610,7 @@ var Lens = class {
   }
   recolour() {
     this.colour?.setAttribute("values", this.matrix().join(" "));
+    this.capNode?.firstElementChild?.setAttribute("tableValues", this.capTable());
     this.changed();
   }
   bindPointer() {
@@ -2297,7 +2483,7 @@ var GlassGroup = class {
       setAttrs(this.main, { x: -edge, y: -edge, width: atlas.w + edge + Math.max(edge, e), height: atlas.h + 2 * edge });
       setAttrs(this.pre, { x: -e, y: -e, width: side * channels + atlas.w + m + e, height: atlas.h + 2 * e });
     } else {
-      setAttrs(this.main, { x: -e, y: -e, width: atlas.w + 2 * e, height: atlas.h + 2 * e });
+      setAttrs(this.main, { x: -e, y: -e, width: atlas.w + e + Math.max(e, Math.ceil(src.right - 1e-6)), height: atlas.h + 2 * e });
     }
   }
 };
@@ -2475,7 +2661,8 @@ var queries = {
   dark: media("(prefers-color-scheme: dark)"),
   reduceTransparency: media("(prefers-reduced-transparency: reduce)"),
   increaseContrast: media("(prefers-contrast: more)"),
-  reduceMotion: media("(prefers-reduced-motion: reduce)")
+  reduceMotion: media("(prefers-reduced-motion: reduce)"),
+  wideGamut: media("(color-gamut: p3)")
 };
 var overrides = {};
 function getEnvironment() {
@@ -2486,7 +2673,8 @@ function getEnvironment() {
     appearance: overrides.appearance ?? (root.glassAppearance === "tinted" ? "tinted" : "clear"),
     reduceTransparency: overrides.reduceTransparency ?? !!queries.reduceTransparency?.matches,
     increaseContrast: overrides.increaseContrast ?? !!queries.increaseContrast?.matches,
-    reduceMotion: overrides.reduceMotion ?? !!queries.reduceMotion?.matches
+    reduceMotion: overrides.reduceMotion ?? !!queries.reduceMotion?.matches,
+    wideGamut: overrides.wideGamut ?? (queries.wideGamut ? queries.wideGamut.matches : true)
   };
 }
 function setEnvironment(env) {

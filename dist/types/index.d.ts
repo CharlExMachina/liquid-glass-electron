@@ -34,7 +34,8 @@ export interface GlassHandle {
 /**
  * What the glass adapts to. Each comes from the page unless set with setEnvironment(): dark from
  * prefers-color-scheme (or <html data-glass-theme="dark">), appearance from <html data-glass-appearance="tinted">,
- * the accessibility settings from prefers-reduced-transparency, prefers-contrast and prefers-reduced-motion.
+ * the accessibility settings from prefers-reduced-transparency, prefers-contrast and prefers-reduced-motion, and
+ * whether the display is wide-gamut from color-gamut (macOS's colour is fitted for either).
  */
 export declare function getEnvironment(): Environment;
 /**

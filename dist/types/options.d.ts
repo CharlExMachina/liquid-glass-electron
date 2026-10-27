@@ -42,9 +42,11 @@ export interface GlassOptions {
     /**
      * 0 = a pill with a bevelled rim (liquidglass's), 1 = a dome that magnifies the whole element, 2 = Apple's lens: the
      * rim magnifies toward the middle, most at the edge and fading out `zRadius` px in, and the middle is flat,
-     * 3 = Apple's switch lens: it shrinks what's behind it, and its rim folds back (scaled to the element, not `zRadius`)
+     * 3 = Apple's switch lens: it shrinks what's behind it, and its rim folds back (scaled to the element, not `zRadius`),
+     * 4 = macOS 27's glass: the rim samples inward along its normal, sized by the element as macOS sizes it (`zRadius` is
+     * the most its height can be), and the frost is sized by it too (regular and clear glass are this)
      */
-    bevelMode: 0 | 1 | 2 | 3;
+    bevelMode: 0 | 1 | 2 | 3 | 4;
     /**
      * how much glass there is, 0..1 (1): bending, fringe, frost, colour, light, fill and shadow together. Cheap to change
      * every frame (no filter is rebuilt), so glass can come and go within an animation; at 0 it costs nothing
@@ -61,6 +63,15 @@ export interface GlassOptions {
     tint: string | null;
     /** a colour laid over the glass, as Apple's .tint(_:) and tinted buttons are; null = none */
     fill: string | null;
+    /**
+     * the backdrop's colour under the glass as a colour matrix: 12 numbers, three rows of red, green and blue gains and
+     * an offset (0..1), in place of saturation, brightness and tint; 'auto' = macOS 27's, for the variant and light or
+     * dark; null = none
+     */
+    colorMatrix: number[] | string | null;
+    /** a thin dark line around the edge, as macOS draws: its opacity where the edge faces sideways, and up or down */
+    outline: number;
+    outlineTop: number;
     /**
      * rect (cornerRadius), capsule, circle, concentric (the radius of the glass it sits in, less the inset), squircle
      * (Apple's continuous corners, of cornerRadius), or path (any shape: `path`)
@@ -89,7 +100,7 @@ export interface GlassOptions {
     group: boolean;
 }
 export declare const DEFAULTS: GlassOptions;
-/** Apple's glass variants, as option sets. `fill` values that depend on light or dark are resolved later. */
+/** Apple's glass variants, as option sets. `fill` and `colorMatrix` values that depend on light or dark are resolved later. */
 export declare const VARIANTS: Record<Variant, Partial<GlassOptions>>;
 /** Options set as CSS custom properties (--glass-chrom-aberration, or the short --glass-aberration) on the element. */
 export declare function fromCss(style: CSSStyleDeclaration): Partial<GlassOptions>;
@@ -104,6 +115,20 @@ export interface Environment {
     reduceTransparency: boolean;
     increaseContrast: boolean;
     reduceMotion: boolean;
+    /** the display is wide-gamut (Display P3), where Chromium composites in its colour space; unset counts as wide */
+    wideGamut?: boolean;
 }
 /** The options from every source, then adjusted for the system's settings. */
 export declare function resolve(sources: Partial<GlassOptions>[], env: Environment): GlassOptions;
+/**
+ * macOS 27's colour, fitted to what SwiftUI's glass draws over photos, flat colours, greys and lines (test/native): per
+ * variant, light and dark, three rows of red, green and blue gains and an offset. Chromium bends and colours the
+ * backdrop in the display's colour space, so there's a matrix for a wide-gamut (Display P3) display, fitted to what the
+ * filter sees there, and one for an sRGB display.
+ */
+export declare const MACOS_COLOUR: Record<'regular' | 'clear', Record<'p3' | 'srgb', [number[], number[]]>>;
+/**
+ * Dark regular glass's colour at 64 px and smaller: brighter than large glass's (macOS caps it less, see macMaxLuma);
+ * between 64 and 104 px it goes from this to MACOS_COLOUR's (lens.ts).
+ */
+export declare const MACOS_SMALL_DARK: Record<'p3' | 'srgb', number[]>;
