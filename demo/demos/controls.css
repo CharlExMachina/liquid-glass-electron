@@ -1,17 +1,112 @@
-.ctl-panel { position: absolute; left: 50%; margin-left: 112px; translate: -50% 0; top: 70px; width: 440px; padding: 24px 26px; border-radius: 34px; color: var(--text); display: grid; gap: 22px; }
+/* macOS 26's slider and switch (the large size), measured from SwiftUI's Slider and Toggle in
+   native/demos/Controls.swift. The knobs' glass is driven from CSS, so transitions drive it: --glass-strength and --glass-blur-amount are
+   registered by the library (the glass's surface comes and goes with its strength); --solid (how much of a knob's own
+   white shows) and --lens-shadow (how much of the lens's shadow, ::after) are registered here, so they interpolate
+   too. */
+@property --solid { syntax: '<number>'; inherits: true; initial-value: 1; }
+@property --lens-shadow { syntax: '<number>'; inherits: true; initial-value: 0; }
+
+.ctl-panel {
+  position: absolute; left: 50%; margin-left: 112px; translate: -50% 0; top: 70px; width: 440px; padding: 24px 26px; border-radius: 34px; color: var(--text); display: grid; gap: 22px;
+  /* text as SwiftUI sets it: lines the font's own height */
+  line-height: normal;
+  /* the springs (iOS's, measured from iOS 26's switch, as macOS's is the same): the knob's press (68% of the way at an
+     eighth of its time, there at 28%, 14% past at 46%) and the switch's slide (there at 245 ms, 6.5% past at 360,
+     settled at 600) */
+  --press: linear(0, 0.1 6%, 0.4 10.5%, 0.68 13.5%, 0.86 21%, 1 28%, 1.1 36%, 1.14 46%, 1.11 60%, 1.04 72%, 1.01 85%, 1);
+  --slide: linear(0, 0.06 1.5%, 0.25 4.5%, 0.47 10%, 0.62 15%, 0.76 21%, 0.87 27%, 0.95 33%, 0.995 39%, 1.03 45%, 1.055 51%, 1.065 57%, 1.062 65%, 1.048 74%, 1.025 82%, 1.008 91%, 1);
+  /* the tracks: white at 16% where they're empty (on glass; macOS's are 10% on a plain backdrop), the accent where
+     they're filled (as macOS draws the gallery's, #0a84ff, and #34c759 for the switch); lighter while the knob is held
+     (the slider's fill, the switch's track) */
+  --track: rgb(255 255 255 / 0.16);
+  --slider-on: rgb(32 137 255);
+  --slider-held: rgb(79 157 254);
+  --switch-on: rgb(61 203 95);
+  --track-held: rgb(255 255 255 / 0.26);
+  --switch-held: rgb(86 224 115);
+  --knob: rgb(255 255 255 / 0.85);
+}
+/* light: black where the dark has white, darker while held; the knobs opaque */
+:root[data-theme='light'] .ctl-panel {
+  --track: rgb(0 0 0 / 0.16);
+  --slider-on: rgb(13 127 244);
+  --slider-held: rgb(19 106 203);
+  --switch-on: rgb(46 193 84);
+  --track-held: rgb(0 0 0 / 0.28);
+  --switch-held: rgb(0 174 62);
+  --knob: #fff;
+}
 .ctl-panel h3 { margin: 0; font-size: 17px; }
 .ctl-row { display: grid; grid-template-columns: 28px 1fr 44px; align-items: center; gap: 12px; }
 .ctl-row span { text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); }
-.slider { position: relative; height: 34px; touch-action: none; cursor: pointer; }
-.slider .track { position: absolute; left: 0; right: 0; top: 14px; height: 6px; border-radius: 3px; background: rgb(127 127 127 / 0.3); overflow: hidden; }
-.slider .track i { position: absolute; left: 0; top: 0; bottom: 0; background: var(--accent); }
-.slider .knob { position: absolute; top: 4px; width: 42px; height: 26px; margin-left: -21px; border-radius: 13px; transition: scale 0.3s cubic-bezier(0.3, 1.5, 0.5, 1); }
+
+/* ------------------------------------------------------------ knobs: solid white at rest, glass while held */
+/* The knob element is the size of its lens; at rest it's scaled down to the white knob's size. Its white is a layer
+   (::before) above the glass, faded by --solid; its glass (and the surface on it: surface() in controls.js) comes and
+   goes with --glass-strength, and the lens's shadow with --lens-shadow. At rest the glass is all but off (2‰, under the
+   white), so the filter stays live and a press doesn't wait a frame or two for it to start. */
+.ctl-panel .knob {
+  position: absolute; z-index: 1;
+  --glass-strength: 0.002; --glass-blur-amount: 0.4; --solid: 1; --lens-shadow: 0;
+  /* release, as macOS's (a recording at 60 fps): the frost comes up and the shadow goes within 50 ms, the knob shrinks
+     back over 70 ms, the white comes up from 10 ms, quickly then slowly, until 150, and the glass goes once it's
+     covered */
+  transition: --glass-strength 0.06s linear 0.16s, --lens-shadow 0.05s linear, --glass-blur-amount 0.04s linear,
+    --solid 0.14s cubic-bezier(0.2, 0.6, 0.4, 1) 0.01s, scale 0.07s cubic-bezier(0.3, 0, 0.3, 1) 0.01s, left 0.63s var(--slide) 0.03s;
+}
+.ctl-panel .knob::before {
+  content: ''; position: absolute; inset: 0; border-radius: inherit; background: var(--knob); opacity: var(--solid);
+}
+.ctl-panel .knob::after {
+  content: ''; position: absolute; inset: -16px; pointer-events: none; opacity: var(--lens-shadow);
+  background: var(--shadow-dark) center / 100% 100% no-repeat;
+}
+/* the lens's surface (two images, set by controls.js), dark or light */
+.ctl-panel .knob { --glass-surface: var(--surface-dark); }
+:root[data-theme='light'] .ctl-panel .knob { --glass-surface: var(--surface-light); }
+:root[data-theme='light'] .ctl-panel .knob::after { background-image: var(--shadow-light); }
+.ctl-panel .held > .knob {
+  scale: 1; --glass-strength: 1; --glass-blur-amount: 0.04; --solid: 0; --lens-shadow: 1;
+  /* press, as macOS's: the white gives way to frosted glass over 110 ms, the frost clears by 100, the shadow comes in
+     at 40 to 90, and the lens springs up, there by 100 ms. A trace of frost stays (0.04, σ 0.3 px, about the smoothing
+     glass gets without any): at 0 the filter would change its structure. */
+  transition: --glass-strength 0.02s linear, --solid 0.11s linear, --glass-blur-amount 0.07s linear 0.03s,
+    --lens-shadow 0.05s linear 0.04s, scale 0.16s var(--press), left 0.63s var(--slide);
+}
+
+/* The slider: 34 high, the track 6, its fill reaching the knob's centre. The knob is 24 × 20 at rest and a lens a third
+   bigger held, 32 × 27, on the same spot; its edges reach the track's ends. Its white has a shadow, tight and close
+   under it and faint and wide all around (in the knob's own px: it's scaled by 0.75 at rest). */
+.slider { position: relative; height: 34px; touch-action: none; cursor: pointer; outline: none; }
+.slider .track { position: absolute; left: 0; right: 0; top: 14px; height: 6px; border-radius: 3px; background: var(--track); overflow: hidden; }
+.slider .track i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 3px; background: var(--slider-on); transition: background-color 0.1s linear; }
+.slider.held .track i { background: var(--slider-held); }
+.slider .knob { top: 3.5px; width: 32px; height: 27px; margin-left: -16px; border-radius: 13.5px; scale: 0.75 0.741; }
+.slider .knob::before { box-shadow: 0 1.95px 9.13px -4.53px rgb(0 0 0 / 0.294), 0 4.6px 20.9px 12.35px rgb(0 0 0 / 0.03); }
+:root[data-theme='light'] .slider .knob::before { box-shadow: 0 1.61px 7.85px -3.55px rgb(0 0 0 / 0.264), 0 4.6px 24.4px 7.8px rgb(0 0 0 / 0.03); }
+/* dragged, the knob follows the pointer */
+.ctl-panel .slider.held .knob { transition-property: --glass-strength, --solid, --glass-blur-amount, --lens-shadow, scale; }
+
+/* The switch: the track 64 × 28, the empty track's white when off and green when on; the knob 38 × 24, 2 px in, with
+   no shadow. Pressed, the knob turns into a lens 1.6× its size on the same spot (Apple's switch lens, bevelMode 3: it
+   shrinks what's behind it); released, the lens frosts, slides and shrinks back, and turns white. The knob element is
+   the lens, 61 × 39, scaled to the knob at rest. */
 .toggles { display: flex; gap: 22px; }
-.toggle { position: relative; width: 64px; height: 30px; border-radius: 15px; background: rgb(127 127 127 / 0.3); cursor: pointer; transition: background 0.25s; }
-.toggle[aria-checked='true'] { background: #34c759; }
-.toggle .knob { position: absolute; top: 2px; left: 2px; width: 38px; height: 26px; border-radius: 13px; transition: translate 0.35s cubic-bezier(0.3, 1.4, 0.5, 1), scale 0.3s cubic-bezier(0.3, 1.5, 0.5, 1); }
-.toggle[aria-checked='true'] .knob { translate: 22px 0; }
 .toggle-label { display: grid; gap: 6px; justify-items: center; font-size: 12px; color: var(--muted); }
+.toggle {
+  position: relative; width: 64px; height: 28px; border-radius: 14px; background: var(--track); cursor: pointer; outline: none;
+  transition: background-color 0.28s cubic-bezier(0.2, 0, 0.3, 1) 0.02s;
+}
+.toggle[aria-checked='true'] { background-color: var(--switch-on); }
+/* held, the track lights up, on or off */
+.toggle.held { background-color: var(--track-held); }
+.toggle.held[aria-checked='true'] { background-color: var(--switch-held); }
+.toggle .knob { top: 50%; left: 21px; width: 61px; height: 39px; margin: -19.5px 0 0 -30.5px; border-radius: 19.5px; scale: 0.623 0.615; }
+.toggle[aria-checked='true'] .knob { left: 43px; }
+/* sliding while held (a quick click), the lens stretches along the way it goes */
+.toggle.stretch .knob { animation: knob-stretch 0.3s ease-out; }
+@keyframes knob-stretch { 35% { transform: scale(1.07, 0.97); } }
+
 .hud { position: absolute; right: 40px; top: 70px; width: 64px; height: 220px; border-radius: 22px; display: grid; justify-items: center; align-content: end; padding-bottom: 14px; color: #fff; }
 .hud .level { position: absolute; left: 0; right: 0; bottom: 0; border-radius: 0 0 22px 22px; background: rgb(255 255 255 / 0.75); }
 .hud .icon { position: relative; color: #222; }
