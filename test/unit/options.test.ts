@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { DEFAULTS, fromCss, fromData, resolve, type Environment } from '../../src/options.ts';
+import { DEFAULTS, fromCss, fromData, resolve, UNSET, type Environment } from '../../src/options.ts';
 
 const env: Environment = { dark: false, appearance: 'clear', reduceTransparency: false, increaseContrast: false, reduceMotion: false };
 const css = (props: Record<string, string>) => ({ getPropertyValue: (n: string) => props[n] ?? '' }) as unknown as CSSStyleDeclaration;
@@ -26,6 +26,21 @@ test('CSS custom properties, then data attributes, then options win', () => {
   assert.equal(o.zRadius, 50);
   const p = resolve([fromCss(css({ '--glass-z-radius': '20' })), fromData(element({ 'data-glass-z-radius': '30' }))], env);
   assert.equal(p.zRadius, 30);
+});
+
+test('a number property that nothing sets (registered, so it has its initial value) leaves the option to the variant', () => {
+  const o = resolve([fromCss(css({ '--glass-blur-amount': String(UNSET), '--glass-z-radius': '20px' })), { variant: 'regular' }], env);
+  assert.equal(o.blurAmount, 1.097);
+  // lengths, as px options could always be written
+  assert.equal(o.zRadius, 20);
+  // on its way from not set, in a transition
+  assert.equal(resolve([fromCss(css({ '--glass-refraction': String(UNSET / 2 - 1) }))], env).refraction, DEFAULTS.refraction);
+});
+
+test('a surface is two images, from CSS as two url()s', () => {
+  const o = resolve([fromCss(css({ '--glass-surface': ' url(data:image/png;base64,AA==) url("b.png")' }))], env);
+  assert.deepEqual(o.surface, ['data:image/png;base64,AA==', 'b.png']);
+  assert.equal(resolve([fromCss(css({ '--glass-surface': 'url(a.png)' }))], env).surface, null);
 });
 
 test('Libre Hub\'s short names still work', () => {

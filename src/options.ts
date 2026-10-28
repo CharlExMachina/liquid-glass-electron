@@ -73,6 +73,13 @@ export interface GlassOptions {
   /** a colour laid over the glass, as Apple's .tint(_:) and tinted buttons are; null = none */
   fill: string | null;
   /**
+   * how the glass's surface changes what it shows, per pixel: out = gain × glass + offset, clipped. What one blend
+   * can't draw: Apple's knobs add light to their rim and take it away along their edge, by the same amount over any
+   * backdrop. Two images' URLs, each stretched over the element's box, in greys: the gain, and the offset (½ is none,
+   * from −½ to ½). In CSS, --glass-surface: url(…) url(…). null = none
+   */
+  surface: [string, string] | null;
+  /**
    * the backdrop's colour under the glass as a colour matrix: 12 numbers, three rows of red, green and blue gains and
    * an offset (0..1), in place of saturation, brightness and tint; 'auto' = macOS 27's, for the variant and light or
    * dark; null = none
@@ -136,6 +143,7 @@ export const DEFAULTS: GlassOptions = {
   backdrop: null,
   tint: null,
   fill: null,
+  surface: null,
   colorMatrix: null,
   outline: 0,
   outlineTop: 0,
@@ -173,7 +181,7 @@ const NUMBERS = ['blurAmount', 'refraction', 'chromAberration', 'edgeHighlight',
   'zRadius', 'opacity', 'saturation', 'tintStrength', 'brightness', 'baseBrightness', 'shadowOpacity', 'shadowSpread', 'shadowOffsetY', 'bevelMode',
   'pressBulge', 'strength', 'elasticity', 'outline', 'outlineTop'] as const;
 const BOOLEANS = ['floating', 'button', 'interactive', 'smooth', 'magnify', 'adaptive', 'group'] as const;
-const STRINGS = ['variant', 'tint', 'fill', 'shape', 'press', 'path', 'pathBox', 'backdrop', 'colorMatrix'] as const;
+const STRINGS = ['variant', 'tint', 'fill', 'surface', 'shape', 'press', 'path', 'pathBox', 'backdrop', 'colorMatrix'] as const;
 const ALL: readonly string[] = [...NUMBERS, ...BOOLEANS, ...STRINGS];
 
 // The names Libre Hub's engine used, for its CSS: --glass-bevel and so on. Its --glass-tint was the app's background
@@ -184,11 +192,27 @@ const ALIASES: Record<string, keyof GlassOptions> = {
 
 const kebab = (s: string) => s.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`);
 
+/**
+ * What a number option's custom property is where nothing sets it. They're registered as numbers (see
+ * NUMBER_PROPERTIES), so they always have a value: this one, which isn't an option's.
+ */
+export const UNSET = -99999;
+/**
+ * The number options' custom properties, as the library registers them (installStyles): numbers (or lengths, for those
+ * in px, as they could always be written), so CSS transitions and animations interpolate them (the glass follows),
+ * inherited as unregistered ones are. --glass-strength is registered on its own (1 where it isn't set, not inherited).
+ */
+const IN_PX = ['cornerRadius', 'zRadius', 'shadowSpread', 'shadowOffsetY'];
+export const NUMBER_PROPERTIES = NUMBERS.filter((k) => k !== 'strength')
+  .map((k) => ({ name: `--glass-${kebab(k)}`, syntax: IN_PX.includes(k) ? '<number> | <length>' : '<number>' }));
+
 function coerce(key: string, raw: string): unknown {
   const v = raw.trim();
   if ((NUMBERS as readonly string[]).includes(key)) {
     if (key === 'cornerRadius' && (v === '' || v === 'auto')) return null;
     const n = parseFloat(v);
+    // not set (or on its way from not set, in a transition)
+    if (n <= UNSET / 2) return undefined;
     return Number.isFinite(n) ? n : undefined;
   }
   if ((BOOLEANS as readonly string[]).includes(key)) {
@@ -196,7 +220,13 @@ function coerce(key: string, raw: string): unknown {
     const n = parseFloat(v);
     return Number.isFinite(n) ? n > 0 : v === '' || v === 'true' || v === 'yes';
   }
-  return v === '' || v === 'none' || v === 'null' ? null : v;
+  if (v === '' || v === 'none' || v === 'null') return null;
+  if (key === 'surface') {
+    // --glass-surface: url(…) url(…), as CSS writes images
+    const urls = [...v.matchAll(/url\(\s*(['"]?)(.*?)\1\s*\)/gs)].map((m) => m[2]);
+    return urls.length === 2 ? urls : undefined;
+  }
+  return v;
 }
 
 /** Options set as CSS custom properties (--glass-chrom-aberration, or the short --glass-aberration) on the element. */

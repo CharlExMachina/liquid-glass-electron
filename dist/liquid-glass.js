@@ -1,3 +1,243 @@
+// src/options.ts
+var DEFAULTS = {
+  blurAmount: 0,
+  refraction: 0.69,
+  chromAberration: 0.05,
+  edgeHighlight: 0.05,
+  specular: 0,
+  fresnel: 1,
+  distortion: 0,
+  cornerRadius: null,
+  zRadius: 40,
+  opacity: 1,
+  saturation: 0,
+  tintStrength: 0,
+  brightness: 0,
+  baseBrightness: 0.06,
+  shadowOpacity: 0.3,
+  shadowSpread: 10,
+  shadowOffsetY: 1,
+  floating: false,
+  elasticity: 0.15,
+  button: false,
+  bevelMode: 0,
+  strength: 1,
+  variant: null,
+  backdrop: null,
+  tint: null,
+  fill: null,
+  surface: null,
+  colorMatrix: null,
+  outline: 0,
+  outlineTop: 0,
+  shape: "rect",
+  path: null,
+  pathBox: null,
+  interactive: false,
+  press: null,
+  pressBulge: 0.25,
+  smooth: true,
+  magnify: true,
+  adaptive: true,
+  group: true
+};
+var MACOS = {
+  bevelMode: 4,
+  zRadius: 20,
+  chromAberration: 0,
+  edgeHighlight: 0,
+  fresnel: 0,
+  specular: 0,
+  shadowOpacity: 0,
+  baseBrightness: 0,
+  saturation: 0,
+  magnify: false,
+  colorMatrix: "auto"
+};
+var VARIANTS = {
+  // frosted (σ ≈ 8 px on large glass, and a wider blur laid over it), saturated and lightened (or darkened): legible over anything
+  regular: { ...MACOS, blurAmount: 1.097, refraction: 0.9, outline: 0.295, outlineTop: 0.194 },
+  // more frost (σ ≈ 20 px on large glass), less colour: what's behind shows through as light, not detail
+  clear: { ...MACOS, blurAmount: 2.665, refraction: 0.9, outline: 0.345, outlineTop: 0 },
+  // no glass at all: for switching it off without changing the layout
+  identity: { refraction: 0, chromAberration: 0, edgeHighlight: 0, fresnel: 0, specular: 0, shadowOpacity: 0 }
+};
+var NUMBERS = [
+  "blurAmount",
+  "refraction",
+  "chromAberration",
+  "edgeHighlight",
+  "specular",
+  "fresnel",
+  "distortion",
+  "cornerRadius",
+  "zRadius",
+  "opacity",
+  "saturation",
+  "tintStrength",
+  "brightness",
+  "baseBrightness",
+  "shadowOpacity",
+  "shadowSpread",
+  "shadowOffsetY",
+  "bevelMode",
+  "pressBulge",
+  "strength",
+  "elasticity",
+  "outline",
+  "outlineTop"
+];
+var BOOLEANS = ["floating", "button", "interactive", "smooth", "magnify", "adaptive", "group"];
+var STRINGS = ["variant", "tint", "fill", "surface", "shape", "press", "path", "pathBox", "backdrop", "colorMatrix"];
+var ALL = [...NUMBERS, ...BOOLEANS, ...STRINGS];
+var ALIASES = {
+  bevel: "zRadius",
+  aberration: "chromAberration",
+  edge: "edgeHighlight",
+  dome: "bevelMode",
+  blur: "blurAmount",
+  radius: "cornerRadius"
+};
+var kebab = (s) => s.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`);
+var UNSET = -99999;
+var IN_PX = ["cornerRadius", "zRadius", "shadowSpread", "shadowOffsetY"];
+var NUMBER_PROPERTIES = NUMBERS.filter((k) => k !== "strength").map((k) => ({ name: `--glass-${kebab(k)}`, syntax: IN_PX.includes(k) ? "<number> | <length>" : "<number>" }));
+function coerce(key, raw) {
+  const v = raw.trim();
+  if (NUMBERS.includes(key)) {
+    if (key === "cornerRadius" && (v === "" || v === "auto")) return null;
+    const n = parseFloat(v);
+    if (n <= UNSET / 2) return void 0;
+    return Number.isFinite(n) ? n : void 0;
+  }
+  if (BOOLEANS.includes(key)) {
+    const n = parseFloat(v);
+    return Number.isFinite(n) ? n > 0 : v === "" || v === "true" || v === "yes";
+  }
+  if (v === "" || v === "none" || v === "null") return null;
+  if (key === "surface") {
+    const urls = [...v.matchAll(/url\(\s*(['"]?)(.*?)\1\s*\)/gs)].map((m) => m[2]);
+    return urls.length === 2 ? urls : void 0;
+  }
+  return v;
+}
+function fromCss(style) {
+  const out = {};
+  for (const key of ALL) {
+    const raw = style.getPropertyValue(`--glass-${kebab(key)}`);
+    if (raw.trim() !== "") {
+      const v = coerce(key, raw);
+      if (v !== void 0) out[key] = v;
+    }
+  }
+  for (const [alias, key] of Object.entries(ALIASES)) {
+    if (key in out) continue;
+    const raw = style.getPropertyValue(`--glass-${alias}`);
+    if (raw.trim() === "") continue;
+    const v = coerce(key, raw);
+    if (v !== void 0) out[key] = v;
+  }
+  return out;
+}
+function fromData(el) {
+  const out = {};
+  const main = el.dataset.glass?.trim();
+  if (main) {
+    if (main.startsWith("{")) {
+      try {
+        Object.assign(out, JSON.parse(main));
+      } catch {
+        console.warn("liquid-glass-electron: data-glass is not valid JSON:", main);
+      }
+    } else if (main in VARIANTS) {
+      out.variant = main;
+    }
+  }
+  for (const key of [...ALL, ...Object.keys(ALIASES)]) {
+    const attr = el.getAttribute(`data-glass-${kebab(key)}`);
+    if (attr === null) continue;
+    const name = ALIASES[key] ?? key;
+    const v = coerce(name, attr);
+    if (v !== void 0) out[name] = v;
+  }
+  return out;
+}
+function resolve(sources, env) {
+  const merged = { ...DEFAULTS };
+  const variant = sources.reduce((v, s) => s.variant !== void 0 ? s.variant : v, null);
+  if (variant && VARIANTS[variant]) Object.assign(merged, VARIANTS[variant]);
+  for (const s of sources) {
+    for (const [k, v] of Object.entries(s)) if (v !== void 0) merged[k] = v;
+  }
+  merged.variant = variant;
+  if (merged.button && merged.press === null) merged.press = "flatten";
+  if (merged.interactive && merged.press === null) merged.press = "bulge";
+  if (merged.variant === "identity" || !merged.adaptive) return finishFill(merged, env);
+  if (env.appearance === "tinted") {
+    merged.blurAmount = Math.max(merged.blurAmount, 0.8);
+    merged.saturation = Math.max(merged.saturation, 0.3);
+    merged.fill ??= "auto-tinted";
+    if (merged.fill === "auto") merged.fill = "auto-tinted";
+  }
+  if (env.reduceTransparency) {
+    merged.blurAmount = Math.max(merged.blurAmount, 2);
+    merged.chromAberration = 0;
+    merged.distortion = 0;
+    merged.fill = merged.fill && !merged.fill.startsWith("auto") ? merged.fill : "auto-opaque";
+  }
+  if (env.increaseContrast) {
+    merged.edgeHighlight = Math.max(merged.edgeHighlight, 0.6);
+    merged.chromAberration = 0;
+    if (!merged.fill || merged.fill === "auto") merged.fill = "auto-tinted";
+  }
+  return finishFill(merged, env);
+}
+var MACOS_COLOUR = {
+  regular: {
+    p3: [
+      [1.0109, -0.4446, -0.0421, 0.4042, -0.1385, 0.708, -0.0456, 0.4057, -0.1392, -0.4553, 1.1175, 0.4056],
+      [1.0335, -0.2837, 79e-4, 0.0945, -0.0441, 0.7589, 0.0284, 0.0977, -0.07, -0.3057, 1.1334, 0.097]
+    ],
+    srgb: [
+      [1.0352, -0.4969, -0.0143, 0.4039, -0.1223, 0.6788, -0.0302, 0.4021, -0.1298, -0.4899, 1.145, 0.4024],
+      [1.0531, -0.3563, 0.0411, 0.0911, -0.0428, 0.704, 0.0665, 0.0921, -0.0715, -0.3338, 1.1377, 0.0976]
+    ]
+  },
+  clear: {
+    p3: [
+      [0.8511, -0.1598, -0.0136, 0.2778, -0.0474, 0.7405, -0.0154, 0.2783, -0.0498, -0.1609, 0.8886, 0.278],
+      [0.9006, -0.1663, -0.0195, 0.0955, -0.048, 0.7818, -0.0187, 0.0955, -0.0514, -0.1679, 0.9342, 0.0957]
+    ],
+    srgb: [
+      [0.83, -0.1351, -0.0215, 0.2832, -0.0361, 0.7286, -0.0149, 0.2785, -0.053, -0.1526, 0.8823, 0.2793],
+      [0.917, -0.2103, 0.0107, 0.0921, -0.045, 0.7741, -0.013, 0.0941, -0.0407, -0.1883, 0.9461, 0.0931]
+    ]
+  }
+};
+var MACOS_SMALL_DARK = {
+  p3: [1.097, -0.2822, 69e-4, 0.093, -0.035, 0.8139, 0.0322, 0.095, -0.0641, -0.2836, 1.1696, 0.0934],
+  srgb: [1.1322, -0.3705, 0.0417, 0.0906, -0.0471, 0.8063, 0.0327, 0.0978, -0.0684, -0.3061, 1.176, 0.0961]
+};
+var DARK_OUTLINE = { regular: [0.605, 0.41], clear: [0.49, 0] };
+function finishFill(o, env) {
+  if (o.colorMatrix === "auto") o.colorMatrix = MACOS_COLOUR[o.variant === "clear" ? "clear" : "regular"][env.wideGamut === false ? "srgb" : "p3"][env.dark ? 1 : 0];
+  else if (o.colorMatrix !== null) {
+    const m = typeof o.colorMatrix === "string" ? o.colorMatrix.split(/[\s,]+/).filter(Boolean).map(Number) : o.colorMatrix;
+    o.colorMatrix = Array.isArray(m) && m.length === 12 && m.every(Number.isFinite) ? m : null;
+  }
+  if (env.dark && (o.variant === "regular" || o.variant === "clear")) {
+    const v = VARIANTS[o.variant];
+    if (o.outline === v.outline && o.outlineTop === v.outlineTop) [o.outline, o.outlineTop] = DARK_OUTLINE[o.variant];
+  }
+  const fills = {
+    auto: ["rgb(255 255 255 / 0.1)", "rgb(20 20 24 / 0.12)"],
+    "auto-tinted": ["rgb(250 250 252 / 0.55)", "rgb(28 28 32 / 0.55)"],
+    "auto-opaque": ["rgb(246 246 248 / 0.9)", "rgb(30 30 34 / 0.9)"]
+  };
+  if (o.fill && fills[o.fill]) o.fill = fills[o.fill][env.dark ? 1 : 0];
+  return o;
+}
+
 // src/dom.ts
 var SVG_NS = "http://www.w3.org/2000/svg";
 var defs = null;
@@ -94,14 +334,21 @@ function installStyles() {
 :where([data-liquid-glass]) { box-shadow: var(--lg-shadow, none); }
 :where([data-liquid-glass][data-lg-pressable]) { cursor: pointer; -webkit-tap-highlight-color: transparent; transition: scale 0.32s cubic-bezier(0.3, 1.6, 0.5, 1); }
 :where([data-liquid-glass][data-lg-interactive]) { background-image: radial-gradient(circle at var(--lg-x, 50%) var(--lg-y, 50%), rgb(255 255 255 / var(--lg-glow, 0)), transparent 70%); }
+:where([data-liquid-glass][data-lg-layered]) { box-shadow: none; }
+:where([data-liquid-glass][data-lg-interactive][data-lg-layered]) { background-image: none; }
+:where([data-liquid-glass][data-lg-interactive]) > :where([data-lg-layer='glass']) { background-image: radial-gradient(circle at var(--lg-x, 50%) var(--lg-y, 50%), rgb(255 255 255 / var(--lg-glow, 0)), transparent 70%); }
 :where([data-liquid-glass][data-lg-floating]) { touch-action: none; cursor: grab; user-select: none; }
 :where([data-liquid-glass][data-lg-floating][data-lg-dragging]) { cursor: grabbing; }
 `);
   document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
-  try {
-    CSS.registerProperty({ name: "--glass-strength", syntax: "<number>", inherits: false, initialValue: "1" });
-  } catch {
-  }
+  const register = (name, syntax, inherits, initialValue) => {
+    try {
+      CSS.registerProperty({ name, syntax, inherits, initialValue });
+    } catch {
+    }
+  };
+  register("--glass-strength", "<number>", false, "1");
+  for (const { name, syntax } of NUMBER_PROPERTIES) register(name, syntax, true, String(UNSET));
 }
 function supportsSvgBackdrop() {
   if (globalThis.LIQUID_GLASS_FALLBACK) return false;
@@ -653,236 +900,6 @@ function fieldLight(f, bevel, o, shadow, scale, pad, fill = null) {
   return { light: { width, height: height2, data: light }, shadow: { width, height: height2, data: shade }, mask: { width, height: height2, data: mask }, pad };
 }
 
-// src/options.ts
-var DEFAULTS = {
-  blurAmount: 0,
-  refraction: 0.69,
-  chromAberration: 0.05,
-  edgeHighlight: 0.05,
-  specular: 0,
-  fresnel: 1,
-  distortion: 0,
-  cornerRadius: null,
-  zRadius: 40,
-  opacity: 1,
-  saturation: 0,
-  tintStrength: 0,
-  brightness: 0,
-  baseBrightness: 0.06,
-  shadowOpacity: 0.3,
-  shadowSpread: 10,
-  shadowOffsetY: 1,
-  floating: false,
-  elasticity: 0.15,
-  button: false,
-  bevelMode: 0,
-  strength: 1,
-  variant: null,
-  backdrop: null,
-  tint: null,
-  fill: null,
-  colorMatrix: null,
-  outline: 0,
-  outlineTop: 0,
-  shape: "rect",
-  path: null,
-  pathBox: null,
-  interactive: false,
-  press: null,
-  pressBulge: 0.25,
-  smooth: true,
-  magnify: true,
-  adaptive: true,
-  group: true
-};
-var MACOS = {
-  bevelMode: 4,
-  zRadius: 20,
-  chromAberration: 0,
-  edgeHighlight: 0,
-  fresnel: 0,
-  specular: 0,
-  shadowOpacity: 0,
-  baseBrightness: 0,
-  saturation: 0,
-  magnify: false,
-  colorMatrix: "auto"
-};
-var VARIANTS = {
-  // frosted (σ ≈ 8 px on large glass, and a wider blur laid over it), saturated and lightened (or darkened): legible over anything
-  regular: { ...MACOS, blurAmount: 1.097, refraction: 0.9, outline: 0.295, outlineTop: 0.194 },
-  // more frost (σ ≈ 20 px on large glass), less colour: what's behind shows through as light, not detail
-  clear: { ...MACOS, blurAmount: 2.665, refraction: 0.9, outline: 0.345, outlineTop: 0 },
-  // no glass at all: for switching it off without changing the layout
-  identity: { refraction: 0, chromAberration: 0, edgeHighlight: 0, fresnel: 0, specular: 0, shadowOpacity: 0 }
-};
-var NUMBERS = [
-  "blurAmount",
-  "refraction",
-  "chromAberration",
-  "edgeHighlight",
-  "specular",
-  "fresnel",
-  "distortion",
-  "cornerRadius",
-  "zRadius",
-  "opacity",
-  "saturation",
-  "tintStrength",
-  "brightness",
-  "baseBrightness",
-  "shadowOpacity",
-  "shadowSpread",
-  "shadowOffsetY",
-  "bevelMode",
-  "pressBulge",
-  "strength",
-  "elasticity",
-  "outline",
-  "outlineTop"
-];
-var BOOLEANS = ["floating", "button", "interactive", "smooth", "magnify", "adaptive", "group"];
-var STRINGS = ["variant", "tint", "fill", "shape", "press", "path", "pathBox", "backdrop", "colorMatrix"];
-var ALL = [...NUMBERS, ...BOOLEANS, ...STRINGS];
-var ALIASES = {
-  bevel: "zRadius",
-  aberration: "chromAberration",
-  edge: "edgeHighlight",
-  dome: "bevelMode",
-  blur: "blurAmount",
-  radius: "cornerRadius"
-};
-var kebab = (s) => s.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`);
-function coerce(key, raw) {
-  const v = raw.trim();
-  if (NUMBERS.includes(key)) {
-    if (key === "cornerRadius" && (v === "" || v === "auto")) return null;
-    const n = parseFloat(v);
-    return Number.isFinite(n) ? n : void 0;
-  }
-  if (BOOLEANS.includes(key)) {
-    const n = parseFloat(v);
-    return Number.isFinite(n) ? n > 0 : v === "" || v === "true" || v === "yes";
-  }
-  return v === "" || v === "none" || v === "null" ? null : v;
-}
-function fromCss(style) {
-  const out = {};
-  for (const key of ALL) {
-    const raw = style.getPropertyValue(`--glass-${kebab(key)}`);
-    if (raw.trim() !== "") {
-      const v = coerce(key, raw);
-      if (v !== void 0) out[key] = v;
-    }
-  }
-  for (const [alias, key] of Object.entries(ALIASES)) {
-    if (key in out) continue;
-    const raw = style.getPropertyValue(`--glass-${alias}`);
-    if (raw.trim() === "") continue;
-    const v = coerce(key, raw);
-    if (v !== void 0) out[key] = v;
-  }
-  return out;
-}
-function fromData(el) {
-  const out = {};
-  const main = el.dataset.glass?.trim();
-  if (main) {
-    if (main.startsWith("{")) {
-      try {
-        Object.assign(out, JSON.parse(main));
-      } catch {
-        console.warn("liquid-glass-electron: data-glass is not valid JSON:", main);
-      }
-    } else if (main in VARIANTS) {
-      out.variant = main;
-    }
-  }
-  for (const key of [...ALL, ...Object.keys(ALIASES)]) {
-    const attr = el.getAttribute(`data-glass-${kebab(key)}`);
-    if (attr === null) continue;
-    const name = ALIASES[key] ?? key;
-    const v = coerce(name, attr);
-    if (v !== void 0) out[name] = v;
-  }
-  return out;
-}
-function resolve(sources, env) {
-  const merged = { ...DEFAULTS };
-  const variant = sources.reduce((v, s) => s.variant !== void 0 ? s.variant : v, null);
-  if (variant && VARIANTS[variant]) Object.assign(merged, VARIANTS[variant]);
-  for (const s of sources) {
-    for (const [k, v] of Object.entries(s)) if (v !== void 0) merged[k] = v;
-  }
-  merged.variant = variant;
-  if (merged.button && merged.press === null) merged.press = "flatten";
-  if (merged.interactive && merged.press === null) merged.press = "bulge";
-  if (merged.variant === "identity" || !merged.adaptive) return finishFill(merged, env);
-  if (env.appearance === "tinted") {
-    merged.blurAmount = Math.max(merged.blurAmount, 0.8);
-    merged.saturation = Math.max(merged.saturation, 0.3);
-    merged.fill ??= "auto-tinted";
-    if (merged.fill === "auto") merged.fill = "auto-tinted";
-  }
-  if (env.reduceTransparency) {
-    merged.blurAmount = Math.max(merged.blurAmount, 2);
-    merged.chromAberration = 0;
-    merged.distortion = 0;
-    merged.fill = merged.fill && !merged.fill.startsWith("auto") ? merged.fill : "auto-opaque";
-  }
-  if (env.increaseContrast) {
-    merged.edgeHighlight = Math.max(merged.edgeHighlight, 0.6);
-    merged.chromAberration = 0;
-    if (!merged.fill || merged.fill === "auto") merged.fill = "auto-tinted";
-  }
-  return finishFill(merged, env);
-}
-var MACOS_COLOUR = {
-  regular: {
-    p3: [
-      [1.0109, -0.4446, -0.0421, 0.4042, -0.1385, 0.708, -0.0456, 0.4057, -0.1392, -0.4553, 1.1175, 0.4056],
-      [1.0335, -0.2837, 79e-4, 0.0945, -0.0441, 0.7589, 0.0284, 0.0977, -0.07, -0.3057, 1.1334, 0.097]
-    ],
-    srgb: [
-      [1.0352, -0.4969, -0.0143, 0.4039, -0.1223, 0.6788, -0.0302, 0.4021, -0.1298, -0.4899, 1.145, 0.4024],
-      [1.0531, -0.3563, 0.0411, 0.0911, -0.0428, 0.704, 0.0665, 0.0921, -0.0715, -0.3338, 1.1377, 0.0976]
-    ]
-  },
-  clear: {
-    p3: [
-      [0.8511, -0.1598, -0.0136, 0.2778, -0.0474, 0.7405, -0.0154, 0.2783, -0.0498, -0.1609, 0.8886, 0.278],
-      [0.9006, -0.1663, -0.0195, 0.0955, -0.048, 0.7818, -0.0187, 0.0955, -0.0514, -0.1679, 0.9342, 0.0957]
-    ],
-    srgb: [
-      [0.83, -0.1351, -0.0215, 0.2832, -0.0361, 0.7286, -0.0149, 0.2785, -0.053, -0.1526, 0.8823, 0.2793],
-      [0.917, -0.2103, 0.0107, 0.0921, -0.045, 0.7741, -0.013, 0.0941, -0.0407, -0.1883, 0.9461, 0.0931]
-    ]
-  }
-};
-var MACOS_SMALL_DARK = {
-  p3: [1.097, -0.2822, 69e-4, 0.093, -0.035, 0.8139, 0.0322, 0.095, -0.0641, -0.2836, 1.1696, 0.0934],
-  srgb: [1.1322, -0.3705, 0.0417, 0.0906, -0.0471, 0.8063, 0.0327, 0.0978, -0.0684, -0.3061, 1.176, 0.0961]
-};
-var DARK_OUTLINE = { regular: [0.605, 0.41], clear: [0.49, 0] };
-function finishFill(o, env) {
-  if (o.colorMatrix === "auto") o.colorMatrix = MACOS_COLOUR[o.variant === "clear" ? "clear" : "regular"][env.wideGamut === false ? "srgb" : "p3"][env.dark ? 1 : 0];
-  else if (o.colorMatrix !== null) {
-    const m = typeof o.colorMatrix === "string" ? o.colorMatrix.split(/[\s,]+/).filter(Boolean).map(Number) : o.colorMatrix;
-    o.colorMatrix = Array.isArray(m) && m.length === 12 && m.every(Number.isFinite) ? m : null;
-  }
-  if (env.dark && (o.variant === "regular" || o.variant === "clear")) {
-    const v = VARIANTS[o.variant];
-    if (o.outline === v.outline && o.outlineTop === v.outlineTop) [o.outline, o.outlineTop] = DARK_OUTLINE[o.variant];
-  }
-  const fills = {
-    auto: ["rgb(255 255 255 / 0.1)", "rgb(20 20 24 / 0.12)"],
-    "auto-tinted": ["rgb(250 250 252 / 0.55)", "rgb(28 28 32 / 0.55)"],
-    "auto-opaque": ["rgb(246 246 248 / 0.9)", "rgb(30 30 34 / 0.9)"]
-  };
-  if (o.fill && fills[o.fill]) o.fill = fills[o.fill][env.dark ? 1 : 0];
-  return o;
-}
-
 // src/lens.ts
 var MAP_PIXELS = 4096;
 var FINE_MAP_PIXELS = 65536;
@@ -892,6 +909,7 @@ var MAC_FILL_SIGMA = 15.6;
 var MAC_FILL_OPACITY = 0.675;
 var fillAlpha = (s) => `1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 ${+(MAC_FILL_OPACITY * s).toFixed(4)} 0`;
 var SETTLE = 120;
+var BACKGROUND = ["background-color", "background-image", "background-position", "background-size", "background-repeat", "background-origin", "background-clip"];
 var KEEP = ["1 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 1 0", "0 0 0 0 0  0 1 0 0 0  0 0 0 0 0  0 0 0 1 0", "0 0 0 0 0  0 0 0 0 0  0 0 1 0 0  0 0 0 1 0"];
 var nextId = 0;
 var mapCache = /* @__PURE__ */ new Map();
@@ -920,6 +938,8 @@ var Lens = class {
   fillAlpha = null;
   blurNode = null;
   mixNode = null;
+  // the surface (GlassOptions.surface): its image, and the composites that apply its gain and offset
+  surface = null;
   // what backdrop-filter is while there's glass, the filter's structure (rebuilt only when it changes), and whether
   // the maps are drawn for refraction 1 (the shift is linear in it, so a scale stands for it)
   filterCss = "none";
@@ -1013,7 +1033,60 @@ var Lens = class {
   setBackdrop(v) {
     this.wanted = v;
     const css = this.batched ? "none" : v;
-    if (this.el.style.getPropertyValue("backdrop-filter") !== css) this.el.style.setProperty("backdrop-filter", css);
+    if (this.paint.style.getPropertyValue("backdrop-filter") !== css) this.paint.style.setProperty("backdrop-filter", css);
+  }
+  // ---------------------------------------------------------------- glass inside glass
+  // With glass inside it, this glass paints on a layer behind its content (see setNested); otherwise on the element.
+  layer = null;
+  layerSaved = {};
+  get paint() {
+    return this.layer ?? this.el;
+  }
+  /**
+   * Glass with glass inside it, or none any more. An element with a backdrop filter is its descendants' backdrop root:
+   * glass inside it would see only what the element paints, not what's behind it. So with glass inside, this glass's
+   * own painting (the bending, its light and shadow, and the element's background over them) goes on a layer behind
+   * its content: a child at z-index -1, in the element made a stacking context (positioned, z-index 0, which paints
+   * where its backdrop filter had it paint). The element is then no backdrop root, and the glass inside sees through
+   * this one as it would through Apple's: what's behind, bent and frosted, this glass's light, and what's on it.
+   */
+  setNested(on) {
+    if (on === !!this.layer || this.shape) return;
+    const el = this.el, own = ["position", "z-index", "border-image", ...BACKGROUND];
+    if (on) {
+      const cs = getComputedStyle(el);
+      for (const p of own) this.layerSaved[p] = el.style.getPropertyValue(p);
+      const layer = document.createElement("div");
+      layer.setAttribute("aria-hidden", "true");
+      layer.dataset.lgLayer = "glass";
+      layer.style.cssText = "position:absolute;z-index:-1;pointer-events:none;margin:0;padding:0;box-sizing:border-box;border-radius:inherit;box-shadow:var(--lg-shadow, none);";
+      layer.style.inset = ["Top", "Right", "Bottom", "Left"].map((s) => `${-(parseFloat(cs.getPropertyValue(`border-${s.toLowerCase()}-width`)) || 0)}px`).join(" ");
+      if (cs.backgroundColor !== "rgba(0, 0, 0, 0)" || cs.backgroundImage !== "none" && !el.hasAttribute("data-lg-interactive")) {
+        for (const p of BACKGROUND) layer.style.setProperty(p, cs.getPropertyValue(p));
+        el.style.setProperty("background-color", "transparent");
+        el.style.setProperty("background-image", "none");
+      }
+      if (cs.position === "static") el.style.position = "relative";
+      if (cs.zIndex === "auto") el.style.zIndex = "0";
+      el.prepend(layer);
+      this.layer = layer;
+      el.toggleAttribute("data-lg-layered", true);
+      el.style.setProperty("backdrop-filter", this.saved["backdrop-filter"] || "");
+      for (const p of ["border-style", "border-width"]) el.style.setProperty(p, this.saved[p] || "");
+      if (cs.borderTopStyle !== "none") el.style.setProperty("border-image", "linear-gradient(transparent, transparent) 1");
+      else el.style.setProperty("border-image", this.saved["border-image"] || "");
+    } else {
+      this.layer.remove();
+      this.layer = null;
+      el.removeAttribute("data-lg-layered");
+      for (const p of own) {
+        if (this.layerSaved[p]) el.style.setProperty(p, this.layerSaved[p]);
+        else el.style.removeProperty(p);
+      }
+    }
+    this.setBackdrop(this.wanted);
+    this.applyLight();
+    this.changed();
   }
   /** A group draws (true) or stops drawing (false) this element's glass: its own filter goes off or back on, at once. */
   setBatched(on) {
@@ -1023,14 +1096,15 @@ var Lens = class {
   }
   /**
    * What a group needs to draw this element's glass in a filter of its own, or null if it can't: glass that doesn't
-   * bend, a free shape, a dome's per-channel maps, noise (it's in the filter's coordinates), CSS filters in front, or no
-   * map yet. `filters` are the element's own filter elements (the group copies them), `images` its map's (a grey per
-   * channel), `side` how far the map is stashed beside the element, `margin` how far the filters reach past it (and
-   * `right`, past its right side, which can be further).
+   * bend, a free shape, a dome's per-channel maps, noise (it's in the filter's coordinates), CSS filters in front, a
+   * surface (images in the element's box), glass with glass inside (it paints on a layer of its own), or no map yet.
+   * `filters` are the element's own filter elements (the group copies them), `images` its map's (a grey per channel),
+   * `side` how far the map is stashed beside the element, `margin` how far the filters reach past it (and `right`, past
+   * its right side, which can be further).
    */
   batchSource() {
     const o = this.options;
-    if (!this.bends || this.maps.length !== 1 || this.isFree() || this.shape || o.backdrop || o.distortion > 0 || this.amount() <= 0 || !this.main) return null;
+    if (!this.bends || this.maps.length !== 1 || this.isFree() || this.shape || this.layer || o.surface || o.backdrop || o.distortion > 0 || this.amount() <= 0 || !this.main) return null;
     const map = this.maps[0];
     if (!map.images[0].getAttribute("href") || !map.rimPx || !this.mapGrid) return null;
     const first = this.pre ?? this.main;
@@ -1050,7 +1124,7 @@ var Lens = class {
   structureKey() {
     const o = this.options;
     const bends = supportsSvgBackdrop() && o.refraction > 0 && o.variant !== "identity";
-    return [bends, o.backdrop, o.chromAberration > 0, o.bevelMode, o.blurAmount > 0, o.smooth, o.distortion > 0, o.opacity < 1, o.variant === "identity", o.magnify, this.isFree(), this.capped(), this.filled() ? this.host.env().dark ? "darken" : "lighten" : ""].join();
+    return [bends, o.backdrop, !!o.surface, o.chromAberration > 0, o.bevelMode, o.blurAmount > 0, o.smooth, o.distortion > 0, o.opacity < 1, o.variant === "identity", o.magnify, this.isFree(), this.capped(), this.filled() ? this.host.env().dark ? "darken" : "lighten" : ""].join();
   }
   /** A shape the element's own (rounded) box can't clip: the filter masks itself, and light and shadow are an image. */
   isFree() {
@@ -1075,6 +1149,7 @@ var Lens = class {
       this.fillAlpha?.setAttribute("values", fillAlpha(s));
       this.mixNode?.setAttribute("k2", String(o.opacity));
       this.mixNode?.setAttribute("k3", String(1 - o.opacity));
+      this.applySurface();
       if (this.passes.length === 3 && this.unitMaps) {
         const a = o.chromAberration * ABERRATION;
         this.passes.forEach((p, k) => p.spread = 1 + (k - 1) * a);
@@ -1083,6 +1158,18 @@ var Lens = class {
       this.setBackdrop(s > 0 ? this.filterCss : "none");
     }
     this.layout(true);
+  }
+  /** The surface's images and, at strength s, its gain and offset: a gain of 1 − s·(1 − g), an offset of s·(o − ½). */
+  applySurface() {
+    const n = this.surface;
+    if (!n) return;
+    const s = this.amount();
+    n.images.forEach((image2, i) => {
+      const url = this.options.surface?.[i] ?? "";
+      if (image2.getAttribute("href") !== url) image2.setAttribute("href", url);
+    });
+    setAttrs(n.gain, { k1: +s.toFixed(4), k2: +(1 - s).toFixed(4) });
+    setAttrs(n.offset, { k2: 1, k3: +s.toFixed(4), k4: +(-s / 2).toFixed(4) });
   }
   /** The strength, 0..1. */
   amount() {
@@ -1143,7 +1230,7 @@ var Lens = class {
     const o = this.options;
     this.pre?.remove();
     this.main?.remove();
-    this.pre = this.main = this.colour = this.blurNode = this.mixNode = this.capNode = this.fillBlur = this.fillAlpha = null;
+    this.pre = this.main = this.colour = this.blurNode = this.mixNode = this.capNode = this.fillBlur = this.fillAlpha = this.surface = null;
     this.maps = [];
     this.passes = [];
     this.reach = 0;
@@ -1241,8 +1328,18 @@ var Lens = class {
       this.mixNode = svgEl("feComposite", { in: "bent", in2: src, operator: "arithmetic", k2: o.opacity, k3: 1 - o.opacity, result: "mixed" });
       second.append(this.mixNode);
     }
+    let out = this.mixNode ? "mixed" : "bent";
+    if (o.surface) {
+      const images2 = ["gain", "offset"].map((result, i) => svgEl("feImage", { href: o.surface[i], preserveAspectRatio: "none", result }));
+      const gain = svgEl("feComposite", { in: out, in2: "gain", operator: "arithmetic", result: "gained" });
+      const offset = svgEl("feComposite", { in: "gained", in2: "offset", operator: "arithmetic", result: "surfaced0" });
+      second.append(images2[0], gain, images2[1], offset, svgEl("feComposite", { in: "surfaced0", in2: out, operator: "in", result: "surfaced" }));
+      this.surface = { images: images2, gain, offset };
+      this.applySurface();
+      out = "surfaced";
+    }
     if (this.isFree()) {
-      second.append(svgEl("feComposite", { in: this.mixNode ? "mixed" : "bent", in2: "map0_cover", operator: "in" }));
+      second.append(svgEl("feComposite", { in: out, in2: "map0_cover", operator: "in" }));
     }
     const defs2 = filterDefs();
     if (fringe) {
@@ -1349,6 +1446,7 @@ var Lens = class {
   place() {
     const { w, h } = this, m = this.margin;
     for (const f of [this.pre, this.main]) if (f) setAttrs(f, { x: 0, y: 0, width: w, height: h });
+    if (this.surface) for (const image2 of this.surface.images) setAttrs(image2, { x: 0, y: 0, width: w, height: h });
     if (!this.maps.length) return;
     const r = this.region.w ? this.region : { x: 0, y: 0, w, h };
     const rect = this.mapRect ?? { x: -m, y: -m, w: r.w + 2 * m, h: r.h + 2 * m };
@@ -1551,14 +1649,14 @@ var Lens = class {
       return;
     }
     if (!light) {
-      this.el.style.setProperty("border-image", this.saved["border-image"] || "");
+      this.paint.style.setProperty("border-image", this.layer ? "" : this.saved["border-image"] || "");
       return;
     }
-    if (getComputedStyle(this.el).borderTopStyle === "none") {
-      this.el.style.setProperty("border-style", "solid");
-      this.el.style.setProperty("border-width", "0");
+    if (this.layer || getComputedStyle(this.el).borderTopStyle === "none") {
+      this.paint.style.setProperty("border-style", "solid");
+      this.paint.style.setProperty("border-width", "0");
     }
-    this.el.style.setProperty("border-image", light.free !== void 0 ? `${image2(light.url, light.empty)} 0 fill / 0 / ${light.free}px stretch` : `${image2(light.url, light.empty)} ${light.slice} fill / ${light.edge}px`);
+    this.paint.style.setProperty("border-image", light.free !== void 0 ? `${image2(light.url, light.empty)} 0 fill / 0 / ${light.free}px stretch` : `${image2(light.url, light.empty)} ${light.slice} fill / ${light.edge}px`);
   }
   // ---------------------------------------------------------------- strength, hover, press, drag
   applyStrength() {
@@ -1699,6 +1797,7 @@ var Lens = class {
     }
   }
   destroy() {
+    this.setNested(false);
     clearTimeout(this.settleTimer);
     cancelAnimationFrame(this.tween);
     cancelAnimationFrame(this.following);
@@ -2726,6 +2825,7 @@ function glass(el, options = {}) {
     lenses.set(el, lens);
     observe(lens);
     autoGroup(el);
+    renest(el);
   }
   const l = lens;
   return {
@@ -2741,6 +2841,9 @@ function glass(el, options = {}) {
     destroy: () => unglass(el)
   };
 }
+function renest(el) {
+  for (let p = el; p; p = p.parentElement) lenses.get(p)?.setNested(!!p.querySelector("[data-liquid-glass]"));
+}
 function container(el, options = {}) {
   installStyles();
   watchEnvironment();
@@ -2752,11 +2855,13 @@ function container(el, options = {}) {
   }
   const c = new GlassContainer(el, { ...fromContainerData(el), ...options }, host);
   containers.set(el, c);
+  renest(el);
   return c;
 }
 function uncontainer(el) {
   containers.get(el)?.destroy();
   containers.delete(el);
+  renest(el);
 }
 function fromContainerData(el) {
   const spacing = parseFloat(el.dataset.glassContainer ?? "");
@@ -2792,6 +2897,7 @@ function unglass(el) {
   sizes?.unobserve(el);
   lens.destroy();
   lenses.delete(el);
+  renest(el.parentElement);
 }
 function glassOf(el) {
   return lenses.has(el) ? glass(el) : void 0;

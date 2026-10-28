@@ -64,6 +64,13 @@ export interface GlassOptions {
     /** a colour laid over the glass, as Apple's .tint(_:) and tinted buttons are; null = none */
     fill: string | null;
     /**
+     * how the glass's surface changes what it shows, per pixel: out = gain × glass + offset, clipped. What one blend
+     * can't draw: Apple's knobs add light to their rim and take it away along their edge, by the same amount over any
+     * backdrop. Two images' URLs, each stretched over the element's box, in greys: the gain, and the offset (½ is none,
+     * from −½ to ½). In CSS, --glass-surface: url(…) url(…). null = none
+     */
+    surface: [string, string] | null;
+    /**
      * the backdrop's colour under the glass as a colour matrix: 12 numbers, three rows of red, green and blue gains and
      * an offset (0..1), in place of saturation, brightness and tint; 'auto' = macOS 27's, for the variant and light or
      * dark; null = none
@@ -102,6 +109,15 @@ export interface GlassOptions {
 export declare const DEFAULTS: GlassOptions;
 /** Apple's glass variants, as option sets. `fill` and `colorMatrix` values that depend on light or dark are resolved later. */
 export declare const VARIANTS: Record<Variant, Partial<GlassOptions>>;
+/**
+ * What a number option's custom property is where nothing sets it. They're registered as numbers (see
+ * NUMBER_PROPERTIES), so they always have a value: this one, which isn't an option's.
+ */
+export declare const UNSET = -99999;
+export declare const NUMBER_PROPERTIES: {
+    name: string;
+    syntax: string;
+}[];
 /** Options set as CSS custom properties (--glass-chrom-aberration, or the short --glass-aberration) on the element. */
 export declare function fromCss(style: CSSStyleDeclaration): Partial<GlassOptions>;
 /**

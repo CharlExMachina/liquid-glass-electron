@@ -80,9 +80,11 @@ Apple's Clear/Tinted setting has no OS API to read on any platform, so an app of
 
 ## Three CSS rules to design around
 
-1. **Glass inside glass only sees the outer glass's own painting**, not what's behind it: the element with the backdrop
-   filter is the inner one's backdrop root. Apple's rule is the same (don't stack glass on glass). Put controls on a glass
-   bar as plain elements, or give them `refraction: 0` (light and fill, no bending).
+1. **Glass inside glass works, as Apple's does**: the outer glass then paints on a layer behind its content (an element
+   with a backdrop filter would be the inner one's backdrop root, and the inner glass would see only its painting), so
+   the inner glass sees what's behind, bent and frosted, and what's on it. Inside such glass, a `mix-blend-mode` cuts the
+   outer glass off from what's behind it (blending isolates its stacking context, the layer's too): put the blended
+   element in one of its own (`isolation: isolate` on its parent).
 2. **An ancestor with `opacity` below 1, a `filter`, a `mask`, `clip-path` or `mix-blend-mode` turns the bending off**
    inside it. Fade glass with its own opacity, not a wrapper's.
 3. **The glass draws its light with `border-image`**, so a glass element's own border isn't drawn (its width still lays

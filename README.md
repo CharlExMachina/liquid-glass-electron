@@ -71,8 +71,8 @@ data attributes are picked up, and a transition or animation of a `--glass-*` pr
 .knob:active { --glass-strength: 1; background: transparent; scale: 1.4; }   /* white at rest, glass while held */
 ```
 
-(`--glass-strength` is registered as a number so it interpolates; register others with `@property` to transition
-them.)
+(Every number option's property is registered as a number, so it interpolates: transition any of them. Don't register
+one yourself with `@property`: its initial value would reach every glass element.)
 
 Custom properties inherit, so one set on `:root` reaches every glass element: give the page's own variables other
 names. Libre Hub's earlier engine's short names work too (`--glass-bevel` for `zRadius`, `--glass-aberration`,
@@ -157,6 +157,7 @@ And this library's:
 | `shape` | `rect` | `rect`, `capsule`, `circle`, `concentric` (the radius of the glass it sits in, less the inset), `squircle` (continuous corners), `path` |
 | `path`, `pathBox` | – | For `shape: 'path'`: SVG path data, in the element's px or in a viewBox (`"0 0 100 100"`) stretched over it |
 | `fill` | – | A colour over the glass (Apple's tinted glass, prominent buttons). Painted with the light, so a CSS reset can't remove it |
+| `surface` | – | How the glass's surface changes what it shows, per pixel, as no blend can: two images' URLs, greys stretched over the element, a gain and an offset (½ is none): out = gain × glass + offset. Apple's knobs add light at the rim and take it away at the edge (the controls page measures and draws macOS's). In CSS, `--glass-surface: url(…) url(…)` |
 | `tint` | – | The colour `tintStrength` multiplies toward |
 | `backdrop` | – | CSS filter functions applied before the glass, as written (`blur(2px) saturate(1.4)`), for a look already written in CSS |
 | `interactive` | false | Apple's `.interactive()`: a press grows the glass, bends it more and lights it where it's pressed |
@@ -417,9 +418,11 @@ liquidglass's look is two; its blur fill and dark cap add nodes Skia draws with 
   at `strength` 0 has no filter and costs nothing; so does `refraction: 0` (light and fill only). A container draws
   all of its members with one filter, and so does a group: sibling glass that doesn't overlap, with nothing painted
   between, is grouped by itself.
-- **Glass inside glass only sees the outer glass's own painting**, not what's behind it, and an ancestor with
-  `opacity` below 1, a `filter`, a `mask`, `clip-path` or `mix-blend-mode` turns the bending off inside it. These are
-  CSS's rules (the backdrop root). Apple's design rule is the same: don't stack glass on glass.
+- **An ancestor with `opacity` below 1, a `filter`, a `mask`, `clip-path` or `mix-blend-mode` turns the bending off**
+  inside it: CSS's rule (the backdrop root). Glass inside glass is fine (the outer glass paints on a layer behind its
+  content, so the inner one sees through it, as Apple's does), but inside such glass, keep a `mix-blend-mode` in an
+  element of its own (`isolation: isolate` on its parent): blending isolates the outer glass, which then sees nothing
+  behind it.
 - **The page can't read the pixels behind an element**, so the glass can't switch between light and dark by itself, as
   Apple's small controls do over changing content. Set the theme (`data-glass-theme`, `setEnvironment({ dark })`).
 - **A glass element's own border isn't drawn**: the light is a `border-image`. Its border width still lays out. Use

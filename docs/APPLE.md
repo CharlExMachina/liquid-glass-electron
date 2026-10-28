@@ -114,7 +114,6 @@ capsules of glass, a floating tab bar with a separate search button, and a bar t
 ## Apple's design rules, which hold here too
 
 - Glass is for the layer that floats over the content (navigation, controls), not for the content.
-- Don't put glass on glass. In CSS it can't work anyway: glass inside glass only sees the glass's own painting, not
-  what's behind it (the element with the backdrop filter is the inner one's backdrop root). Put controls on a glass bar
-  as plain elements, or with `refraction: 0` (light and fill only).
+- Don't put glass on glass, but for a control's own glass on a bar or panel (a knob held, as Apple's are): that works
+  here as on macOS, the inner glass seeing the outer and what's behind it.
 - Use clear glass only over media, with bold content on it, or with a dimming layer.

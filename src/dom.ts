@@ -2,6 +2,7 @@
 // Everything goes through the CSSOM and setAttribute on SVG nodes, never inline <style> or style attributes, so a
 // strict Content-Security-Policy (style-src 'self') doesn't block it. Images are data: URLs (img-src needs data:).
 import type { Pixels } from './maps.ts';
+import { NUMBER_PROPERTIES, UNSET } from './options.ts';
 
 export const SVG_NS = 'http://www.w3.org/2000/svg';
 
@@ -148,16 +149,26 @@ export function installStyles() {
 :where([data-liquid-glass]) { box-shadow: var(--lg-shadow, none); }
 :where([data-liquid-glass][data-lg-pressable]) { cursor: pointer; -webkit-tap-highlight-color: transparent; transition: scale 0.32s cubic-bezier(0.3, 1.6, 0.5, 1); }
 :where([data-liquid-glass][data-lg-interactive]) { background-image: radial-gradient(circle at var(--lg-x, 50%) var(--lg-y, 50%), rgb(255 255 255 / var(--lg-glow, 0)), transparent 70%); }
+:where([data-liquid-glass][data-lg-layered]) { box-shadow: none; }
+:where([data-liquid-glass][data-lg-interactive][data-lg-layered]) { background-image: none; }
+:where([data-liquid-glass][data-lg-interactive]) > :where([data-lg-layer='glass']) { background-image: radial-gradient(circle at var(--lg-x, 50%) var(--lg-y, 50%), rgb(255 255 255 / var(--lg-glow, 0)), transparent 70%); }
 :where([data-liquid-glass][data-lg-floating]) { touch-action: none; cursor: grab; user-select: none; }
 :where([data-liquid-glass][data-lg-floating][data-lg-dragging]) { cursor: grabbing; }
 `);
   document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
-  // --glass-strength as a number, so CSS transitions and animations interpolate it (the glass follows them)
-  try {
-    CSS.registerProperty({ name: '--glass-strength', syntax: '<number>', inherits: false, initialValue: '1' });
-  } catch {
-    // registered already
-  }
+  // --glass-strength as a number, so CSS transitions and animations interpolate it (the glass follows them); and the
+  // other number options, UNSET where nothing sets them. Registered here, a page's own @property for one (with an
+  // initial value of its own) doesn't count: it would give every element that value, glass that should have its
+  // variant's instead.
+  const register = (name: string, syntax: string, inherits: boolean, initialValue: string) => {
+    try {
+      CSS.registerProperty({ name, syntax, inherits, initialValue });
+    } catch {
+      // registered already
+    }
+  };
+  register('--glass-strength', '<number>', false, '1');
+  for (const { name, syntax } of NUMBER_PROPERTIES) register(name, syntax, true, String(UNSET));
 }
 
 /**

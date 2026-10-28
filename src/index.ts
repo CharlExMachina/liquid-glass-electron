@@ -148,6 +148,7 @@ export function glass(el: HTMLElement, options: Partial<GlassOptions> = {}): Gla
     lenses.set(el, lens);
     observe(lens);
     autoGroup(el);
+    renest(el);
   }
   const l = lens;
   return {
@@ -162,6 +163,15 @@ export function glass(el: HTMLElement, options: Partial<GlassOptions> = {}): Gla
     drawn: () => l.whenDrawn(),
     destroy: () => unglass(el),
   };
+}
+
+/**
+ * Glass inside glass: glass with any inside it (an element's or a container's) paints its own on a layer behind its
+ * content, so what's inside sees through it (see Lens.setNested). Checked for `el` and everything around it, when
+ * glass comes or goes.
+ */
+function renest(el: HTMLElement | null) {
+  for (let p = el; p; p = p.parentElement) lenses.get(p)?.setNested(!!p.querySelector('[data-liquid-glass]'));
 }
 
 /**
@@ -180,6 +190,7 @@ export function container(el: HTMLElement, options: ContainerOptions = {}): Glas
   }
   const c = new GlassContainer(el, { ...fromContainerData(el), ...options }, host);
   containers.set(el, c);
+  renest(el);
   return c;
 }
 
@@ -187,6 +198,7 @@ export function container(el: HTMLElement, options: ContainerOptions = {}): Glas
 export function uncontainer(el: HTMLElement) {
   containers.get(el)?.destroy();
   containers.delete(el);
+  renest(el);
 }
 
 function fromContainerData(el: HTMLElement): ContainerOptions {
@@ -232,6 +244,7 @@ export function unglass(el: HTMLElement) {
   sizes?.unobserve(el);
   lens.destroy();
   lenses.delete(el);
+  renest(el.parentElement);
 }
 
 /** The glass handle of an element, if it has one. */
