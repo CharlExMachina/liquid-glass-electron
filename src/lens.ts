@@ -35,6 +35,8 @@ const MAC_FILL_SIGMA = 15.6, MAC_FILL_OPACITY = 0.675;
 const fillAlpha = (s: number) => `1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 ${+(MAC_FILL_OPACITY * s).toFixed(4)} 0`;
 // How long a size has to hold before the map and light are drawn for it, ms.
 const SETTLE = 120;
+// What of an element's background its glass's layer paints instead, with glass inside it (see setNested)
+const BACKGROUND = ['background-color', 'background-image', 'background-position', 'background-size', 'background-repeat', 'background-origin', 'background-clip'];
 // Keeps the green channel only, and so on: the fringe's three passes are added up.
 const KEEP = ['1 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 1 0', '0 0 0 0 0  0 1 0 0 0  0 0 0 0 0  0 0 0 1 0', '0 0 0 0 0  0 0 0 0 0  0 0 1 0 0  0 0 0 1 0'];
 
@@ -89,6 +91,8 @@ export class Lens {
   private fillAlpha: SVGFEColorMatrixElement | null = null;
   private blurNode: SVGFEGaussianBlurElement | null = null;
   private mixNode: SVGFECompositeElement | null = null;
+  // the surface (GlassOptions.surface): its image, and the composites that apply its gain and offset
+  private surface: { images: [SVGFEImageElement, SVGFEImageElement]; gain: SVGFECompositeElement; offset: SVGFECompositeElement } | null = null;
   // what backdrop-filter is while there's glass, the filter's structure (rebuilt only when it changes), and whether
   // the maps are drawn for refraction 1 (the shift is linear in it, so a scale stands for it)
   private filterCss = 'none';
@@ -191,7 +195,67 @@ export class Lens {
   private setBackdrop(v: string) {
     this.wanted = v;
     const css = this.batched ? 'none' : v;
-    if (this.el.style.getPropertyValue('backdrop-filter') !== css) this.el.style.setProperty('backdrop-filter', css);
+    if (this.paint.style.getPropertyValue('backdrop-filter') !== css) this.paint.style.setProperty('backdrop-filter', css);
+  }
+
+  // ---------------------------------------------------------------- glass inside glass
+
+  // With glass inside it, this glass paints on a layer behind its content (see setNested); otherwise on the element.
+  private layer: HTMLDivElement | null = null;
+  private layerSaved: Record<string, string> = {};
+  private get paint(): HTMLElement {
+    return this.layer ?? this.el;
+  }
+
+  /**
+   * Glass with glass inside it, or none any more. An element with a backdrop filter is its descendants' backdrop root:
+   * glass inside it would see only what the element paints, not what's behind it. So with glass inside, this glass's
+   * own painting (the bending, its light and shadow, and the element's background over them) goes on a layer behind
+   * its content: a child at z-index -1, in the element made a stacking context (positioned, z-index 0, which paints
+   * where its backdrop filter had it paint). The element is then no backdrop root, and the glass inside sees through
+   * this one as it would through Apple's: what's behind, bent and frosted, this glass's light, and what's on it.
+   */
+  setNested(on: boolean) {
+    if (on === !!this.layer || this.shape) return;
+    const el = this.el, own = ['position', 'z-index', 'border-image', ...BACKGROUND];
+    if (on) {
+      const cs = getComputedStyle(el);
+      for (const p of own) this.layerSaved[p] = el.style.getPropertyValue(p);
+      const layer = document.createElement('div');
+      layer.setAttribute('aria-hidden', 'true');
+      layer.dataset.lgLayer = 'glass';
+      layer.style.cssText = 'position:absolute;z-index:-1;pointer-events:none;margin:0;padding:0;box-sizing:border-box;border-radius:inherit;box-shadow:var(--lg-shadow, none);';
+      // over the element's border box (the layer is placed in its padding box)
+      layer.style.inset = ['Top', 'Right', 'Bottom', 'Left'].map((s) => `${-(parseFloat(cs.getPropertyValue(`border-${s.toLowerCase()}-width`)) || 0)}px`).join(' ');
+      // the element's own background, as it is now, over the glass as before (painted by the element, it would be
+      // under the layer, and bent)
+      if (cs.backgroundColor !== 'rgba(0, 0, 0, 0)' || (cs.backgroundImage !== 'none' && !el.hasAttribute('data-lg-interactive'))) {
+        for (const p of BACKGROUND) layer.style.setProperty(p, cs.getPropertyValue(p));
+        el.style.setProperty('background-color', 'transparent');
+        el.style.setProperty('background-image', 'none');
+      }
+      if (cs.position === 'static') el.style.position = 'relative';
+      if (cs.zIndex === 'auto') el.style.zIndex = '0';
+      el.prepend(layer);
+      this.layer = layer;
+      el.toggleAttribute('data-lg-layered', true);
+      // the element's own filter and border are as the page has them; a border it has isn't drawn, as on glass
+      el.style.setProperty('backdrop-filter', this.saved['backdrop-filter'] || '');
+      for (const p of ['border-style', 'border-width']) el.style.setProperty(p, this.saved[p] || '');
+      if (cs.borderTopStyle !== 'none') el.style.setProperty('border-image', 'linear-gradient(transparent, transparent) 1');
+      else el.style.setProperty('border-image', this.saved['border-image'] || '');
+    } else {
+      this.layer!.remove();
+      this.layer = null;
+      el.removeAttribute('data-lg-layered');
+      for (const p of own) {
+        if (this.layerSaved[p]) el.style.setProperty(p, this.layerSaved[p]);
+        else el.style.removeProperty(p);
+      }
+    }
+    this.setBackdrop(this.wanted);
+    this.applyLight();
+    this.changed();
   }
 
   /** A group draws (true) or stops drawing (false) this element's glass: its own filter goes off or back on, at once. */
@@ -203,14 +267,15 @@ export class Lens {
 
   /**
    * What a group needs to draw this element's glass in a filter of its own, or null if it can't: glass that doesn't
-   * bend, a free shape, a dome's per-channel maps, noise (it's in the filter's coordinates), CSS filters in front, or no
-   * map yet. `filters` are the element's own filter elements (the group copies them), `images` its map's (a grey per
-   * channel), `side` how far the map is stashed beside the element, `margin` how far the filters reach past it (and
-   * `right`, past its right side, which can be further).
+   * bend, a free shape, a dome's per-channel maps, noise (it's in the filter's coordinates), CSS filters in front, a
+   * surface (images in the element's box), glass with glass inside (it paints on a layer of its own), or no map yet.
+   * `filters` are the element's own filter elements (the group copies them), `images` its map's (a grey per channel),
+   * `side` how far the map is stashed beside the element, `margin` how far the filters reach past it (and `right`, past
+   * its right side, which can be further).
    */
   batchSource(): { filters: SVGFilterElement[]; images: SVGFEImageElement[]; tables: [SVGFEComponentTransferElement, SVGFEComponentTransferElement]; shifts: SVGFEOffsetElement[]; side: number; margin: number; right: number; grid: MapGrid; mapMargin: number } | null {
     const o = this.options;
-    if (!this.bends || this.maps.length !== 1 || this.isFree() || this.shape || o.backdrop || o.distortion > 0 || this.amount() <= 0 || !this.main) return null;
+    if (!this.bends || this.maps.length !== 1 || this.isFree() || this.shape || this.layer || o.surface || o.backdrop || o.distortion > 0 || this.amount() <= 0 || !this.main) return null;
     const map = this.maps[0];
     if (!map.images[0].getAttribute('href') || !map.rimPx || !this.mapGrid) return null;
     const first = this.pre ?? this.main;
@@ -228,7 +293,7 @@ export class Lens {
   private structureKey() {
     const o = this.options;
     const bends = supportsSvgBackdrop() && o.refraction > 0 && o.variant !== 'identity';
-    return [bends, o.backdrop, o.chromAberration > 0, o.bevelMode, o.blurAmount > 0, o.smooth, o.distortion > 0, o.opacity < 1, o.variant === 'identity', o.magnify, this.isFree(), this.capped(), this.filled() ? (this.host.env().dark ? 'darken' : 'lighten') : ''].join();
+    return [bends, o.backdrop, !!o.surface, o.chromAberration > 0, o.bevelMode, o.blurAmount > 0, o.smooth, o.distortion > 0, o.opacity < 1, o.variant === 'identity', o.magnify, this.isFree(), this.capped(), this.filled() ? (this.host.env().dark ? 'darken' : 'lighten') : ''].join();
   }
 
   /** A shape the element's own (rounded) box can't clip: the filter masks itself, and light and shadow are an image. */
@@ -256,6 +321,7 @@ export class Lens {
       this.fillAlpha?.setAttribute('values', fillAlpha(s));
       this.mixNode?.setAttribute('k2', String(o.opacity));
       this.mixNode?.setAttribute('k3', String(1 - o.opacity));
+      this.applySurface();
       if (this.passes.length === 3 && this.unitMaps) {
         const a = o.chromAberration * ABERRATION;
         this.passes.forEach((p, k) => (p.spread = 1 + (k - 1) * a));
@@ -264,6 +330,19 @@ export class Lens {
       this.setBackdrop(s > 0 ? this.filterCss : 'none');
     }
     this.layout(true);
+  }
+
+  /** The surface's images and, at strength s, its gain and offset: a gain of 1 − s·(1 − g), an offset of s·(o − ½). */
+  private applySurface() {
+    const n = this.surface;
+    if (!n) return;
+    const s = this.amount();
+    n.images.forEach((image, i) => {
+      const url = this.options.surface?.[i] ?? '';
+      if (image.getAttribute('href') !== url) image.setAttribute('href', url);
+    });
+    setAttrs(n.gain, { k1: +s.toFixed(4), k2: +(1 - s).toFixed(4) });
+    setAttrs(n.offset, { k2: 1, k3: +s.toFixed(4), k4: +(-s / 2).toFixed(4) });
   }
 
   /** The strength, 0..1. */
@@ -336,7 +415,7 @@ export class Lens {
     const o = this.options;
     this.pre?.remove();
     this.main?.remove();
-    this.pre = this.main = this.colour = this.blurNode = this.mixNode = this.capNode = this.fillBlur = this.fillAlpha = null;
+    this.pre = this.main = this.colour = this.blurNode = this.mixNode = this.capNode = this.fillBlur = this.fillAlpha = this.surface = null;
     this.maps = [];
     this.passes = [];
     this.reach = 0;
@@ -459,10 +538,23 @@ export class Lens {
       this.mixNode = svgEl('feComposite', { in: 'bent', in2: src, operator: 'arithmetic', k2: o.opacity, k3: 1 - o.opacity, result: 'mixed' });
       second.append(this.mixNode);
     }
+    let out = this.mixNode ? 'mixed' : 'bent';
+    if (o.surface) {
+      // The surface: the glass times one image, plus the other less ½ (see GlassOptions.surface), clipped as
+      // compositing clips. They're greys, as the maps are: colour management (sRGB to the display's gamut) would mix a
+      // colour's channels. Where the backdrop is transparent (a transparent window's), it stays so.
+      const images = (['gain', 'offset'] as const).map((result, i) => svgEl('feImage', { href: o.surface![i], preserveAspectRatio: 'none', result })) as [SVGFEImageElement, SVGFEImageElement];
+      const gain = svgEl('feComposite', { in: out, in2: 'gain', operator: 'arithmetic', result: 'gained' });
+      const offset = svgEl('feComposite', { in: 'gained', in2: 'offset', operator: 'arithmetic', result: 'surfaced0' });
+      second.append(images[0], gain, images[1], offset, svgEl('feComposite', { in: 'surfaced0', in2: out, operator: 'in', result: 'surfaced' }));
+      this.surface = { images, gain, offset };
+      this.applySurface();
+      out = 'surfaced';
+    }
     if (this.isFree()) {
       // the shape: the map's blue channel is the distance to its edge, its table turned it into coverage; as alpha, it
       // cuts the glass to the shape (the backdrop shows through outside it, as if there were no element)
-      second.append(svgEl('feComposite', { in: this.mixNode ? 'mixed' : 'bent', in2: 'map0_cover', operator: 'in' }));
+      second.append(svgEl('feComposite', { in: out, in2: 'map0_cover', operator: 'in' }));
     }
 
     const defs = filterDefs();
@@ -584,6 +676,7 @@ export class Lens {
   private place() {
     const { w, h } = this, m = this.margin;
     for (const f of [this.pre, this.main]) if (f) setAttrs(f, { x: 0, y: 0, width: w, height: h });
+    if (this.surface) for (const image of this.surface.images) setAttrs(image, { x: 0, y: 0, width: w, height: h });
     if (!this.maps.length) return;
     // the map's rectangle: `m` past the shape's part of the box on each side, or a little more on a group's grid
     const r = this.region.w ? this.region : { x: 0, y: 0, w, h };
@@ -802,16 +895,16 @@ export class Lens {
       return;
     }
     if (!light) {
-      this.el.style.setProperty('border-image', this.saved['border-image'] || '');
+      this.paint.style.setProperty('border-image', this.layer ? '' : this.saved['border-image'] || '');
       return;
     }
     // border-image needs a border style to be drawn at all (any width, even 0); without a border of its own, the
-    // element gets a solid one 0 px wide, so its layout doesn't move
-    if (getComputedStyle(this.el).borderTopStyle === 'none') {
-      this.el.style.setProperty('border-style', 'solid');
-      this.el.style.setProperty('border-width', '0');
+    // element gets a solid one 0 px wide, so its layout doesn't move (the layer never has one)
+    if (this.layer || getComputedStyle(this.el).borderTopStyle === 'none') {
+      this.paint.style.setProperty('border-style', 'solid');
+      this.paint.style.setProperty('border-width', '0');
     }
-    this.el.style.setProperty('border-image', light.free !== undefined
+    this.paint.style.setProperty('border-image', light.free !== undefined
       ? `${image(light.url, light.empty)} 0 fill / 0 / ${light.free}px stretch`
       : `${image(light.url, light.empty)} ${light.slice} fill / ${light.edge}px`);
   }
@@ -971,6 +1064,7 @@ export class Lens {
   }
 
   destroy() {
+    this.setNested(false);
     clearTimeout(this.settleTimer);
     cancelAnimationFrame(this.tween);
     cancelAnimationFrame(this.following);

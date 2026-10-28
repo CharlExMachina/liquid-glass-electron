@@ -54,7 +54,8 @@
     "test:native": "node scripts/build.mjs && node scripts/electron.mjs test/native/run.mjs",
     "demo": "node scripts/build.mjs && node scripts/electron.mjs demo/main.mjs",
     "playground": "node scripts/build.mjs && node scripts/electron.mjs demo/main.mjs --page=playground",
-    "playground:native": "node scripts/native.mjs",
+    "demo:native": "node scripts/native.mjs",
+    "playground:native": "node scripts/native.mjs --page=playground",
     "bench": "node scripts/bench.mjs",
     "compare": "node scripts/build.mjs && node scripts/electron.mjs bench/compare/run.mjs",
     "media": "node scripts/media.mjs"

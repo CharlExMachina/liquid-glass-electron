@@ -37,12 +37,12 @@ Options can also come from data attributes (`data-glass-refraction="0.4"`, `data
 
 | You want | Do this | See |
 |---|---|---|
-| A control that turns to glass only while touched (iOS 26 slider and switch knobs) | The element's own CSS background is the solid look; animate `strength` 0 → 1 (or transition `--glass-strength`) while fading that background out, and `scale` it up. For Apple's look use `bevelMode: 2` on a slider's knob (the rim magnifies toward the middle, so a track flares where it enters) and `bevelMode: 3` on a switch's (it shrinks what's behind, as iOS's does), `baseBrightness: 0` on light pages, and draw the rim's line and shading in CSS (`.ios-knob::after`; the switch's is an image, `surface()`). Keep a trace of frost (`blurAmount` above 0) on glass whose frost is transitioned: 0 → above 0 changes the filter's structure, which costs a frame | `demo/demos/ios.js`, `demo/demos/controls.js` |
+| A control that turns to glass only while touched (iOS 26 slider and switch knobs) | The element's own CSS background is the solid look; animate `strength` 0 → 1 (or transition `--glass-strength`) while fading that background out, and `scale` it up. For Apple's look use `bevelMode: 2` on a slider's knob (the rim magnifies toward the middle, so a track flares where it enters) and `bevelMode: 3` on a switch's (it shrinks what's behind, as iOS's does), `baseBrightness: 0` on light pages, and draw the rim's line and shading in CSS (`.ios-knob::after`; the switch's is an image, `surface()`). macOS's knobs (`controls.js`) are measured: their surface adds light at the rim and takes it away at the edge, which no blend can, so it's the glass's own `surface` (a gain and an offset), and the knobs sit in a glass panel. Keep a trace of frost (`blurAmount` above 0) on glass whose frost is transitioned: 0 → above 0 changes the filter's structure, which costs a frame | `demo/demos/ios.js`, `demo/demos/controls.js` |
 | Glass that comes and goes within any animation | `g.set({ strength })` each frame, `g.animate({ strength })`, or a CSS transition/keyframes on `--glass-strength` | `demo/demos/ios.js` |
 | A lens that slides between positions (segmented control) | One glass element moved with `translate`; `strength` up while it moves, down when it lands | `demo/demos/ios.js` |
 | A menu or sheet that grows out of its button | `await morph(button, menu)` (menu laid out, `visibility: hidden`); back: `morph(menu, button)` | `demo/demos/morph.js` |
 | A pop-up menu that swells out of a small blob | The menu is glass; animate its own `scale` from small with a spring while `g.animate({ strength: 1 })` runs, items fading in after (the glass is in the element's space, so it follows the transform) | `demo/demos/ios.js` |
-| Any option driven by CSS transitions | `--glass-strength` is registered as a number already; register others yourself so they interpolate: `@property --glass-blur-amount { syntax: '<number>'; inherits: false; initial-value: 0; }`, then transition it. Don't also pass that option to `glass()`: options passed there win over CSS | `demo/demos/ios.css` |
+| Any option driven by CSS transitions | Every number option's `--glass-*` property is registered as a number already, so it interpolates: transition it. Don't register one yourself with an initial value (a page's `@property` would give every element that value, glass that should have its variant's instead; the library's registration wins anyway). Don't also pass that option to `glass()`: options passed there win over CSS | `demo/demos/ios.css` |
 | Notifications, popovers appearing | `materialize(el, 'in')`, `materialize(el, 'out')` | `demo/demos/toasts.js` |
 | Many glass elements on screen at once (a grid of tiles, a long toolbar, a dock) | Nothing: sibling glass that doesn't overlap shares one backdrop filter by itself (each element stays glass of its own and looks the same). To change them together and keep them one filter, `const g = glassGroup(parentOrElements, options)`: `g.set()`/`g.animate()` change every member at once; a member changed on its own gets its own filter while it differs. `group: false` keeps an element out. See the rules for groups below | `demo/demos/many.js` |
 | Grouped buttons on one piece of glass | Make the group element glass (`shape: 'capsule'`), buttons plain inside | `demo/demos/toolbar.js` |
@@ -76,9 +76,9 @@ Options can also come from data attributes (`data-glass-refraction="0.4"`, `data
 
 ## Rules that silently break glass
 
-1. **No glass inside glass.** An element with a backdrop filter is its descendants' backdrop root: inner glass only
-   sees the outer glass's own painting. Put controls on a glass bar as plain elements, or with `refraction: 0` (light
-   and fill only).
+1. **Inside glass that has glass in it, no `mix-blend-mode`** except in an element of its own (`isolation: isolate`
+   on its parent): blending isolates the outer glass's stacking context, and its glass, a layer in it, goes blind. Glass
+   inside glass itself is fine (the outer one paints on a layer behind its content, and the inner sees through it).
 2. **No `opacity` < 1, `filter`, `mask`, `clip-path` or `mix-blend-mode` on an ancestor** of glass: the bending turns
    off. Fade glass with its own `opacity` or `strength`.
 3. **The element's own border isn't drawn** (the light is a `border-image`). Use `edgeHighlight`.

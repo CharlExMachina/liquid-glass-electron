@@ -1,12 +1,15 @@
 // The native reference: Apple's own Liquid Glass (SwiftUI's glassEffect), for comparing this library's glass with
 // the real thing on a Mac. Two modes:
 //
-//   playground                the gallery's playground in SwiftUI: a backdrop, glass to drag, and Apple's knobs
+//   playground                the gallery in SwiftUI (native/Gallery.swift, the demos in native/demos/): every page
+//                             of demo/'s, laid out the same, with Apple's glass. --page=<name> opens that page,
+//                             --theme=light|dark, --size=WxH, as demo/main.mjs takes them
 //   playground --scenes       a scene renderer for tests: reads scenes as JSON lines on stdin, draws each in a
 //                             borderless window and answers `READY <name> <window id>` once it's drawn, for
 //                             `screencapture -l` to capture (test/native/run.mjs drives it)
 //
-// Built by scripts/native.mjs with the command line tools' swiftc (no Xcode project). macOS 26 or later.
+// Built by scripts/native.mjs with the command line tools' swiftc (no Xcode project, so no macros: no @State or
+// @Observable; models are ObservableObjects). macOS 26 or later.
 import AppKit
 import SwiftUI
 
@@ -195,155 +198,6 @@ final class SceneRunner: NSObject {
   }
 }
 
-// ---------------------------------------------------------------- the playground
-
-enum Backdrop: String, CaseIterable, Identifiable {
-  case photo, ponds, alps, night, text, stripes
-  var id: String { rawValue }
-}
-
-enum ShapeChoice: String, CaseIterable, Identifiable {
-  case rect, squircle, capsule, circle
-  var id: String { rawValue }
-}
-
-enum VariantChoice: String, CaseIterable, Identifiable {
-  case regular, clear, identity
-  var id: String { rawValue }
-}
-
-/// The playground's settings (an ObservableObject: SwiftUI's @State is a macro, and the command line tools ship no
-/// macro plugins)
-final class Settings: ObservableObject {
-  @Published var backdrop = Backdrop.photo
-  @Published var variant = VariantChoice.regular
-  @Published var shape = ShapeChoice.rect
-  @Published var radius = 40.0
-  @Published var width = 340.0
-  @Published var height = 200.0
-  @Published var tinted = false
-  @Published var tint = Color(.sRGB, red: 0, green: 0.48, blue: 1, opacity: 0.5)
-  @Published var interactive = false
-  @Published var position = CGPoint(x: 290, y: 250)
-  @Published var dragStart: CGPoint?
-  @Published var dark = false
-}
-
-struct PlaygroundView: View {
-  let assets: URL
-  @ObservedObject var s: Settings
-
-  var body: some View {
-    HStack(spacing: 0) {
-      stage
-      Divider()
-      panel.frame(width: 330)
-    }
-    .preferredColorScheme(s.dark ? .dark : .light)
-  }
-
-  private var current: Glass {
-    var g: Glass = s.variant == .clear ? .clear : s.variant == .identity ? .identity : .regular
-    if s.tinted { g = g.tint(s.tint) }
-    if s.interactive { g = g.interactive() }
-    return g
-  }
-
-  private var stage: some View {
-    GeometryReader { geo in
-      ZStack {
-        backdropView.frame(width: geo.size.width, height: geo.size.height).clipped()
-        Text("Drag me")
-          .font(.system(size: 18, weight: .bold))
-          .foregroundStyle(.white)
-          .shadow(color: .black.opacity(0.4), radius: 1.5, y: 1)
-          .frame(width: s.width, height: s.height)
-          .glass(current, shape: s.shape.rawValue, radius: s.radius)
-          .position(s.position)
-          .gesture(DragGesture()
-            .onChanged { v in
-              let start = s.dragStart ?? s.position
-              s.dragStart = start
-              s.position = CGPoint(x: start.x + v.translation.width, y: start.y + v.translation.height)
-            }
-            .onEnded { _ in s.dragStart = nil })
-      }
-    }
-  }
-
-  @ViewBuilder private var backdropView: some View {
-    switch s.backdrop {
-    case .text:
-      LinearGradient(colors: [Color(red: 0.11, green: 0.17, blue: 0.39), Color(red: 0.97, green: 0.8, blue: 0.85)], startPoint: .topLeading, endPoint: .bottomTrailing)
-        .overlay(alignment: .topLeading) {
-          VStack(alignment: .leading, spacing: 18) {
-            ForEach(["Liquid glass bends whatever is behind it.", "Text, photos, video, canvas: the live page.", "Drag the glass over this and watch the letters bend at the rim."], id: \.self) {
-              Text($0).font(.system(size: 34, weight: .bold)).foregroundStyle(.white)
-            }
-          }.padding(30)
-        }
-    case .stripes:
-      Canvas { ctx, size in
-        ctx.fill(Path(CGRect(origin: .zero, size: size)), with: .color(.white))
-        for x in stride(from: 0.0, to: size.width, by: 20) { ctx.fill(Path(CGRect(x: x, y: 0, width: 10, height: size.height)), with: .color(Color(white: 0.07))) }
-      }
-    default:
-      if let image = NSImage(contentsOf: assets.appendingPathComponent("\(s.backdrop == .photo ? "coast" : s.backdrop.rawValue).jpg")) {
-        Image(nsImage: image).resizable().aspectRatio(contentMode: .fill)
-      } else {
-        Color.gray
-      }
-    }
-  }
-
-  private var code: String {
-    var g = ".\(s.variant.rawValue)"
-    if s.tinted { g += ".tint(...)" }
-    if s.interactive { g += ".interactive()" }
-    let shape: String
-    switch s.shape {
-    case .rect: shape = ".rect(cornerRadius: \(Int(s.radius)))"
-    case .squircle: shape = "RoundedRectangle(cornerRadius: \(Int(s.radius)), style: .continuous)"
-    case .capsule: shape = ".capsule"
-    case .circle: shape = ".circle"
-    }
-    return "content\n  .frame(width: \(Int(s.width)), height: \(Int(s.height)))\n  .glassEffect(\(g), in: \(shape))"
-  }
-
-  private var panel: some View {
-    Form {
-      Section("Backdrop") {
-        Picker("backdrop", selection: $s.backdrop) { ForEach(Backdrop.allCases) { Text($0.rawValue).tag($0) } }
-        Toggle("dark", isOn: $s.dark)
-      }
-      Section("Glass") {
-        Picker("variant", selection: $s.variant) { ForEach(VariantChoice.allCases) { Text($0.rawValue).tag($0) } }
-        Toggle("interactive", isOn: $s.interactive)
-        Toggle("tint", isOn: $s.tinted)
-        if s.tinted { ColorPicker("tint colour", selection: $s.tint, supportsOpacity: true) }
-      }
-      Section("Shape") {
-        Picker("shape", selection: $s.shape) { ForEach(ShapeChoice.allCases) { Text($0.rawValue).tag($0) } }
-        if s.shape == .rect || s.shape == .squircle { slider("cornerRadius", $s.radius, 0...120) }
-        slider("width", $s.width, 40...600)
-        slider("height", $s.height, 30...400)
-      }
-      Section("SwiftUI") {
-        Text(code).font(.system(size: 12, design: .monospaced)).textSelection(.enabled)
-      }
-    }
-    .formStyle(.grouped)
-  }
-
-  private func slider(_ label: String, _ value: Binding<Double>, _ range: ClosedRange<Double>) -> some View {
-    HStack {
-      Text(label).frame(width: 96, alignment: .leading)
-      Slider(value: value, in: range, step: 1)
-      Text("\(Int(value.wrappedValue))").monospacedDigit().frame(width: 36, alignment: .trailing)
-    }
-  }
-}
-
 // ---------------------------------------------------------------- the app
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -361,11 +215,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       fflush(stdout)
       return
     }
-    // the demo's photos, next to this file in the repo
-    let assets = URL(fileURLWithPath: args.first { $0.hasPrefix("--assets=") }.map { String($0.dropFirst(9)) } ?? "demo/assets")
-    let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1180 - 224, height: 760), styleMask: [.titled, .closable, .resizable, .miniaturizable], backing: .buffered, defer: false)
-    w.title = "Playground · SwiftUI's Liquid Glass"
-    w.contentView = NSHostingView(rootView: PlaygroundView(assets: assets, s: Settings()))
+    // the gallery, as demo/main.mjs opens the Electron one
+    let arg = { (name: String) in args.first { $0.hasPrefix("--\(name)=") }.map { String($0.dropFirst(name.count + 3)) } }
+    if let a = arg("assets") { Assets.dir = URL(fileURLWithPath: a) }
+    if let b = arg("build") { Assets.build = URL(fileURLWithPath: b) }
+    let size = (arg("size") ?? "1180x760").split(separator: "x").compactMap { Double($0) }
+    let theme = arg("theme")
+    let dark = theme.map { $0 == "dark" } ?? (NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua)
+    let gallery = Gallery(page: arg("page").flatMap(Page.init(rawValue:)) ?? .toolbar, dark: dark)
+    let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: size.first ?? 1180, height: size.count > 1 ? size[1] : 760), styleMask: [.titled, .closable, .resizable, .miniaturizable], backing: .buffered, defer: false)
+    w.backgroundColor = NSColor(white: 0.067, alpha: 1)
+    gallery.window = w
+    w.title = "\(gallery.page.title) · SwiftUI's Liquid Glass"
+    let host = NSHostingView(rootView: GalleryView(g: gallery))
+    // the window's size is the user's (or --size), not what the content would like
+    host.sizingOptions = []
+    w.contentView = host
     w.center()
     // --inactive: shown without taking focus (for screenshots while the machine is in use)
     if args.contains("--inactive") {
@@ -384,9 +249,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { runner == nil }
 }
 
-let app = NSApplication.shared
-let scenes = CommandLine.arguments.contains("--scenes")
-app.setActivationPolicy(scenes ? .accessory : .regular)
-let delegate = AppDelegate()
-app.delegate = delegate
-app.run()
+@main
+enum Main {
+  static func main() {
+    let app = NSApplication.shared
+    app.setActivationPolicy(CommandLine.arguments.contains("--scenes") ? .accessory : .regular)
+    let delegate = AppDelegate()
+    app.delegate = delegate
+    app.run()
+  }
+}

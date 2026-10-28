@@ -1,7 +1,6 @@
 /* iOS 26's controls. The glass's strength and frost are CSS custom properties here, so that CSS transitions drive
-   them: --glass-strength is registered by the library; --glass-blur-amount and --ios-solid (how much of a knob's own
-   white shows) are registered below, so they interpolate too. */
-@property --glass-blur-amount { syntax: '<number>'; inherits: false; initial-value: 0; }
+   them: --glass-strength and --glass-blur-amount are registered by the library; --ios-solid (how much of a knob's own
+   white shows) is registered below, so it interpolates too. */
 @property --ios-solid { syntax: '<number>'; inherits: true; initial-value: 1; }
 /* how much of a knob's glass surface (its rim and shading, see .ios-knob::after) shows */
 @property --ios-glass { syntax: '<number>'; inherits: true; initial-value: 0; }
