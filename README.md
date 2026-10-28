@@ -195,8 +195,17 @@ so changing them, even every frame, rebuilds nothing.
 ```bash
 pnpm demo                 # the gallery
 pnpm playground           # every option, live
-pnpm playground:native    # the same playground in SwiftUI, with macOS's own glass (on a Mac with macOS 26+)
+pnpm demo:native          # the same gallery in SwiftUI, with macOS's own glass (on a Mac with macOS 26+)
+pnpm playground:native    # its playground
 ```
+
+The native gallery (`native/Gallery.swift`, a SwiftUI twin of each demo in `native/demos/`) has every page of the
+Electron one, laid out the same, with Apple's glass where this library's is: `glassEffect`, `GlassEffectContainer`,
+`glassEffectID`, `.materialize`, the `.glass` and `.glassProminent` button styles, the scroll edge effect, and macOS's
+own sliders, switches and menus. Its Tinted glass and the accessibility switches are the system's settings, set for
+that app alone. Where this library does something macOS's glass doesn't (a dome that magnifies, liquidglass's own look
+and presses), the native page uses the nearest thing a Mac has and says so. `--page=<name>`, `--theme=light|dark` and
+`--size=WxH` work as they do for `pnpm demo`.
 
 The gallery runs sandboxed, context-isolated and under a strict Content-Security-Policy. Photos and video are NASA's
 ([credits](demo/assets/CREDITS.md)).
