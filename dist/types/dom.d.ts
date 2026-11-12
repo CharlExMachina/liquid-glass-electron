@@ -58,7 +58,8 @@ export declare function predecode(url: string): Promise<void>;
 export declare function installStyles(): void;
 /**
  * Whether `backdrop-filter: url(#svg-filter)` bends the backdrop here: Chromium (and so Electron) does; Firefox and
- * Safari accept the syntax but draw nothing, so there the glass falls back to a plain blur (with its light, fill and
- * shadow). globalThis.LIQUID_GLASS_FALLBACK = true forces the fallback.
+ * Safari accept the syntax but draw nothing, so there the glass is drawn by a shader over the backdrop the page names
+ * (GlassOptions.backdropSource, webgl.ts), or falls back to a plain blur (with its light, fill and shadow).
+ * globalThis.LIQUID_GLASS_FALLBACK = true forces the fallback.
  */
 export declare function supportsSvgBackdrop(): boolean;

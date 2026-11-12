@@ -1,0 +1,911 @@
+[
+ {
+  "browser": "chrome",
+  "mode": "none",
+  "scene": "idle",
+  "dpr": 1,
+  "view": [
+   1300,
+   857
+  ],
+  "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/157.0.0.0 Safari/537.36",
+  "shader": false,
+  "cpu": 1.6
+ },
+ {
+  "browser": "chrome",
+  "mode": "none",
+  "scene": "content",
+  "dpr": 1,
+  "view": [
+   1300,
+   857
+  ],
+  "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/157.0.0.0 Safari/537.36",
+  "fps": 54.8,
+  "p95": 32.7,
+  "shader": false,
+  "cpu": 17.3
+ },
+ {
+  "browser": "chrome",
+  "mode": "none",
+  "scene": "move",
+  "dpr": 1,
+  "view": [
+   1300,
+   857
+  ],
+  "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/157.0.0.0 Safari/537.36",
+  "fps": 59.3,
+  "p95": 19.5,
+  "shader": false,
+  "cpu": 23.2
+ },
+ {
+  "browser": "chrome",
+  "mode": "none",
+  "scene": "scroll",
+  "dpr": 1,
+  "view": [
+   1300,
+   857
+  ],
+  "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/157.0.0.0 Safari/537.36",
+  "fps": 59.3,
+  "p95": 18.6,
+  "shader": false,
+  "cpu": 23.1
+ },
+ {
+  "browser": "chrome",
+  "mode": "none",
+  "scene": "n10",
+  "dpr": 1,
+  "view": [
+   1300,
+   857
+  ],
+  "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/157.0.0.0 Safari/537.36",
+  "fps": 59.8,
+  "p95": 18.3,
+  "shader": false,
+  "cpu": 23.6
+ },
+ {
+  "browser": "chrome",
+  "mode": "none",
+  "scene": "n30",
+  "dpr": 1,
+  "view": [
+   1300,
+   857
+  ],
+  "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/157.0.0.0 Safari/537.36",
+  "fps": 59.7,
+  "p95": 18.5,
+  "shader": false,
+  "cpu": 27
+ },
+ {
+  "browser": "chrome",
+  "mode": "none",
+  "scene": "video",
+  "dpr": 1,
+  "view": [
+   1300,
+   857
+  ],
+  "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/157.0.0.0 Safari/537.36",
+  "shader": false,
+  "cpu": 8.7
+ },
+ {
+  "browser": "chrome",
+  "mode": "glass",
+  "scene": "idle",
+  "dpr": 1,
+  "view": [
+   1300,
+   857
+  ],
+  "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/157.0.0.0 Safari/537.36",
+  "shader": false,
+  "cpu": 2
+ },
+ {
+  "browser": "chrome",
+  "mode": "glass",
+  "scene": "content",
+  "dpr": 1,
+  "view": [
+   1300,
+   857
+  ],
+  "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/157.0.0.0 Safari/537.36",
+  "fps": 53.3,
+  "p95": 33.3,
+  "shader": false,
+  "cpu": 18.2
+ },
+ {
+  "browser": "chrome",
+  "mode": "glass",
+  "scene": "move",
+  "dpr": 1,
+  "view": [
+   1300,
+   857
+  ],
+  "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/157.0.0.0 Safari/537.36",
+  "fps": 59.9,
+  "p95": 20.7,
+  "shader": false,
+  "cpu": 35.4
+ },
+ {
+  "browser": "chrome",
+  "mode": "glass",
+  "scene": "scroll",
+  "dpr": 1,
+  "view": [
+   1300,
+   857
+  ],
+  "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/157.0.0.0 Safari/537.36",
+  "fps": 59.8,
+  "p95": 18.5,
+  "shader": false,
+  "cpu": 29.8
+ },
+ {
+  "browser": "chrome",
+  "mode": "glass",
+  "scene": "n10",
+  "dpr": 1,
+  "view": [
+   1300,
+   857
+  ],
+  "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/157.0.0.0 Safari/537.36",
+  "fps": 60,
+  "p95": 18.4,
+  "shader": false,
+  "cpu": 34.3
+ },
+ {
+  "browser": "chrome",
+  "mode": "glass",
+  "scene": "n30",
+  "dpr": 1,
+  "view": [
+   1300,
+   857
+  ],
+  "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/157.0.0.0 Safari/537.36",
+  "fps": 60,
+  "p95": 17.7,
+  "shader": false,
+  "cpu": 34.6
+ },
+ {
+  "browser": "chrome",
+  "mode": "glass",
+  "scene": "video",
+  "dpr": 1,
+  "view": [
+   1300,
+   857
+  ],
+  "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/157.0.0.0 Safari/537.36",
+  "shader": false,
+  "cpu": 15.4
+ },
+ {
+  "browser": "chrome",
+  "mode": "shader",
+  "scene": "idle",
+  "dpr": 1,
+  "view": [
+   1300,
+   857
+  ],
+  "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/157.0.0.0 Safari/537.36",
+  "shader": true,
+  "cpu": 2.1
+ },
+ {
+  "browser": "chrome",
+  "mode": "shader",
+  "scene": "content",
+  "dpr": 1,
+  "view": [
+   1300,
+   857
+  ],
+  "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/157.0.0.0 Safari/537.36",
+  "fps": 52.7,
+  "p95": 33.3,
+  "shader": true,
+  "cpu": 16.8
+ },
+ {
+  "browser": "chrome",
+  "mode": "shader",
+  "scene": "move",
+  "dpr": 1,
+  "view": [
+   1300,
+   857
+  ],
+  "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/157.0.0.0 Safari/537.36",
+  "fps": 60,
+  "p95": 18.5,
+  "shader": true,
+  "cpu": 32.5
+ },
+ {
+  "browser": "chrome",
+  "mode": "shader",
+  "scene": "scroll",
+  "dpr": 1,
+  "view": [
+   1300,
+   857
+  ],
+  "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/157.0.0.0 Safari/537.36",
+  "fps": 59.8,
+  "p95": 18.1,
+  "shader": true,
+  "cpu": 33.4
+ },
+ {
+  "browser": "chrome",
+  "mode": "shader",
+  "scene": "n10",
+  "dpr": 1,
+  "view": [
+   1300,
+   857
+  ],
+  "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/157.0.0.0 Safari/537.36",
+  "fps": 60,
+  "p95": 18.4,
+  "shader": true,
+  "cpu": 42.2
+ },
+ {
+  "browser": "chrome",
+  "mode": "shader",
+  "scene": "n30",
+  "dpr": 1,
+  "view": [
+   1300,
+   857
+  ],
+  "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/157.0.0.0 Safari/537.36",
+  "fps": 60,
+  "p95": 18,
+  "shader": true,
+  "cpu": 57.4
+ },
+ {
+  "browser": "chrome",
+  "mode": "shader",
+  "scene": "video",
+  "dpr": 1,
+  "view": [
+   1300,
+   857
+  ],
+  "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/157.0.0.0 Safari/537.36",
+  "shader": true,
+  "cpu": 28.4
+ },
+ {
+  "browser": "safari",
+  "mode": "none",
+  "scene": "idle",
+  "dpr": 1,
+  "view": [
+   1324,
+   808
+  ],
+  "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/27.2 Safari/605.1.15",
+  "shader": false,
+  "cpu": 1.6
+ },
+ {
+  "browser": "safari",
+  "mode": "none",
+  "scene": "content",
+  "dpr": 1,
+  "view": [
+   1324,
+   808
+  ],
+  "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/27.2 Safari/605.1.15",
+  "fps": 60,
+  "p95": 19,
+  "shader": false,
+  "cpu": 7.1
+ },
+ {
+  "browser": "safari",
+  "mode": "none",
+  "scene": "move",
+  "dpr": 1,
+  "view": [
+   1324,
+   808
+  ],
+  "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/27.2 Safari/605.1.15",
+  "fps": 60,
+  "p95": 19,
+  "shader": false,
+  "cpu": 25.1
+ },
+ {
+  "browser": "safari",
+  "mode": "none",
+  "scene": "scroll",
+  "dpr": 1,
+  "view": [
+   1324,
+   808
+  ],
+  "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/27.2 Safari/605.1.15",
+  "fps": 60,
+  "p95": 19,
+  "shader": false,
+  "cpu": 24.3
+ },
+ {
+  "browser": "safari",
+  "mode": "none",
+  "scene": "n10",
+  "dpr": 1,
+  "view": [
+   1324,
+   808
+  ],
+  "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/27.2 Safari/605.1.15",
+  "fps": 60,
+  "p95": 19,
+  "shader": false,
+  "cpu": 21.9
+ },
+ {
+  "browser": "safari",
+  "mode": "none",
+  "scene": "n30",
+  "dpr": 1,
+  "view": [
+   1324,
+   808
+  ],
+  "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/27.2 Safari/605.1.15",
+  "fps": 60.1,
+  "p95": 18,
+  "shader": false,
+  "cpu": 23.9
+ },
+ {
+  "browser": "safari",
+  "mode": "none",
+  "scene": "video",
+  "dpr": 1,
+  "view": [
+   1324,
+   808
+  ],
+  "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/27.2 Safari/605.1.15",
+  "shader": false,
+  "cpu": 6.9
+ },
+ {
+  "browser": "safari",
+  "mode": "blur",
+  "scene": "idle",
+  "dpr": 1,
+  "view": [
+   1324,
+   808
+  ],
+  "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/27.2 Safari/605.1.15",
+  "shader": false,
+  "cpu": 1.6
+ },
+ {
+  "browser": "safari",
+  "mode": "blur",
+  "scene": "content",
+  "dpr": 1,
+  "view": [
+   1324,
+   808
+  ],
+  "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/27.2 Safari/605.1.15",
+  "fps": 60.1,
+  "p95": 19,
+  "shader": false,
+  "cpu": 7.4
+ },
+ {
+  "browser": "safari",
+  "mode": "blur",
+  "scene": "move",
+  "dpr": 1,
+  "view": [
+   1324,
+   808
+  ],
+  "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/27.2 Safari/605.1.15",
+  "fps": 60,
+  "p95": 18,
+  "shader": false,
+  "cpu": 15
+ },
+ {
+  "browser": "safari",
+  "mode": "blur",
+  "scene": "scroll",
+  "dpr": 1,
+  "view": [
+   1324,
+   808
+  ],
+  "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/27.2 Safari/605.1.15",
+  "fps": 60.1,
+  "p95": 19,
+  "shader": false,
+  "cpu": 20.8
+ },
+ {
+  "browser": "safari",
+  "mode": "blur",
+  "scene": "n10",
+  "dpr": 1,
+  "view": [
+   1324,
+   808
+  ],
+  "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/27.2 Safari/605.1.15",
+  "fps": 60,
+  "p95": 19,
+  "shader": false,
+  "cpu": 19.7
+ },
+ {
+  "browser": "safari",
+  "mode": "blur",
+  "scene": "n30",
+  "dpr": 1,
+  "view": [
+   1324,
+   808
+  ],
+  "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/27.2 Safari/605.1.15",
+  "fps": 60.1,
+  "p95": 18,
+  "shader": false,
+  "cpu": 36.1
+ },
+ {
+  "browser": "safari",
+  "mode": "blur",
+  "scene": "video",
+  "dpr": 1,
+  "view": [
+   1324,
+   808
+  ],
+  "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/27.2 Safari/605.1.15",
+  "shader": false,
+  "cpu": 5.9
+ },
+ {
+  "browser": "safari",
+  "mode": "glass",
+  "scene": "idle",
+  "dpr": 1,
+  "view": [
+   1324,
+   808
+  ],
+  "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/27.2 Safari/605.1.15",
+  "shader": true,
+  "cpu": 2.8
+ },
+ {
+  "browser": "safari",
+  "mode": "glass",
+  "scene": "content",
+  "dpr": 1,
+  "view": [
+   1324,
+   808
+  ],
+  "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/27.2 Safari/605.1.15",
+  "fps": 60,
+  "p95": 18,
+  "shader": true,
+  "cpu": 9.7
+ },
+ {
+  "browser": "safari",
+  "mode": "glass",
+  "scene": "move",
+  "dpr": 1,
+  "view": [
+   1324,
+   808
+  ],
+  "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/27.2 Safari/605.1.15",
+  "fps": 60,
+  "p95": 19,
+  "shader": true,
+  "cpu": 47.9
+ },
+ {
+  "browser": "safari",
+  "mode": "glass",
+  "scene": "scroll",
+  "dpr": 1,
+  "view": [
+   1324,
+   808
+  ],
+  "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/27.2 Safari/605.1.15",
+  "fps": 60,
+  "p95": 18,
+  "shader": true,
+  "cpu": 44.9
+ },
+ {
+  "browser": "safari",
+  "mode": "glass",
+  "scene": "n10",
+  "dpr": 1,
+  "view": [
+   1324,
+   808
+  ],
+  "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/27.2 Safari/605.1.15",
+  "fps": 60,
+  "p95": 18,
+  "shader": true,
+  "cpu": 43.1
+ },
+ {
+  "browser": "safari",
+  "mode": "glass",
+  "scene": "n30",
+  "dpr": 1,
+  "view": [
+   1324,
+   808
+  ],
+  "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/27.2 Safari/605.1.15",
+  "fps": 60,
+  "p95": 18,
+  "shader": true,
+  "cpu": 52.6
+ },
+ {
+  "browser": "safari",
+  "mode": "glass",
+  "scene": "video",
+  "dpr": 1,
+  "view": [
+   1324,
+   808
+  ],
+  "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/27.2 Safari/605.1.15",
+  "shader": true,
+  "cpu": 49.6
+ },
+ {
+  "browser": "firefox",
+  "mode": "none",
+  "scene": "idle",
+  "dpr": 1,
+  "view": [
+   1300,
+   915
+  ],
+  "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:154.0) Gecko/20100101 Firefox/154.0",
+  "shader": false,
+  "cpu": 16.9
+ },
+ {
+  "browser": "firefox",
+  "mode": "none",
+  "scene": "content",
+  "dpr": 1,
+  "view": [
+   1300,
+   915
+  ],
+  "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:154.0) Gecko/20100101 Firefox/154.0",
+  "fps": 60.1,
+  "p95": 18.3,
+  "shader": false,
+  "cpu": 10.5
+ },
+ {
+  "browser": "firefox",
+  "mode": "none",
+  "scene": "move",
+  "dpr": 1,
+  "view": [
+   1300,
+   915
+  ],
+  "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:154.0) Gecko/20100101 Firefox/154.0",
+  "fps": 60.1,
+  "p95": 18.1,
+  "shader": false,
+  "cpu": 79.2
+ },
+ {
+  "browser": "firefox",
+  "mode": "none",
+  "scene": "scroll",
+  "dpr": 1,
+  "view": [
+   1300,
+   915
+  ],
+  "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:154.0) Gecko/20100101 Firefox/154.0",
+  "fps": 60.1,
+  "p95": 18.3,
+  "shader": false,
+  "cpu": 42.5
+ },
+ {
+  "browser": "firefox",
+  "mode": "none",
+  "scene": "n10",
+  "dpr": 1,
+  "view": [
+   1300,
+   915
+  ],
+  "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:154.0) Gecko/20100101 Firefox/154.0",
+  "fps": 60.1,
+  "p95": 18.4,
+  "shader": false,
+  "cpu": 31.6
+ },
+ {
+  "browser": "firefox",
+  "mode": "none",
+  "scene": "n30",
+  "dpr": 1,
+  "view": [
+   1300,
+   915
+  ],
+  "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:154.0) Gecko/20100101 Firefox/154.0",
+  "fps": 60.1,
+  "p95": 18.3,
+  "shader": false,
+  "cpu": 32.4
+ },
+ {
+  "browser": "firefox",
+  "mode": "none",
+  "scene": "video",
+  "dpr": 1,
+  "view": [
+   1300,
+   915
+  ],
+  "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:154.0) Gecko/20100101 Firefox/154.0",
+  "shader": false,
+  "cpu": 19.3
+ },
+ {
+  "browser": "firefox",
+  "mode": "blur",
+  "scene": "idle",
+  "dpr": 1,
+  "view": [
+   1300,
+   915
+  ],
+  "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:154.0) Gecko/20100101 Firefox/154.0",
+  "shader": false,
+  "cpu": 16.1
+ },
+ {
+  "browser": "firefox",
+  "mode": "blur",
+  "scene": "content",
+  "dpr": 1,
+  "view": [
+   1300,
+   915
+  ],
+  "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:154.0) Gecko/20100101 Firefox/154.0",
+  "fps": 60,
+  "p95": 18.4,
+  "shader": false,
+  "cpu": 16
+ },
+ {
+  "browser": "firefox",
+  "mode": "blur",
+  "scene": "move",
+  "dpr": 1,
+  "view": [
+   1300,
+   915
+  ],
+  "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:154.0) Gecko/20100101 Firefox/154.0",
+  "fps": 60,
+  "p95": 17.9,
+  "shader": false,
+  "cpu": 86.6
+ },
+ {
+  "browser": "firefox",
+  "mode": "blur",
+  "scene": "scroll",
+  "dpr": 1,
+  "view": [
+   1300,
+   915
+  ],
+  "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:154.0) Gecko/20100101 Firefox/154.0",
+  "fps": 60,
+  "p95": 16.9,
+  "shader": false,
+  "cpu": 46.9
+ },
+ {
+  "browser": "firefox",
+  "mode": "blur",
+  "scene": "n10",
+  "dpr": 1,
+  "view": [
+   1300,
+   915
+  ],
+  "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:154.0) Gecko/20100101 Firefox/154.0",
+  "fps": 60.1,
+  "p95": 17.5,
+  "shader": false,
+  "cpu": 56.9
+ },
+ {
+  "browser": "firefox",
+  "mode": "blur",
+  "scene": "n30",
+  "dpr": 1,
+  "view": [
+   1300,
+   915
+  ],
+  "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:154.0) Gecko/20100101 Firefox/154.0",
+  "fps": 60.1,
+  "p95": 16.7,
+  "shader": false,
+  "cpu": 60.5
+ },
+ {
+  "browser": "firefox",
+  "mode": "blur",
+  "scene": "video",
+  "dpr": 1,
+  "view": [
+   1300,
+   915
+  ],
+  "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:154.0) Gecko/20100101 Firefox/154.0",
+  "shader": false,
+  "cpu": 33.9
+ },
+ {
+  "browser": "firefox",
+  "mode": "glass",
+  "scene": "idle",
+  "dpr": 1,
+  "view": [
+   1300,
+   915
+  ],
+  "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:154.0) Gecko/20100101 Firefox/154.0",
+  "shader": true,
+  "cpu": 17.5
+ },
+ {
+  "browser": "firefox",
+  "mode": "glass",
+  "scene": "content",
+  "dpr": 1,
+  "view": [
+   1300,
+   915
+  ],
+  "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:154.0) Gecko/20100101 Firefox/154.0",
+  "fps": 60,
+  "p95": 18.3,
+  "shader": true,
+  "cpu": 15.7
+ },
+ {
+  "browser": "firefox",
+  "mode": "glass",
+  "scene": "move",
+  "dpr": 1,
+  "view": [
+   1300,
+   915
+  ],
+  "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:154.0) Gecko/20100101 Firefox/154.0",
+  "fps": 60,
+  "p95": 18.4,
+  "shader": true,
+  "cpu": 98.4
+ },
+ {
+  "browser": "firefox",
+  "mode": "glass",
+  "scene": "scroll",
+  "dpr": 1,
+  "view": [
+   1300,
+   915
+  ],
+  "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:154.0) Gecko/20100101 Firefox/154.0",
+  "fps": 60,
+  "p95": 18.5,
+  "shader": true,
+  "cpu": 58
+ },
+ {
+  "browser": "firefox",
+  "mode": "glass",
+  "scene": "n10",
+  "dpr": 1,
+  "view": [
+   1300,
+   915
+  ],
+  "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:154.0) Gecko/20100101 Firefox/154.0",
+  "fps": 60,
+  "p95": 18.3,
+  "shader": true,
+  "cpu": 56.3
+ },
+ {
+  "browser": "firefox",
+  "mode": "glass",
+  "scene": "n30",
+  "dpr": 1,
+  "view": [
+   1300,
+   915
+  ],
+  "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:154.0) Gecko/20100101 Firefox/154.0",
+  "fps": 60,
+  "p95": 17.8,
+  "shader": true,
+  "cpu": 48
+ },
+ {
+  "browser": "firefox",
+  "mode": "glass",
+  "scene": "video",
+  "dpr": 1,
+  "view": [
+   1300,
+   915
+  ],
+  "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:154.0) Gecko/20100101 Firefox/154.0",
+  "shader": true,
+  "cpu": 41.1
+ }
+]

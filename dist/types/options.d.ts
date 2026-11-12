@@ -59,6 +59,13 @@ export interface GlassOptions {
      * already written in CSS. blurAmount and saturation do the same inside the glass's own filter, which is cheaper
      */
     backdrop: string | null;
+    /**
+     * what's behind the glass, for browsers whose backdrop-filter can't bend (Safari, Firefox): an <img>, <video> or
+     * <canvas>, or a selector for one. The glass there bends that element's picture, drawn with WebGL; anything else
+     * behind the glass isn't seen through it. Without it, glass in those browsers is a plain blur. Chromium bends
+     * whatever is behind the glass and doesn't need it. null = none
+     */
+    backdropSource: string | Element | null;
     /** the colour tintStrength mixes toward (multiplied); null = liquidglass's cool glass (0.92, 0.95, 1.05) */
     tint: string | null;
     /** a colour laid over the glass, as Apple's .tint(_:) and tinted buttons are; null = none */

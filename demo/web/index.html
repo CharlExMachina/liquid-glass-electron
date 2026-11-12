@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>liquid-glass-electron in any browser</title>
+<link rel="stylesheet" href="web.css">
+<script type="module" src="web.js"></script>
+</head>
+<body>
+<main id="stage">
+  <img id="photo" src="../assets/coast.jpg" alt="">
+  <video id="film" src="../assets/orbit.webm" muted loop playsinline hidden></video>
+  <header class="bar" data-glass data-glass-shape="capsule">
+    <strong>liquid-glass-electron</strong>
+    <span id="how"></span>
+  </header>
+  <div class="lens" id="lens" data-glass data-glass-floating data-glass-shape="circle" data-glass-bevel-mode="1" data-glass-refraction="1.6"></div>
+  <section class="card" data-glass="regular">
+    <h1>Glass in any browser</h1>
+    <p>Chromium bends whatever is behind an element. Safari and Firefox can't, so there the glass bends the picture the
+      page names as its <code>backdropSource</code>, with a shader. Drag the lens and the panel.</p>
+  </section>
+  <div class="panel" id="panel" data-glass data-glass-floating>drag me</div>
+  <nav class="dock" data-glass data-glass-shape="capsule">
+    <button id="source" type="button">Video</button>
+    <button id="variant" type="button">Clear</button>
+    <button id="theme" type="button">Light</button>
+  </nav>
+</main>
+</body>
+</html>

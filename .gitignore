@@ -10,3 +10,6 @@ native/.build/
 test/native/out/
 test/native/.old/
 test/native/backdrops/
+test/web/out/
+bench/web/.firefox-*/
+bench/web/results/run.log

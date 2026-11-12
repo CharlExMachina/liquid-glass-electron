@@ -53,6 +53,7 @@ Options can also come from data attributes (`data-glass-refraction="0.4"`, `data
 | Bars over scrolling content | glass on a fixed/sticky bar; `scrollEdge(scroller, { style: 'soft' })` | `demo/demos/scroll.js` |
 | Apple's button styles | `glassButton(el, 'glass' \| 'prominent')`; accent from `--glass-accent` | `demo/demos/buttons.js` |
 | Glass over video, canvas, CSS animation | Nothing special: it bends whatever is drawn behind it, live | `demo/demos/video.js`, `demo/demos/drag.js` |
+| Glass that also bends in Safari and Firefox (a website, not Electron) | Put what's behind the glass in one `<img>`, `<video>` or `<canvas>` and name it: `backdropSource: '#hero'` (or `data-glass-backdrop-source="#hero"`). There a shader bends that picture; Chromium ignores the option. Only that picture is seen through the glass there; other elements between it and the glass are covered. Same origin, or served with CORS headers and `crossorigin` on the element | `demo/web/web.js` |
 | Apple's glass as macOS 27 draws it | `variant: 'regular'` or `'clear'` (both frosted, `clear` more so with less colour, a lens along the rim; measured against SwiftUI's own, `pnpm test:native`); no variant for liquidglass's sharp bending; `blurAmount` for your own frost | `demo/demos/appearance.js`, `native/Glass.swift` |
 | Dark mode, Tinted, accessibility | `setEnvironment({ dark, appearance: 'tinted', reduceTransparency, increaseContrast, reduceMotion })` | `demo/demos/appearance.js` |
 | Every knob at once | the playground: it prints the `glass()` call for what you set | `demo/demos/playground.js` |
@@ -83,7 +84,9 @@ Options can also come from data attributes (`data-glass-refraction="0.4"`, `data
    off. Fade glass with its own `opacity` or `strength`.
 3. **The element's own border isn't drawn** (the light is a `border-image`). Use `edgeHighlight`.
 4. **Glass needs something behind it** to look like glass: photos, colour, text. Over a flat colour it's just a tint.
-5. **Chromium only** for the bending (Electron is Chromium); elsewhere it falls back to a blur.
+5. **Only Chromium bends whatever is behind the glass** (Electron is Chromium). Safari and Firefox bend the picture
+   named by `backdropSource` and nothing else; without one the glass falls back to a blur. Containers and glass inside
+   glass get no further than that picture there.
 6. **CSP:** `img-src` must allow `data:`.
 
 ## Rules for groups (glassGroup)
@@ -116,3 +119,7 @@ backdrop for all its members at once, before any of them paints. So:
 Glass is drawn by the compositor, so check it visually: capture the window (`webContents.capturePage()`) or record
 frames (`webContents.beginFrameSubscription`), as `demo/main.mjs --shot` and `--record` do, and look at the in-between
 frames of animations.
+
+In Safari and Firefox the glass is a canvas inside the element (`canvas[data-lg-layer="backdrop"]`), which a page can
+read back (`toDataURL()`): `pnpm test:web` does, against Chromium's own drawing of the same case. No such canvas means
+the glass fell back to the blur (no usable `backdropSource`).

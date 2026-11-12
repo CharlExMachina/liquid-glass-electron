@@ -68,6 +68,13 @@ export interface GlassOptions {
    * already written in CSS. blurAmount and saturation do the same inside the glass's own filter, which is cheaper
    */
   backdrop: string | null;
+  /**
+   * what's behind the glass, for browsers whose backdrop-filter can't bend (Safari, Firefox): an <img>, <video> or
+   * <canvas>, or a selector for one. The glass there bends that element's picture, drawn with WebGL; anything else
+   * behind the glass isn't seen through it. Without it, glass in those browsers is a plain blur. Chromium bends
+   * whatever is behind the glass and doesn't need it. null = none
+   */
+  backdropSource: string | Element | null;
   /** the colour tintStrength mixes toward (multiplied); null = liquidglass's cool glass (0.92, 0.95, 1.05) */
   tint: string | null;
   /** a colour laid over the glass, as Apple's .tint(_:) and tinted buttons are; null = none */
@@ -141,6 +148,7 @@ export const DEFAULTS: GlassOptions = {
   strength: 1,
   variant: null,
   backdrop: null,
+  backdropSource: null,
   tint: null,
   fill: null,
   surface: null,
@@ -181,7 +189,7 @@ const NUMBERS = ['blurAmount', 'refraction', 'chromAberration', 'edgeHighlight',
   'zRadius', 'opacity', 'saturation', 'tintStrength', 'brightness', 'baseBrightness', 'shadowOpacity', 'shadowSpread', 'shadowOffsetY', 'bevelMode',
   'pressBulge', 'strength', 'elasticity', 'outline', 'outlineTop'] as const;
 const BOOLEANS = ['floating', 'button', 'interactive', 'smooth', 'magnify', 'adaptive', 'group'] as const;
-const STRINGS = ['variant', 'tint', 'fill', 'surface', 'shape', 'press', 'path', 'pathBox', 'backdrop', 'colorMatrix'] as const;
+const STRINGS = ['variant', 'tint', 'fill', 'surface', 'shape', 'press', 'path', 'pathBox', 'backdrop', 'backdropSource', 'colorMatrix'] as const;
 const ALL: readonly string[] = [...NUMBERS, ...BOOLEANS, ...STRINGS];
 
 // The names Libre Hub's engine used, for its CSS: --glass-bevel and so on. Its --glass-tint was the app's background
