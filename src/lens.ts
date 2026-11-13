@@ -19,6 +19,7 @@ import { gridField, roundedRect, signedDistance, squircle, type Field } from './
 import { fieldLight, lightImage, tableMap, type MapGrid, type RGBA } from './maps.ts';
 import { ABERRATION, blurSigma, boxShadow, clampRadii, colorMatrix, MAC_LENS_REACH, macFrost, macLensSize, macMaxLuma, outlineShadow, tintGains, type Radii } from './optics.ts';
 import { encodeTables, filterDefs, greyDataURL, mapNodes, predecode, setAttrs, stashNodes, supportsSvgBackdrop, svgEl, toDataURL } from './dom.ts';
+import { GlGlass, glSupported, isBackdropSource, sourceIdentity, watchSources, type BackdropSource, type GlFrame, type GlMap } from './webgl.ts';
 import { fromCss, fromData, MACOS_COLOUR, MACOS_SMALL_DARK, resolve, type Environment, type GlassOptions } from './options.ts';
 
 // Map pixels per CSS px: about this many pixels in a map (per-frame cost follows its bytes), between 0.08 and 0.5 per
@@ -41,7 +42,19 @@ const BACKGROUND = ['background-color', 'background-image', 'background-position
 const KEEP = ['1 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 1 0', '0 0 0 0 0  0 1 0 0 0  0 0 0 0 0  0 0 0 1 0', '0 0 0 0 0  0 0 0 0 0  0 0 1 0 0  0 0 0 1 0'];
 
 let nextId = 0;
-interface MapEntry { urls: string[]; rimPx: number; margin: number; rect: { x: number; y: number; w: number; h: number }; grid: MapGrid; tables: { down: string; across: string; cover: string } }
+
+/** Whether glass here is drawn by a shader, given a source: where the compositor can't bend, or when asked for. */
+const shaderHere = () => !supportsSvgBackdrop() || !!(globalThis as { LIQUID_GLASS_WEBGL?: boolean }).LIQUID_GLASS_WEBGL;
+
+// what a page got wrong with a backdropSource, said once per source
+const warned = new WeakSet<Element>(), warnedNames = new Set<string>();
+function warnOnce(about: Element | string, ...message: unknown[]) {
+  if (typeof about === 'string' ? warnedNames.has(about) : warned.has(about)) return;
+  if (typeof about === 'string') warnedNames.add(about);
+  else warned.add(about);
+  console.warn('liquid-glass-electron:', ...message);
+}
+interface MapEntry { urls: string[]; rimPx: number; margin: number; rect: { x: number; y: number; w: number; h: number }; grid: MapGrid; tables: { down: string; across: string; cover: string }; gl?: GlMap }
 const mapCache = new Map<string, MapEntry>();
 const lightCache = new Map<string, { url: string; empty: string; slice: number; edge: number } | null>();
 const remember = <K, V>(m: Map<K, V>, k: K, v: V) => {
@@ -103,6 +116,16 @@ export class Lens {
   private passes: { node: SVGFEDisplacementMapElement; source: SVGFEOffsetElement; spread: number; map: number }[] = [];
   private stash = false;
   private bends = false;
+  // Where backdrop-filter can't bend (Safari, Firefox) and the page names what's behind the glass
+  // (GlassOptions.backdropSource): a shader draws the glass on a canvas behind the glass's layer (webgl.ts). The
+  // filter's nodes are still made, as what holds the glass's state, but never put in the document.
+  private gl: GlGlass | null = null;
+  private glMaps: GlMap[] = [];
+  // the source now (looked up with every refresh: a selector's match may be another element, or one at last)
+  private glNow: BackdropSource | null = null;
+  // a source that couldn't be read, and what it showed then: not tried again until it shows something else
+  private glFailed: { el: BackdropSource; as: string } | null = null;
+  private unwatch: (() => void) | null = null;
   // geometry and the current map
   private w = 0;
   private h = 0;
@@ -162,10 +185,24 @@ export class Lens {
     if (js) this.js = { ...this.js, ...js };
     const prev = this.options;
     this.options = resolve([fromCss(getComputedStyle(this.el)), fromData(this.el), this.js], this.host.env());
+    this.glNow = this.glSource();
+    // while a source is named where a shader would draw it: told when the document may have another for the name
+    const watch = !!this.options.backdropSource && !this.shape && shaderHere();
+    if (watch && !this.unwatch) {
+      this.unwatch = watchSources(() => {
+        if (this.glSource() !== this.glNow) this.refresh();
+      });
+    } else if (!watch) {
+      this.unwatch?.();
+      this.unwatch = null;
+    }
     const structure = this.structureKey();
     if (!prev || structure !== this.structure) {
       this.structure = structure;
       this.build();
+      // a shader's glass paints on a canvas behind the glass's layer, as glass with glass inside it paints on one
+      this.setLayered(this.nested || !!this.gl);
+      if (this.gl && this.gl.canvas.parentElement !== this.el) this.el.prepend(this.gl.canvas);
       this.measure();
       this.bindPointer();
       this.changed();
@@ -189,6 +226,7 @@ export class Lens {
 
   private changed() {
     this.version++;
+    this.gl?.invalidate();
     this.onChange?.();
   }
 
@@ -216,6 +254,14 @@ export class Lens {
    * this one as it would through Apple's: what's behind, bent and frosted, this glass's light, and what's on it.
    */
   setNested(on: boolean) {
+    this.nested = on;
+    this.setLayered(on || !!this.gl);
+  }
+
+  private nested = false;
+
+  /** The glass's own painting on a layer behind its content (see setNested), or on the element again. */
+  private setLayered(on: boolean) {
     if (on === !!this.layer || this.shape) return;
     const el = this.el, own = ['position', 'z-index', 'border-image', ...BACKGROUND];
     if (on) {
@@ -275,7 +321,7 @@ export class Lens {
    */
   batchSource(): { filters: SVGFilterElement[]; images: SVGFEImageElement[]; tables: [SVGFEComponentTransferElement, SVGFEComponentTransferElement]; shifts: SVGFEOffsetElement[]; side: number; margin: number; right: number; grid: MapGrid; mapMargin: number } | null {
     const o = this.options;
-    if (!this.bends || this.maps.length !== 1 || this.isFree() || this.shape || this.layer || o.surface || o.backdrop || o.distortion > 0 || this.amount() <= 0 || !this.main) return null;
+    if (!this.bends || this.gl || this.maps.length !== 1 || this.isFree() || this.shape || this.layer || o.surface || o.backdrop || o.distortion > 0 || this.amount() <= 0 || !this.main) return null;
     const map = this.maps[0];
     if (!map.images[0].getAttribute('href') || !map.rimPx || !this.mapGrid) return null;
     const first = this.pre ?? this.main;
@@ -292,8 +338,62 @@ export class Lens {
   /** What, in the options, decides which filter nodes there are. */
   private structureKey() {
     const o = this.options;
-    const bends = supportsSvgBackdrop() && o.refraction > 0 && o.variant !== 'identity';
-    return [bends, o.backdrop, !!o.surface, o.chromAberration > 0, o.bevelMode, o.blurAmount > 0, o.smooth, o.distortion > 0, o.opacity < 1, o.variant === 'identity', o.magnify, this.isFree(), this.capped(), this.filled() ? (this.host.env().dark ? 'darken' : 'lighten') : ''].join();
+    const gl = !!this.glNow;
+    const bends = (supportsSvgBackdrop() || gl) && o.refraction > 0 && o.variant !== 'identity';
+    return [bends, gl, o.backdrop, !!o.surface, o.chromAberration > 0, o.bevelMode, o.blurAmount > 0, o.smooth, o.distortion > 0, o.opacity < 1, o.variant === 'identity', o.magnify, this.isFree(), this.capped(), this.filled() ? (this.host.env().dark ? 'darken' : 'lighten') : ''].join();
+  }
+
+  /**
+   * The element a shader bends as this glass's backdrop, or null: the compositor bends what's behind (Chromium), no
+   * source is named, nothing matches its selector (yet), it isn't an image, a video or a canvas, or it can't be read.
+   * globalThis.LIQUID_GLASS_WEBGL = true draws with the shader in Chromium too (to see or test it there).
+   */
+  private glSource(): BackdropSource | null {
+    const named = this.options.backdropSource;
+    if (!named || this.shape || !shaderHere()) return null;
+    let el: Element | null = null;
+    if (typeof named === 'string') {
+      try {
+        el = document.querySelector(named);
+      } catch {
+        warnOnce(named, `backdropSource: "${named}" is not a selector; the glass is a plain blur`);
+      }
+    } else el = named;
+    if (!isBackdropSource(el)) {
+      if (el) warnOnce(el, 'backdropSource must be an <img>, <video> or <canvas>; the glass is a plain blur over', el);
+      return null;
+    }
+    if (this.glFailed?.el === el && this.glFailed.as === sourceIdentity(el)) return null;
+    return glSupported() ? el : null;
+  }
+
+  /** What the shader draws now (see GlFrame), or null: no glass, or its map isn't drawn yet. */
+  private glFrame(): GlFrame | null {
+    const o = this.options, s = this.amount(), { w, h } = this;
+    if (!this.bends || s <= 0 || !w || !h || !this.passes.length || this.glMaps.length !== this.maps.length) return null;
+    // the shift's share, as applyStrength gives the filter's passes
+    const k = Math.max(this.bulge, 1) * (this.unitMaps ? o.refraction : 1) * s * Math.min(this.bulge, 1);
+    const passes = this.passes.length === 3 ? this.passes : [this.passes[0], this.passes[0], this.passes[0]];
+    // where the map is: as place() puts the filter's
+    const r = this.region.w ? this.region : { x: 0, y: 0, w, h }, m = this.margin;
+    const rect = this.mapRect ?? { x: -m, y: -m, w: r.w + 2 * m, h: r.h + 2 * m };
+    const frosted = o.blurAmount > 0;
+    return {
+      w, h,
+      maps: this.glMaps,
+      mapRect: { x: r.x + rect.x, y: r.y + rect.y, w: rect.w, h: rect.h },
+      channels: passes.map((p) => ({ map: p.map, k: k * p.spread })),
+      reach: this.reach,
+      sigma: frosted ? this.frost() * s : 0,
+      fill: this.filled() ? { sigma: MAC_FILL_SIGMA * s, alpha: MAC_FILL_OPACITY * s, darken: this.host.env().dark } : null,
+      smooth: !frosted && o.smooth,
+      matrix: this.matrix(),
+      cap: this.capped() ? 1 + (macMaxLuma(Math.min(w, h)) - 1) * s : null,
+      opacity: o.opacity,
+      surface: o.surface ? { urls: o.surface, strength: s } : null,
+      cover: this.isFree(),
+      wideGamut: this.host.env().wideGamut !== false,
+    };
   }
 
   /** A shape the element's own (rounded) box can't clip: the filter masks itself, and light and shadow are an image. */
@@ -328,6 +428,7 @@ export class Lens {
       }
       this.applyStrength();
       this.setBackdrop(s > 0 ? this.filterCss : 'none');
+      if (this.gl && this.glNow) this.gl.setSource(this.glNow);
     }
     this.layout(true);
   }
@@ -420,7 +521,13 @@ export class Lens {
     this.passes = [];
     this.reach = 0;
     this.mapKey = '';
-    this.bends = supportsSvgBackdrop() && o.refraction > 0 && o.variant !== 'identity';
+    const source = this.glNow;
+    this.bends = (supportsSvgBackdrop() || !!source) && o.refraction > 0 && o.variant !== 'identity';
+    if (!source || !this.bends) {
+      this.gl?.destroy();
+      this.gl = null;
+      this.glMaps = [];
+    }
     const sigma = this.frost();
 
     if (!this.bends) {
@@ -557,6 +664,29 @@ export class Lens {
       second.append(svgEl('feComposite', { in: out, in2: 'map0_cover', operator: 'in' }));
     }
 
+    if (source) {
+      // the shader's glass: the nodes above stay out of the document
+      this.pre = fringe ? first : null;
+      this.main = second;
+      this.filterCss = 'none';
+      this.gl ??= new GlGlass({
+        el: this.el,
+        frame: () => this.glFrame(),
+        // the source can't be read: the plain blur instead, until the source shows something else
+        failed: () => {
+          const el = this.glNow;
+          if (el) {
+            this.glFailed = { el, as: sourceIdentity(el) };
+            warnOnce(el, 'backdropSource can\'t be read (another origin: it needs CORS headers and crossorigin="anonymous"); the glass is a plain blur over', el);
+          }
+          this.refresh();
+        },
+        fallback: () => (this.options.variant === 'identity' || this.amount() <= 0 ? 'none' : this.cssBackdrop()),
+      }, source);
+      this.gl.setSource(source);
+      this.setBackdrop('none');
+      return;
+    }
     const defs = filterDefs();
     if (fringe) {
       defs.append(first, second);
@@ -762,19 +892,22 @@ export class Lens {
       if (key !== this.mapKey) {
         this.mapKey = key;
         const entries = this.maps.map((map) => {
-          const k = `${key}|${map.fringe}`;
+          const k = `${key}|${map.fringe}${this.gl ? '|gl' : ''}`;
           return mapCache.get(k) ?? remember(mapCache, k, (() => {
             // a path's edges are anywhere: its tables come from a plain box's straight edges
             const profile = free && o.shape === 'path' ? roundedRect(w, h, [0, 0, 0, 0]) : sub;
             const m = tableMap(sub, { refraction, bevel: zR, dome: o.bevelMode === 1, rim: o.bevelMode === 2, minify: o.bevelMode === 3, mac, magnify: o.magnify }, scale, moving ? 64 : 256, map.fringe, profile, grid);
-            return { urls: [0, 1, 2].slice(0, free ? 3 : 2).map((c) => greyDataURL(m, c)), rimPx: m.rimPx, margin: m.margin, rect: m.rect, grid: m.grid, tables: { ...encodeTables(m.tableX, m.tableY, m.bias), cover: m.tableB.join(' ') } };
+            // the shader reads the map's pixels and tables as they are; the filter, an image per channel
+            const gl = this.gl ? { pixels: { width: m.width, height: m.height, data: m.data }, tableX: m.tableX, tableY: m.tableY, bias: m.bias, rimPx: m.rimPx } : undefined;
+            return { gl, urls: gl ? [] : [0, 1, 2].slice(0, free ? 3 : 2).map((c) => greyDataURL(m, c)), rimPx: m.rimPx, margin: m.margin, rect: m.rect, grid: m.grid, tables: { ...encodeTables(m.tableX, m.tableY, m.bias), cover: m.tableB.join(' ') } };
           })());
         });
         const maps = this.maps;
         applies.push(Promise.all(entries.flatMap((e) => e.urls.map(predecode))).then(() => () => {
           if (this.mapKey !== key || this.maps !== maps) return;
+          this.glMaps = entries.flatMap((e) => (e.gl ? [e.gl] : []));
           entries.forEach((e, i) => {
-            maps[i].images.forEach((image, c) => image.setAttribute('href', e.urls[c]));
+            if (e.urls.length) maps[i].images.forEach((image, c) => image.setAttribute('href', e.urls[c]));
             maps[i].tables[0].children[0].setAttribute('tableValues', e.tables.across);
             for (const f of maps[i].tables[1].children) f.setAttribute('tableValues', e.tables.down);
             maps[i].cover?.children[0].setAttribute('tableValues', e.tables.cover);
@@ -1064,6 +1197,10 @@ export class Lens {
   }
 
   destroy() {
+    this.unwatch?.();
+    this.unwatch = null;
+    this.gl?.destroy();
+    this.gl = null;
     this.setNested(false);
     clearTimeout(this.settleTimer);
     cancelAnimationFrame(this.tween);

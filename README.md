@@ -25,7 +25,8 @@ nothing on screen changes it costs nothing at all.
   glass only while it's held. Any shape works, including any SVG path.
 - **Easy to drop in:** `glass(el)`, or `data-glass` on an element; options as data attributes or CSS custom properties.
   One ES module, TypeScript types, no dependencies. It runs in sandboxed, context-isolated renderers under a strict
-  Content-Security-Policy, and falls back to a plain blur outside Chromium.
+  Content-Security-Policy. In Safari and Firefox, which can't bend what's behind an element, it bends a picture the
+  page names with a shader ([Safari and Firefox](#safari-and-firefox)), and is a plain blur otherwise.
 
 ## Install
 
@@ -160,6 +161,7 @@ And this library's:
 | `surface` | – | How the glass's surface changes what it shows, per pixel, as no blend can: two images' URLs, greys stretched over the element, a gain and an offset (½ is none): out = gain × glass + offset. Apple's knobs add light at the rim and take it away at the edge (the controls page measures and draws macOS's). In CSS, `--glass-surface: url(…) url(…)` |
 | `tint` | – | The colour `tintStrength` multiplies toward |
 | `backdrop` | – | CSS filter functions applied before the glass, as written (`blur(2px) saturate(1.4)`), for a look already written in CSS |
+| `backdropSource` | – | What's behind the glass, for Safari and Firefox: an `<img>`, `<video>` or `<canvas>` (or a selector for one), which the glass there bends with a shader ([Safari and Firefox](#safari-and-firefox)). Chromium doesn't need it |
 | `interactive` | false | Apple's `.interactive()`: a press grows the glass, bends it more and lights it where it's pressed |
 | `press`, `pressBulge` | –, 0.25 | What a press does: `bulge` (bend more), `flatten` (button mode), `none` |
 | `elasticity` | 0.15 | Floating glass stretches along the way it's dragged, by how fast, and springs back. 0 = rigid |
@@ -190,6 +192,86 @@ painted once and kept. A rounded rectangle's is a 9-slice, so a resize only move
 
 `strength`, refraction, fringe, frost, colour, light and shadow are attributes and styles on nodes that already exist,
 so changing them, even every frame, rebuilds nothing.
+
+## Safari and Firefox
+
+Only Chromium's `backdrop-filter` takes an SVG filter, and no browser lets a page read the pixels behind an element. So
+in Safari and Firefox the glass bends what the page tells it is behind: an `<img>`, a `<video>` or a `<canvas>`.
+
+```js
+glass(nav, { backdropSource: '#hero' });            // a selector, or the element itself
+```
+
+```html
+<nav data-glass="regular" data-glass-backdrop-source="#hero">…</nav>
+```
+
+For a website, start from [demo/web/minimal.html](demo/web/minimal.html) (one page to copy: a fixed picture, a fixed
+bar, a card), and read [Websites: Safari and Firefox](docs/AGENTS.md#websites-safari-and-firefox), which says how to
+lay the page out so the picture stays under the glass.
+
+A selector is looked up again whenever the document changes, so the picture may be added after `glass()`, replaced, or
+given another `src`, and the glass follows. Where the glass reaches past the picture's edge, the bent picture fades
+into the plain blur the glass has without a source; glass wholly past its picture is that blur.
+
+There, a WebGL2 fragment shader samples that element's picture through the same map and lookup tables as the SVG
+filter (bilinearly, where Chromium's displacement takes the nearest pixel), with the same frost, colour, fringe,
+surface and shape. One WebGL context draws every glass on the page; each glass shows its pixels in a canvas of its own
+behind its content, under the same light, fill and shadow as in Chromium. Chromium ignores the option and bends
+whatever is behind the glass, as always. `pnpm demo:web` serves a page to open in any browser. The context is made in
+the first way whose frame reaches a canvas as drawn, checked once (WebKitGTK 2.54 hands over an empty frame from an
+`OffscreenCanvas` context without antialiasing, so there it's made with it); with none, the glass is the plain blur.
+
+It matches Chromium's glass: `pnpm test:web` draws 27 cases (every bevel mode, the variants light and dark, fringe,
+frost, colour, opacity, strength, free shapes, a surface, `object-fit`, glass across its picture's edge, and a source
+that comes late, is replaced, or can't be read at first) with the shader in Electron, Safari and Firefox (on Linux:
+Firefox and WebKitGTK), and compares each with what Chromium's compositor draws. On the machine below they differ by 0.5 to 3 levels of 255 on
+average inside the glass (5 where `smooth` is off: the shader has none of the grain that option leaves in Chromium).
+
+Nothing is drawn unless something changed. A page gets no event when an element moves, so while anything is going on
+(scrolling, the pointer, a transition, a change of options, a playing video) each glass's place is read every frame,
+and it's drawn again if it or its source moved; after half a second of nothing, a look once a second is all that's
+left.
+
+What it costs, with `pnpm bench:web` ([bench/web/](bench/web/run.mjs)): the scenes of [Performance](#performance)
+over a photo in an `<img>` (and, last, a playing video), in a window of 1300 × 1000 at 60 Hz. The number is the CPU time
+of every process of the browser, in % of one core, over 6 seconds after a 2-second warm-up. Machine: Apple M1 Max,
+macOS 27.2, a 1080p display at 1×; Chrome 157, Safari 27.2, Firefox 154. "blur" is what Safari and Firefox draw without
+a `backdropSource`; Chrome's "shader" is the shader forced on there, beside its own compositor's glass.
+
+| % of a core | Chrome, no glass | Chrome, glass | Chrome, shader | Safari, no glass | Safari, blur | Safari, shader | Firefox, no glass | Firefox, blur | Firefox, shader |
+|---|---|---|---|---|---|---|---|---|---|
+| idle | 1.6 | 2.0 | 2.1 | 1.6 | 1.6 | 2.8 | 16.9 | 16.1 | 17.5 |
+| content | 17.3 | 18.2 | 16.8 | 7.1 | 7.4 | 9.7 | 10.5 | 16.0 | 15.7 |
+| move | 23.2 | 35.4 | 32.5 | 25.1 | 15.0 | 47.9 | 79.2 | 86.6 | 98.4 |
+| scroll | 23.1 | 29.8 | 33.4 | 24.3 | 20.8 | 44.9 | 42.5 | 46.9 | 58.0 |
+| 10 elements | 23.6 | 34.3 | 42.2 | 21.9 | 19.7 | 43.1 | 31.6 | 56.9 | 56.3 |
+| 30 elements | 27.0 | 34.6 | 57.4 | 23.9 | 36.1 | 52.6 | 32.4 | 60.5 | 48.0 |
+| video | 8.7 | 15.4 | 28.4 | 6.9 | 5.9 | 49.6 | 19.3 | 33.9 | 41.1 |
+
+Every scene drew at the display's 60 frames a second in Safari and Firefox (Chrome drew the content scene at 53 to 55
+with or without glass). Still glass costs about what no glass does. Moving glass, or a picture scrolling under it, costs
+Safari 20 to 30% of a core more than no glass and Firefox 15 to 25%, 30 elements included (all of them are drawn on
+one WebGL canvas, then copied out). A playing video costs the most, 40 to 50% of a core: each of its frames is
+uploaded as a texture. One run each ([the rows](bench/web/results/2026-11-12.json)); between runs these move by a few
+points.
+
+What it doesn't do:
+
+- **Only the named picture is seen through the glass.** Text or other elements between the picture and the glass
+  aren't (they're covered by it). Past the picture's edge there's nothing to bend: the glass is the plain blur there
+  (Chromium bends the page). Without a `backdropSource`, or when it can't be used (no WebGL2, an image from
+  another origin served without CORS headers, an element that isn't an image, a video or a canvas), the glass is the
+  plain blur, and the console says why.
+- **Glass in a `container`, and glass inside other glass, sees no further than the picture**: containers fall back to
+  the blur, and inner glass bends the picture, not the outer glass over it. Groups don't apply (there are no backdrop
+  filters to share).
+- **A scroll or a compositor-driven animation is seen a frame late**: the page reads where things are, then draws.
+  Under a fixed bar the bent picture trails the scrolling one by a frame.
+- **Rotated glass** is bent as if it weren't; scales and translations are followed.
+- `distortion` and `backdrop` (CSS filter functions in front) are left out there.
+- `globalThis.LIQUID_GLASS_WEBGL = true` (before the first `glass()`) draws with the shader in Chromium too, to see
+  or test it.
 
 ## The demos
 
@@ -409,9 +491,15 @@ liquidglass's look is two; its blur fill and dark cap add nodes Skia draws with 
 
 ## Limitations
 
-- **Chromium only.** Electron, Chrome and Edge bend the backdrop; Firefox and Safari accept the syntax but draw nothing,
-  so there the glass is a plain blur with its light, fill and shadow (`globalThis.LIQUID_GLASS_FALLBACK = true` shows
-  what that looks like).
+- **Only Chromium bends whatever is behind the glass.** Electron, Chrome and Edge do; Firefox and Safari accept the
+  syntax but draw nothing. There the glass bends a picture the page names, with a shader
+  ([Safari and Firefox](#safari-and-firefox)), and without one it's a plain blur with its light, fill and shadow
+  (`globalThis.LIQUID_GLASS_FALLBACK = true` shows what that looks like).
+- **On a display whose colour profile has another tone curve than sRGB's** (a calibrated monitor's, say), Chromium
+  converts the glass's maps on their way to the screen, greys too, and everything under the glass moves down by some
+  px: 4 px for a map of no shift at a scale of 100 on the Dell this was found on (its profile's curve is a gamma of
+  1.96), 9 px under default glass of 360 × 200. Drawn off screen it's right, which is how `test:web` draws its
+  references. The shader's glass doesn't go through that conversion.
 - **Every glass costs something on every frame anything on the page changes**, even glass whose own backdrop didn't
   change: Chromium runs every backdrop filter again for each frame. Idle, it's nothing; while something animates or
   scrolls, it's roughly proportional to the number of glass elements on screen (see [Performance](#performance)). Glass
@@ -478,6 +566,7 @@ one, see `pnpm-workspace.yaml`) and Node 22.18 or later, which runs the unit tes
 pnpm test              # the optics, fields, maps, options and groups' geometry (node:test)
 pnpm test:visual       # screenshots in Electron against test/visual/baseline/
 pnpm test:native       # on a Mac: the glass against macOS's own, test/native/reference/ (see below)
+pnpm test:web          # the shader's glass in Electron, Safari and Firefox (Linux: Firefox, WebKitGTK) against the compositor's (see below)
 pnpm typecheck
 ```
 
@@ -490,6 +579,15 @@ glass wrong on purpose and fails unless the cases catch it; `--calibrate` writes
 from what the glass measures now, which is for after a change meant to move the glass closer to macOS. It needs Screen
 Recording permission for the terminal, and stops if macOS's version, the display's gamut or its scale differ from the
 references'.
+
+`pnpm test:web` draws each case of `test/web/cases.js` as Chromium's compositor does (in Electron, off screen, in
+sRGB: the reference, drawn fresh every run), then with the shader in Electron, and in Safari and Firefox (on Linux,
+Firefox and WebKitGTK, the latter through `test/web/webkitgtk.py`: GTK 4, WebKitGTK 6.0 and PyGObject), which it
+opens on the page and closes again. Any other name in `--browsers=` prints the page's address for a browser you open
+yourself (`--host=0.0.0.0` for one on another machine). The page reads the glass's canvas back, so nothing is captured from the screen and
+it needs no permission. Each case has limits (`test/web/limits.json`, written by `--calibrate`) on the mean difference
+inside the glass, the same within 10 px of its edge, and the share of pixels far off; `--self-check` bends the glass
+half as much again on purpose and fails unless every case catches it. `--browsers=electron` runs without opening any.
 
 The visual baselines are drawn by the GPU, so they belong to a machine (these are from Linux, Mesa, AMD). On another,
 write your own first with `pnpm test:visual --update`, then the test catches changes from there.

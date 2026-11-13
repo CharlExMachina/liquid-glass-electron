@@ -1,0 +1,22 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>liquid-glass-electron: bench:web</title>
+<style>
+  html, body { margin: 0; background: #111; font: 15px/1.5 system-ui, sans-serif; color: #fff; }
+  #root { position: relative; width: 1180px; height: 800px; overflow: hidden; }
+  #scroller { position: absolute; inset: 0; overflow: hidden; }
+  #back { display: block; width: 1180px; height: 3200px; object-fit: cover; }
+  #film { display: block; width: 1180px; height: 800px; object-fit: cover; }
+  #counter { position: absolute; left: 40px; top: 400px; font: 600 64px/1 ui-monospace, monospace; }
+  .panel { position: absolute; left: 0; top: 0; display: grid; place-items: center; font-weight: 600; text-shadow: 0 1px 2px rgb(0 0 0 / .5); }
+  #hud { position: fixed; left: 8px; bottom: 8px; color: #0f0; font: 12px ui-monospace, monospace; background: rgb(0 0 0 / .6); padding: 2px 6px; z-index: 9; }
+</style>
+<script type="module" src="page.js"></script>
+</head>
+<body>
+<div id="root"><div id="scroller"></div><div id="counter">0</div></div>
+<div id="hud"></div>
+</body>
+</html>

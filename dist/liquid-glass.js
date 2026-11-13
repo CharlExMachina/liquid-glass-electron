@@ -24,6 +24,7 @@ var DEFAULTS = {
   strength: 1,
   variant: null,
   backdrop: null,
+  backdropSource: null,
   tint: null,
   fill: null,
   surface: null,
@@ -88,7 +89,7 @@ var NUMBERS = [
   "outlineTop"
 ];
 var BOOLEANS = ["floating", "button", "interactive", "smooth", "magnify", "adaptive", "group"];
-var STRINGS = ["variant", "tint", "fill", "surface", "shape", "press", "path", "pathBox", "backdrop", "colorMatrix"];
+var STRINGS = ["variant", "tint", "fill", "surface", "shape", "press", "path", "pathBox", "backdrop", "backdropSource", "colorMatrix"];
 var ALL = [...NUMBERS, ...BOOLEANS, ...STRINGS];
 var ALIASES = {
   bevel: "zRadius",
@@ -900,6 +901,802 @@ function fieldLight(f, bevel, o, shadow, scale, pad, fill = null) {
   return { light: { width, height: height2, data: light }, shadow: { width, height: height2, data: shade }, mask: { width, height: height2, data: mask }, pad };
 }
 
+// src/webgl.ts
+function isBackdropSource(el) {
+  return !!el && (el instanceof HTMLImageElement || el instanceof HTMLVideoElement || el instanceof HTMLCanvasElement);
+}
+function sourceIdentity(el) {
+  if (el instanceof HTMLCanvasElement) return `${el.width}x${el.height}`;
+  return `${el.currentSrc}|${el.crossOrigin}`;
+}
+var supported = null;
+function glSupported() {
+  if (supported !== null) return supported;
+  if (typeof document === "undefined") return supported = false;
+  try {
+    supported = !!renderer().gl;
+  } catch {
+    supported = false;
+  }
+  return supported;
+}
+function fitRect(box, iw, ih, fit, position) {
+  if (!iw || !ih) return box;
+  let w = box.w, h = box.h;
+  const contain = Math.min(box.w / iw, box.h / ih), cover = Math.max(box.w / iw, box.h / ih);
+  const scale = fit === "contain" ? contain : fit === "cover" ? cover : fit === "none" ? 1 : fit === "scale-down" ? Math.min(1, contain) : 0;
+  if (scale) {
+    w = iw * scale;
+    h = ih * scale;
+  }
+  const [px = "50%", py = "50%"] = position.trim().split(/\s+/);
+  const at = (v, free) => v.endsWith("%") ? parseFloat(v) / 100 * free : parseFloat(v) || 0;
+  return { x: box.x + at(px, box.w - w), y: box.y + at(py, box.h - h), w, h };
+}
+var VERTEX = `#version 300 es
+out vec2 v;
+void main() {
+  // one triangle over the viewport
+  vec2 p = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2));
+  v = p;
+  gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);
+}`;
+var INSIDE = `uniform vec4 uShown;   // what of the picture its element shows, in uv: from xy to zw
+float inside(vec2 uv, vec2 px) {
+  vec2 d = clamp(min(uv - uShown.xy, uShown.zw - uv) / max(px, vec2(1e-7)) + 0.5, 0.0, 1.0);
+  return d.x * d.y;
+}`;
+var COPY = `#version 300 es
+precision highp float;
+uniform sampler2D uSrc;
+uniform vec4 uRegion;   // the texture's place, in the element's px
+uniform vec4 uToUv;     // the element's px to the source's uv: p * xy + zw
+uniform vec2 uGx, uGy;  // the source's uv per texel of the output
+in vec2 v;
+out vec4 o;
+${INSIDE}
+void main() {
+  vec2 p = uRegion.xy + v * uRegion.zw;
+  vec2 uv = p * uToUv.xy + uToUv.zw;
+  // past the picture: nothing (premultiplied, so the blur fades the picture out, not into its last row)
+  o = textureGrad(uSrc, clamp(uv, 0.0, 1.0), uGx, uGy) * inside(uv, vec2(uGx.x, uGy.y));
+}`;
+var BLUR = `#version 300 es
+precision highp float;
+uniform sampler2D uTex;
+uniform vec2 uStep;
+uniform float uSigma;
+in vec2 v;
+out vec4 o;
+void main() {
+  vec4 sum = vec4(0.0);
+  float total = 0.0;
+  for (int i = -12; i <= 12; i++) {
+    float w = exp(-0.5 * float(i * i) / (uSigma * uSigma));
+    sum += w * textureLod(uTex, v + float(i) * uStep, 0.0);
+    total += w;
+  }
+  o = sum / total;
+}`;
+var GLASS = `#version 300 es
+precision highp float;
+uniform sampler2D uBack, uWide, uMap0, uMap1, uMap2, uTab0, uTab1, uTab2, uGain, uOffset;
+uniform vec4 uTabInfo[3];   // entries, bias, rimPx
+uniform vec3 uK;            // red, green, blue: times the map's shift
+uniform vec2 uSize;         // the element, px
+uniform vec4 uMapRect;
+uniform vec4 uToUv;         // the element's px to the backdrop texture's uv
+uniform vec2 uGx, uGy;      // the backdrop's uv per device pixel
+uniform float uPixel;       // a device pixel, in the element's px
+uniform vec2 uEdge;         // a device pixel in the backdrop's uv, where its edge is the picture's (0: it has the picture's edge in it, the frost's)
+uniform mat3 uColour;
+uniform vec3 uColourOffset;
+uniform float uFill, uCap, uOpacity, uSurface;
+uniform bool uFlip, uSmooth, uDarken, uFringe, uCover;
+in vec2 v;
+out vec4 o;
+
+${INSIDE}
+
+// the backdrop at a place, premultiplied: nothing past the picture
+vec4 tap(vec2 p) {
+  vec2 uv = p * uToUv.xy + uToUv.zw;
+  vec4 c = textureGrad(uBack, clamp(uv, 0.0, 1.0), uGx, uGy);
+  return uEdge.x > 0.0 ? c * inside(uv, uEdge) : c;
+}
+
+// the backdrop as the glass shows it, premultiplied
+vec4 back(vec2 p) {
+  vec4 c;
+  if (uSmooth) {
+    // four taps half a pixel out, each the mean of four pixels: the 3 x 3 kernel 1 2 1, 2 4 2, 1 2 1
+    vec2 d = vec2(uPixel * 0.5);
+    c = 0.25 * (tap(p + d) + tap(p - d) + tap(p + vec2(d.x, -d.y)) + tap(p + vec2(-d.x, d.y)));
+  } else {
+    c = tap(p);
+  }
+  if (c.a <= 0.0) return vec4(0.0);
+  vec3 s = c.rgb / c.a;
+  if (uFill > 0.0) {
+    vec4 w = textureLod(uWide, clamp(p * uToUv.xy + uToUv.zw, 0.0, 1.0), 0.0);
+    if (w.a > 0.0) s = mix(s, uDarken ? min(s, w.rgb / w.a) : max(s, w.rgb / w.a), uFill);
+  }
+  // the matrix, clipped as a filter clips; and macOS's cap on the luma, which keeps the hue
+  vec3 r = uColour * s + uColourOffset;
+  vec3 col = clamp(r, 0.0, 1.0);
+  if (uCap > 0.0) {
+    float l = clamp(dot(vec3(0.2126, 0.7152, 0.0722), r), -1.0, 1.0);
+    if (l > uCap) col *= uCap / l;
+  }
+  return vec4(col * c.a, c.a);
+}
+
+vec2 shift(sampler2D map, sampler2D tab, vec4 info, vec2 p, out float edge) {
+  vec3 m = textureLod(map, (p - uMapRect.xy) / uMapRect.zw, 0.0).rgb;
+  edge = m.b;
+  vec2 t = m.rg * (info.x - 1.0), i = min(floor(t), info.x - 2.0), f = t - i;
+  float x = mix(texelFetch(tab, ivec2(int(i.x), 0), 0).r, texelFetch(tab, ivec2(int(i.x) + 1, 0), 0).r, f.x);
+  float y = mix(texelFetch(tab, ivec2(int(i.y), 0), 0).g, texelFetch(tab, ivec2(int(i.y) + 1, 0), 0).g, f.y);
+  return (vec2(x, y) - info.y - 0.5) * 2.0 * info.z;
+}
+
+void main() {
+  vec2 p = vec2(v.x, uFlip ? 1.0 - v.y : v.y) * uSize;
+  float edge, unused;
+  vec2 s0 = shift(uMap0, uTab0, uTabInfo[0], p, edge);
+  vec4 col;
+  if (uFringe) {
+    vec2 s1 = shift(uMap1, uTab1, uTabInfo[1], p, unused), s2 = shift(uMap2, uTab2, uTabInfo[2], p, unused);
+    // each channel from its own place: there as much as the three are, between them
+    vec4 r = back(p + s0 * uK.x), g = back(p + s1 * uK.y), b = back(p + s2 * uK.z);
+    col = vec4(r.r, g.g, b.b, (r.a + g.a + b.a) / 3.0);
+  } else {
+    col = back(p + s0 * uK.x);
+  }
+  if (uOpacity < 1.0) col = mix(back(p), col, uOpacity);
+  if (uSurface > 0.0 && col.a > 0.0) {
+    float gain = textureLod(uGain, p / uSize, 0.0).r, offset = textureLod(uOffset, p / uSize, 0.0).r;
+    col.rgb = clamp(col.rgb / col.a * (1.0 - uSurface + uSurface * gain) + uSurface * (offset - 0.5), 0.0, 1.0) * col.a;
+  }
+  // (where the glass sees none of the picture, none of it is drawn: what's under its canvas shows)
+  o = col * (uCover ? clamp((edge * 255.0 - 128.0) / 8.0 + 0.5, 0.0, 1.0) : 1.0);
+}`;
+var SCRATCH = 15;
+var Renderer = class {
+  canvas;
+  gl;
+  copy;
+  blur;
+  glass;
+  targets = /* @__PURE__ */ new Map();
+  sources = /* @__PURE__ */ new WeakMap();
+  mapTextures = /* @__PURE__ */ new WeakMap();
+  tableTextures = /* @__PURE__ */ new WeakMap();
+  images = /* @__PURE__ */ new Map();
+  // textures of maps that are gone, deleted with them
+  gone = new FinalizationRegistry((t) => this.gl.deleteTexture(t));
+  frame = 0;
+  maxTexture = 4096;
+  p3 = false;
+  lost = false;
+  constructor() {
+    const options = { alpha: true, premultipliedAlpha: true, depth: false, stencil: false, preserveDrawingBuffer: false };
+    const off = typeof OffscreenCanvas === "function";
+    const ways = [...off ? [[true, false], [true, true]] : [], [false, false], [false, true]];
+    const check = readsBack();
+    for (const [offscreen, antialias] of ways) {
+      const canvas2 = offscreen ? new OffscreenCanvas(16, 16) : Object.assign(document.createElement("canvas"), { width: 16, height: 16 });
+      const gl = canvas2.getContext("webgl2", { ...options, antialias });
+      if (!gl) continue;
+      if (!check || arrives(canvas2, gl)) {
+        this.canvas = canvas2;
+        this.gl = gl;
+        break;
+      }
+      gl.getExtension("WEBGL_lose_context")?.loseContext();
+    }
+    if (!this.gl) throw new Error("no WebGL2 whose frame can be copied");
+    this.canvas.addEventListener("webglcontextlost", (e) => {
+      e.preventDefault();
+      this.lost = true;
+    });
+    this.canvas.addEventListener("webglcontextrestored", () => {
+      this.setup();
+      this.lost = false;
+      for (const g of glasses) g.invalidate();
+    });
+    this.setup();
+  }
+  /** Everything the context holds, made (again). */
+  setup() {
+    const gl = this.gl;
+    this.targets = /* @__PURE__ */ new Map();
+    this.sources = /* @__PURE__ */ new WeakMap();
+    this.mapTextures = /* @__PURE__ */ new WeakMap();
+    this.tableTextures = /* @__PURE__ */ new WeakMap();
+    this.images = /* @__PURE__ */ new Map();
+    this.maxTexture = Math.min(gl.getParameter(gl.MAX_TEXTURE_SIZE), 8192);
+    this.copy = this.link(COPY);
+    this.blur = this.link(BLUR);
+    this.glass = this.link(GLASS);
+    gl.bindVertexArray(gl.createVertexArray());
+    gl.disable(gl.BLEND);
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+    this.p3 = false;
+  }
+  link(fragment) {
+    const gl = this.gl, program = gl.createProgram();
+    for (const [type, source] of [[gl.VERTEX_SHADER, VERTEX], [gl.FRAGMENT_SHADER, fragment]]) {
+      const shader = gl.createShader(type);
+      gl.shaderSource(shader, source);
+      gl.compileShader(shader);
+      if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS) && !gl.isContextLost()) throw new Error(`liquid-glass-electron: shader: ${gl.getShaderInfoLog(shader)}`);
+      gl.attachShader(program, shader);
+    }
+    gl.linkProgram(program);
+    if (!gl.getProgramParameter(program, gl.LINK_STATUS) && !gl.isContextLost()) throw new Error(`liquid-glass-electron: program: ${gl.getProgramInfoLog(program)}`);
+    const at = {};
+    const count = gl.getProgramParameter(program, gl.ACTIVE_UNIFORMS);
+    for (let i = 0; i < count; i++) {
+      const name = gl.getActiveUniform(program, i).name.replace(/\[0\]$/, "");
+      at[name] = gl.getUniformLocation(program, name);
+    }
+    return { program, at };
+  }
+  /** Whether the shader's numbers can be Display P3's (a wide-gamut display's, as Chromium's filters' are there). */
+  get canWide() {
+    return "drawingBufferColorSpace" in this.gl && "unpackColorSpace" in this.gl;
+  }
+  /** The colour space the shader's numbers are in. */
+  colourSpace(wide) {
+    const gl = this.gl;
+    const p3 = wide && this.canWide;
+    if (p3 === this.p3) return;
+    this.p3 = p3;
+    gl.drawingBufferColorSpace = gl.unpackColorSpace = p3 ? "display-p3" : "srgb";
+    this.sources = /* @__PURE__ */ new WeakMap();
+  }
+  /** A new texture, bound to the unit textures are made and filled on (never one a shader reads). */
+  texture(filter, wrap = this.gl.CLAMP_TO_EDGE) {
+    const gl = this.gl, t = gl.createTexture();
+    gl.activeTexture(gl.TEXTURE0 + SCRATCH);
+    gl.bindTexture(gl.TEXTURE_2D, t);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, filter);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, wrap);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, wrap);
+    return t;
+  }
+  /** A texture to draw into, of this size: kept for the next glass of the same size (and dropped after a while unused). */
+  target(w, h, n) {
+    const gl = this.gl, key = `${w}x${h}`;
+    let list = this.targets.get(key);
+    if (!list) this.targets.set(key, list = []);
+    while (list.length <= n) {
+      const texture = this.texture(gl.LINEAR);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+      const fbo = gl.createFramebuffer();
+      gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
+      list.push({ texture, fbo, w, h, used: this.frame });
+    }
+    list[n].used = this.frame;
+    return list[n];
+  }
+  /** Once a draw: targets no glass has used for a while go. */
+  sweep() {
+    if (++this.frame % 240) return;
+    for (const [key, list] of this.targets) {
+      if (list.every((t) => this.frame - t.used > 240)) {
+        for (const t of list) {
+          this.gl.deleteTexture(t.texture);
+          this.gl.deleteFramebuffer(t.fbo);
+        }
+        this.targets.delete(key);
+      }
+    }
+  }
+  /** The source as a texture, uploaded when what it shows changed; null while it has nothing to show (or can't be read). */
+  source(el) {
+    const gl = this.gl;
+    let e = this.sources.get(el);
+    if (!e) {
+      e = { texture: this.texture(el instanceof HTMLImageElement ? gl.LINEAR_MIPMAP_LINEAR : gl.LINEAR), key: "", version: 0, w: 0, h: 0, failed: false, failedAs: "", frames: 0, watching: false };
+      this.sources.set(el, e);
+    }
+    if (e.failed) {
+      if (e.failedAs === sourceIdentity(el)) return e;
+      e.failed = false;
+      e.key = "";
+    }
+    let w, h, key;
+    if (el instanceof HTMLImageElement) {
+      if (!el.complete || !el.naturalWidth) return null;
+      w = el.naturalWidth;
+      h = el.naturalHeight;
+      key = `${el.currentSrc}|${w}x${h}`;
+    } else if (el instanceof HTMLVideoElement) {
+      if (el.readyState < 2 || !el.videoWidth) return null;
+      w = el.videoWidth;
+      h = el.videoHeight;
+      const video = el;
+      const told = typeof video.requestVideoFrameCallback === "function";
+      if (told && !e.watching) {
+        const entry = e;
+        const next = () => {
+          entry.frames++;
+          entry.watching = false;
+          wake();
+        };
+        e.watching = true;
+        video.requestVideoFrameCallback(next);
+      }
+      key = `${w}x${h}|${told ? e.frames : el.currentTime}`;
+    } else {
+      if (!el.width || !el.height) return null;
+      w = el.width;
+      h = el.height;
+      key = `${w}x${h}|${this.frame}`;
+    }
+    if (key === e.key) return e;
+    e.key = key;
+    try {
+      gl.activeTexture(gl.TEXTURE0 + SCRATCH);
+      gl.bindTexture(gl.TEXTURE_2D, e.texture);
+      gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
+      const scale = Math.min(1, this.maxTexture / Math.max(w, h));
+      if (scale < 1) {
+        const small = document.createElement("canvas");
+        small.width = Math.round(w * scale);
+        small.height = Math.round(h * scale);
+        small.getContext("2d").drawImage(el, 0, 0, small.width, small.height);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, small);
+      } else {
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, el);
+      }
+      if (el instanceof HTMLImageElement) gl.generateMipmap(gl.TEXTURE_2D);
+      e.w = w;
+      e.h = h;
+      e.version++;
+    } catch {
+      e.failed = true;
+      e.failedAs = sourceIdentity(el);
+    }
+    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+    return e;
+  }
+  mapTexture(m) {
+    const gl = this.gl;
+    let t = this.mapTextures.get(m.pixels);
+    if (!t) {
+      t = this.texture(gl.LINEAR);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, m.pixels.width, m.pixels.height, 0, gl.RGBA, gl.UNSIGNED_BYTE, m.pixels.data);
+      this.mapTextures.set(m.pixels, t);
+      this.gone.register(m.pixels, t);
+    }
+    return t;
+  }
+  tableTexture(m) {
+    const gl = this.gl;
+    let t = this.tableTextures.get(m);
+    if (!t) {
+      t = this.texture(gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+      const n = m.tableX.length, data = new Float32Array(n * 2);
+      for (let i = 0; i < n; i++) {
+        data[i * 2] = m.tableX[i];
+        data[i * 2 + 1] = m.tableY[i];
+      }
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RG32F, n, 1, 0, gl.RG, gl.FLOAT, data);
+      this.tableTextures.set(m, t);
+      this.gone.register(m, t);
+    }
+    return t;
+  }
+  /** An image by its URL (a surface's gain or offset), once it's loaded; null until then. */
+  image(url, loaded) {
+    let e = this.images.get(url);
+    if (!e) {
+      const entry = e = { texture: null, ready: false };
+      this.images.set(url, entry);
+      const img = new Image();
+      img.crossOrigin = "anonymous";
+      img.onload = () => {
+        const gl = this.gl;
+        entry.texture = this.texture(gl.LINEAR);
+        try {
+          gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
+          entry.ready = true;
+        } catch {
+          entry.texture = null;
+        }
+        loaded();
+      };
+      img.src = url;
+      if (this.images.size > 64) this.images.delete(this.images.keys().next().value);
+    }
+    return e.ready ? e.texture : null;
+  }
+  run(target, x, y, w, h) {
+    const gl = this.gl;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, target ? target.fbo : null);
+    gl.viewport(x, y, w, h);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+  }
+  bind(unit2, texture) {
+    this.gl.activeTexture(this.gl.TEXTURE0 + unit2);
+    this.gl.bindTexture(this.gl.TEXTURE_2D, texture);
+  }
+  /**
+   * The backdrop around the glass (`pad` px past it on each side), blurred by σ px: at a resolution the blur can't
+   * tell from full, so its kernel stays 25 taps whatever σ is.
+   */
+  frosted(src, f, toUv, shown, scale, sigma, pad, slot) {
+    const gl = this.gl;
+    const texels = sigma * scale, q = Math.min(1, 2 ** -Math.ceil(Math.log2(Math.max(texels, 1e-3) / 4)));
+    const region = { x: -pad, y: -pad, w: f.w + 2 * pad, h: f.h + 2 * pad };
+    const w = Math.max(2, Math.round(region.w * scale * q)), h = Math.max(2, Math.round(region.h * scale * q));
+    const a = this.target(w, h, slot), b = this.target(w, h, slot + 1);
+    gl.useProgram(this.copy.program);
+    this.bind(0, src.texture);
+    gl.uniform1i(this.copy.at.uSrc, 0);
+    gl.uniform4f(this.copy.at.uRegion, region.x, region.y, region.w, region.h);
+    gl.uniform4f(this.copy.at.uToUv, toUv[0], toUv[1], toUv[2], toUv[3]);
+    gl.uniform2f(this.copy.at.uGx, toUv[0] * region.w / w, 0);
+    gl.uniform2f(this.copy.at.uGy, 0, toUv[1] * region.h / h);
+    gl.uniform4f(this.copy.at.uShown, shown[0], shown[1], shown[2], shown[3]);
+    this.run(a, 0, 0, w, h);
+    gl.useProgram(this.blur.program);
+    gl.uniform1i(this.blur.at.uTex, 0);
+    gl.uniform1f(this.blur.at.uSigma, Math.max(texels * q, 0.05));
+    this.bind(0, a.texture);
+    gl.uniform2f(this.blur.at.uStep, 1 / w, 0);
+    this.run(b, 0, 0, w, h);
+    this.bind(0, b.texture);
+    gl.uniform2f(this.blur.at.uStep, 0, 1 / h);
+    this.run(a, 0, 0, w, h);
+    return { texture: a.texture, region };
+  }
+  /**
+   * Draw the glasses due this frame, each into its own canvas. All of them are drawn side by side on the one WebGL
+   * canvas first and copied out after: a copy taken between two draws would have the browser finish the first draw
+   * before it starts the second, once per glass. False if nothing could be drawn (the context is lost).
+   */
+  flush(jobs) {
+    const gl = this.gl;
+    if (this.lost || gl.isContextLost()) return false;
+    this.sweep();
+    this.colourSpace(jobs[0].f.wideGamut);
+    const LIMIT = Math.min(this.maxTexture, 4096);
+    for (let from = 0; from < jobs.length; ) {
+      let x = 0, y = 0, row = 0, width = 0, to = from;
+      for (; to < jobs.length; to++) {
+        const j = jobs[to];
+        if (x && x + j.cw > LIMIT) {
+          x = 0;
+          y += row;
+          row = 0;
+        }
+        if (to > from && y + j.ch > LIMIT) break;
+        j.x = x;
+        j.y = y;
+        x += j.cw;
+        row = Math.max(row, j.ch);
+        width = Math.max(width, x);
+      }
+      const height2 = y + row;
+      if (this.canvas.width < width || this.canvas.height < height2) {
+        this.canvas.width = Math.max(this.canvas.width, width);
+        this.canvas.height = Math.max(this.canvas.height, height2);
+      }
+      const batch = jobs.slice(from, to);
+      for (const j of batch) this.draw(j);
+      const image2 = this.canvas instanceof HTMLCanvasElement ? this.canvas : this.canvas.transferToImageBitmap();
+      for (const j of batch) {
+        j.out.globalCompositeOperation = "copy";
+        j.out.drawImage(image2, j.x, j.y, j.cw, j.ch, 0, 0, j.cw, j.ch);
+        j.done();
+      }
+      if (!(image2 instanceof HTMLCanvasElement)) image2.close();
+      from = to;
+    }
+    return true;
+  }
+  /** One glass, at its place on the WebGL canvas. */
+  draw({ f, src, glassBox, sourceBox, shown: part, cw, ch, redraw, x = 0, y = 0 }) {
+    const gl = this.gl;
+    const sx = glassBox.w / f.w, sy = glassBox.h / f.h;
+    const toUv = [sx / sourceBox.w, sy / sourceBox.h, (glassBox.x - sourceBox.x) / sourceBox.w, (glassBox.y - sourceBox.y) / sourceBox.h];
+    const shown = [(part.x - sourceBox.x) / sourceBox.w, (part.y - sourceBox.y) / sourceBox.h, (part.x + part.w - sourceBox.x) / sourceBox.w, (part.y + part.h - sourceBox.y) / sourceBox.h];
+    const scale = cw / f.w;
+    let back = src.texture, backToUv = toUv, wide = null;
+    let gx = [toUv[0] / scale, 0], gy = [0, toUv[1] / (ch / f.h)];
+    if (f.sigma > 0.01) {
+      const tail = Math.ceil(3 * Math.max(f.sigma, f.fill?.sigma ?? 0));
+      const pad = Math.ceil(f.reach) + tail + 2;
+      const frost = this.frosted(src, f, toUv, shown, scale, f.sigma, pad, 0);
+      back = frost.texture;
+      backToUv = [1 / frost.region.w, 1 / frost.region.h, -frost.region.x / frost.region.w, -frost.region.y / frost.region.h];
+      gx = [0, 0];
+      gy = [0, 0];
+      if (f.fill && f.fill.alpha > 0) wide = this.frosted(src, f, toUv, shown, scale, f.fill.sigma, pad, 2).texture;
+    }
+    const p = this.glass, at = p.at;
+    gl.useProgram(p.program);
+    this.bind(0, back);
+    this.bind(1, wide ?? back);
+    const maps = [0, 1, 2].map((c) => f.maps[f.channels[c].map]);
+    maps.forEach((m2, c) => {
+      this.bind(2 + c, this.mapTexture(m2));
+      this.bind(5 + c, this.tableTexture(m2));
+    });
+    let surface = 0;
+    if (f.surface && f.surface.strength > 0) {
+      const gain = this.image(f.surface.urls[0], redraw), offset = this.image(f.surface.urls[1], redraw);
+      if (gain && offset) {
+        this.bind(8, gain);
+        this.bind(9, offset);
+        surface = f.surface.strength;
+      }
+    }
+    if (!surface) {
+      this.bind(8, back);
+      this.bind(9, back);
+    }
+    ["uBack", "uWide", "uMap0", "uMap1", "uMap2", "uTab0", "uTab1", "uTab2", "uGain", "uOffset"].forEach((name, unit2) => gl.uniform1i(at[name], unit2));
+    gl.uniform4fv(at.uTabInfo, maps.flatMap((m2) => [m2.tableX.length, m2.bias, m2.rimPx, 0]));
+    gl.uniform3f(at.uK, f.channels[0].k, f.channels[1].k, f.channels[2].k);
+    gl.uniform2f(at.uSize, f.w, f.h);
+    gl.uniform4f(at.uMapRect, f.mapRect.x, f.mapRect.y, f.mapRect.w, f.mapRect.h);
+    gl.uniform4f(at.uToUv, backToUv[0], backToUv[1], backToUv[2], backToUv[3]);
+    gl.uniform2f(at.uGx, gx[0], gx[1]);
+    gl.uniform2f(at.uGy, gy[0], gy[1]);
+    gl.uniform1f(at.uPixel, 1 / scale);
+    gl.uniform2f(at.uEdge, gx[0], gy[1]);
+    gl.uniform4f(at.uShown, shown[0], shown[1], shown[2], shown[3]);
+    const m = f.matrix;
+    gl.uniformMatrix3fv(at.uColour, false, [m[0], m[5], m[10], m[1], m[6], m[11], m[2], m[7], m[12]]);
+    gl.uniform3f(at.uColourOffset, m[3] + m[4], m[8] + m[9], m[13] + m[14]);
+    gl.uniform1f(at.uFill, wide ? f.fill.alpha : 0);
+    gl.uniform1f(at.uCap, f.cap ?? 0);
+    gl.uniform1f(at.uOpacity, f.opacity);
+    gl.uniform1f(at.uSurface, surface);
+    gl.uniform1i(at.uFlip, 1);
+    gl.uniform1i(at.uSmooth, f.smooth && f.sigma <= 0.01 ? 1 : 0);
+    gl.uniform1i(at.uDarken, f.fill?.darken ? 1 : 0);
+    gl.uniform1i(at.uFringe, f.channels.some((c) => c.map !== f.channels[0].map || c.k !== f.channels[0].k) ? 1 : 0);
+    gl.uniform1i(at.uCover, f.cover ? 1 : 0);
+    this.run(null, x, this.canvas.height - y - ch, cw, ch);
+  }
+};
+function readsBack() {
+  const ctx = Object.assign(document.createElement("canvas"), { width: 2, height: 2 }).getContext("2d", { willReadFrequently: true });
+  if (!ctx) return false;
+  ctx.fillStyle = "#f00";
+  ctx.fillRect(0, 0, 2, 2);
+  const p = ctx.getImageData(0, 0, 1, 1).data;
+  return p[0] > 247 && p[1] < 8 && p[2] < 8 && p[3] > 247;
+}
+function arrives(canvas2, gl) {
+  try {
+    const ctx = Object.assign(document.createElement("canvas"), { width: 2, height: 2 }).getContext("2d", { willReadFrequently: true });
+    ctx.globalCompositeOperation = "copy";
+    for (const [r, b] of [[1, 0], [0, 1]]) {
+      gl.viewport(0, 0, canvas2.width, canvas2.height);
+      gl.clearColor(r, 0, b, 1);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+      const image2 = canvas2 instanceof HTMLCanvasElement ? canvas2 : canvas2.transferToImageBitmap();
+      ctx.drawImage(image2, 0, 0, 2, 2);
+      if (!(image2 instanceof HTMLCanvasElement)) image2.close();
+      const p = ctx.getImageData(0, 0, 1, 1).data;
+      if (Math.abs(p[0] - r * 255) > 8 || p[1] > 8 || Math.abs(p[2] - b * 255) > 8 || p[3] < 247) return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+var shared = null;
+function renderer() {
+  return shared ??= new Renderer();
+}
+var glasses = /* @__PURE__ */ new Set();
+var watchers = /* @__PURE__ */ new Set();
+var stale = false;
+var SOURCE_ATTRIBUTES = ["src", "srcset", "crossorigin", "id", "class"];
+var frame = 0;
+var timer = 0;
+var quiet = 0;
+var listening = false;
+var mutations = null;
+var QUIET = 30;
+var REST = 1e3;
+var EVENTS = ["scroll", "wheel", "pointermove", "pointerdown", "pointerup", "touchmove", "keydown", "transitionrun", "animationstart", "load", "play", "seeked"];
+function watchSources(look) {
+  watchers.add(look);
+  listen(true);
+  return () => {
+    watchers.delete(look);
+    if (!glasses.size && !watchers.size) listen(false);
+  };
+}
+var changed = () => {
+  stale = true;
+  wake();
+};
+function drawDue() {
+  const jobs = [];
+  for (const g of glasses) {
+    const job = g.prepare();
+    if (job) jobs.push(job);
+  }
+  return jobs.length > 0 && renderer().flush(jobs);
+}
+function wake() {
+  quiet = 0;
+  if (frame || !(glasses.size || watchers.size)) return;
+  clearTimeout(timer);
+  timer = 0;
+  frame = requestAnimationFrame(tick);
+}
+function tick() {
+  frame = 0;
+  if (!glasses.size && !watchers.size) return;
+  if (stale) {
+    stale = false;
+    for (const look of [...watchers]) look();
+  }
+  const drew = !document.hidden && drawDue();
+  quiet = drew ? 0 : quiet + 1;
+  if (quiet < QUIET) frame = requestAnimationFrame(tick);
+  else timer = window.setTimeout(() => {
+    timer = 0;
+    stale = true;
+    frame = requestAnimationFrame(tick);
+  }, REST);
+}
+function listen(on) {
+  if (on === listening) return;
+  listening = on;
+  for (const type of EVENTS) {
+    if (on) document.addEventListener(type, wake, { capture: true, passive: true });
+    else document.removeEventListener(type, wake, { capture: true });
+  }
+  if (on) {
+    window.addEventListener("resize", wake);
+    document.addEventListener("visibilitychange", wake);
+    for (const type of ["load", "error"]) document.addEventListener(type, changed, { capture: true, passive: true });
+    mutations = new MutationObserver((records) => {
+      if (records.some((r) => r.type === "childList" || SOURCE_ATTRIBUTES.includes(r.attributeName))) stale = true;
+      wake();
+    });
+    mutations.observe(document.documentElement, { subtree: true, childList: true, attributes: true, attributeFilter: ["style", "hidden", ...SOURCE_ATTRIBUTES] });
+  } else {
+    mutations?.disconnect();
+    mutations = null;
+    window.removeEventListener("resize", wake);
+    document.removeEventListener("visibilitychange", wake);
+    for (const type of ["load", "error"]) document.removeEventListener(type, changed, { capture: true });
+    cancelAnimationFrame(frame);
+    clearTimeout(timer);
+    frame = timer = 0;
+  }
+}
+var boxOf = (r) => ({ x: r.left, y: r.top, w: r.width, h: r.height });
+function pictureBox(el, src) {
+  const r = el.getBoundingClientRect(), cs = getComputedStyle(el);
+  const kx = el.offsetWidth ? r.width / el.offsetWidth : 1, ky = el.offsetHeight ? r.height / el.offsetHeight : 1;
+  const px = (name) => parseFloat(cs.getPropertyValue(name)) || 0;
+  const left = (px("border-left-width") + px("padding-left")) * kx, top = (px("border-top-width") + px("padding-top")) * ky;
+  const right = (px("border-right-width") + px("padding-right")) * kx, bottom = (px("border-bottom-width") + px("padding-bottom")) * ky;
+  const content = { x: r.left + left, y: r.top + top, w: Math.max(r.width - left - right, 0), h: Math.max(r.height - top - bottom, 0) };
+  const picture = fitRect(content, src.w * kx, src.h * ky, cs.objectFit, cs.objectPosition);
+  const x = Math.max(picture.x, content.x), y = Math.max(picture.y, content.y);
+  return { picture, shown: { x, y, w: Math.max(Math.min(picture.x + picture.w, content.x + content.w) - x, 0), h: Math.max(Math.min(picture.y + picture.h, content.y + content.h) - y, 0) } };
+}
+var GlGlass = class {
+  host;
+  source;
+  canvas;
+  // made with the first frame, in the colour space the glass is drawn in
+  ctx = null;
+  dirty = true;
+  key = "";
+  shown = false;
+  // the plain look under the canvas, while the glass looks past its picture
+  under = "none";
+  constructor(host2, source) {
+    this.host = host2;
+    this.source = source;
+    this.canvas = document.createElement("canvas");
+    this.canvas.setAttribute("aria-hidden", "true");
+    this.canvas.dataset.lgLayer = "backdrop";
+    this.canvas.style.cssText = "position:absolute;z-index:-2;pointer-events:none;margin:0;padding:0;border:0;border-radius:inherit;display:block;";
+    glasses.add(this);
+    listen(true);
+    wake();
+  }
+  setSource(source) {
+    if (source === this.source) return;
+    this.source = source;
+    this.invalidate();
+  }
+  /** What the glass looks like changed: draw it again on the next frame. */
+  invalidate() {
+    this.dirty = true;
+    wake();
+  }
+  /** What to draw, if the glass, the source or either's place changed since it was last drawn; null if nothing did. */
+  prepare() {
+    const f = this.host.frame();
+    const r = renderer();
+    const src = f ? r.source(this.source) : null;
+    if (src?.failed) {
+      this.host.failed();
+      return null;
+    }
+    const el = this.host.el;
+    const glassBox = f && src ? boxOf(el.getBoundingClientRect()) : null;
+    const at = glassBox?.w && glassBox.h ? pictureBox(this.source, src) : null;
+    if (!f || !at?.shown.w || !at.shown.h) {
+      this.setUnder(f ? this.host.fallback() : "none");
+      if (this.shown) {
+        this.ctx?.clearRect(0, 0, this.canvas.width, this.canvas.height);
+        this.shown = false;
+        this.key = "";
+      }
+      return null;
+    }
+    const box = glassBox, sourceBox = at.picture, shown = at.shown;
+    const within2 = box.x >= shown.x - 0.5 && box.y >= shown.y - 0.5 && box.x + box.w <= shown.x + shown.w + 0.5 && box.y + box.h <= shown.y + shown.h + 0.5;
+    this.setUnder(within2 || f.cover ? "none" : this.host.fallback());
+    if (box.x > innerWidth || box.y > innerHeight || box.x + box.w < 0 || box.y + box.h < 0) return null;
+    const dpr = Math.min(devicePixelRatio || 1, 3);
+    const key = [box.x - sourceBox.x, box.y - sourceBox.y, box.w, box.h, sourceBox.w, sourceBox.h, shown.x - sourceBox.x, shown.y - sourceBox.y, shown.w, shown.h, f.w, f.h, dpr].map((v) => Math.round(v * 64)).join() + `|${src.version}`;
+    if (!this.dirty && key === this.key) return null;
+    const cs = getComputedStyle(el), style = this.canvas.style;
+    const set = (k, v) => {
+      if (style[k] !== v) style[k] = v;
+    };
+    set("left", `${-(parseFloat(cs.borderLeftWidth) || 0)}px`);
+    set("top", `${-(parseFloat(cs.borderTopWidth) || 0)}px`);
+    set("width", `${f.w}px`);
+    set("height", `${f.h}px`);
+    const cw = Math.max(1, Math.round(f.w * dpr)), ch = Math.max(1, Math.round(f.h * dpr));
+    if (this.canvas.width !== cw || this.canvas.height !== ch) {
+      this.canvas.width = cw;
+      this.canvas.height = ch;
+    }
+    this.ctx ??= this.canvas.getContext("2d", f.wideGamut && r.canWide ? { colorSpace: "display-p3" } : void 0);
+    return {
+      f,
+      src,
+      glassBox: box,
+      sourceBox,
+      shown,
+      cw,
+      ch,
+      out: this.ctx,
+      redraw: () => this.invalidate(),
+      done: () => {
+        this.dirty = false;
+        this.key = key;
+        this.shown = true;
+      }
+    };
+  }
+  setUnder(css) {
+    if (css === this.under) return;
+    this.under = css;
+    this.canvas.style.setProperty("backdrop-filter", css);
+  }
+  destroy() {
+    glasses.delete(this);
+    this.canvas.remove();
+    if (!glasses.size && !watchers.size) listen(false);
+  }
+};
+
 // src/lens.ts
 var MAP_PIXELS = 4096;
 var FINE_MAP_PIXELS = 65536;
@@ -912,6 +1709,15 @@ var SETTLE = 120;
 var BACKGROUND = ["background-color", "background-image", "background-position", "background-size", "background-repeat", "background-origin", "background-clip"];
 var KEEP = ["1 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 1 0", "0 0 0 0 0  0 1 0 0 0  0 0 0 0 0  0 0 0 1 0", "0 0 0 0 0  0 0 0 0 0  0 0 1 0 0  0 0 0 1 0"];
 var nextId = 0;
+var shaderHere = () => !supportsSvgBackdrop() || !!globalThis.LIQUID_GLASS_WEBGL;
+var warned = /* @__PURE__ */ new WeakSet();
+var warnedNames = /* @__PURE__ */ new Set();
+function warnOnce(about, ...message) {
+  if (typeof about === "string" ? warnedNames.has(about) : warned.has(about)) return;
+  if (typeof about === "string") warnedNames.add(about);
+  else warned.add(about);
+  console.warn("liquid-glass-electron:", ...message);
+}
 var mapCache = /* @__PURE__ */ new Map();
 var lightCache = /* @__PURE__ */ new Map();
 var remember = (m, k, v) => {
@@ -950,6 +1756,16 @@ var Lens = class {
   passes = [];
   stash = false;
   bends = false;
+  // Where backdrop-filter can't bend (Safari, Firefox) and the page names what's behind the glass
+  // (GlassOptions.backdropSource): a shader draws the glass on a canvas behind the glass's layer (webgl.ts). The
+  // filter's nodes are still made, as what holds the glass's state, but never put in the document.
+  gl = null;
+  glMaps = [];
+  // the source now (looked up with every refresh: a selector's match may be another element, or one at last)
+  glNow = null;
+  // a source that couldn't be read, and what it showed then: not tried again until it shows something else
+  glFailed = null;
+  unwatch = null;
   // geometry and the current map
   w = 0;
   h = 0;
@@ -1004,10 +1820,22 @@ var Lens = class {
     if (js) this.js = { ...this.js, ...js };
     const prev = this.options;
     this.options = resolve([fromCss(getComputedStyle(this.el)), fromData(this.el), this.js], this.host.env());
+    this.glNow = this.glSource();
+    const watch = !!this.options.backdropSource && !this.shape && shaderHere();
+    if (watch && !this.unwatch) {
+      this.unwatch = watchSources(() => {
+        if (this.glSource() !== this.glNow) this.refresh();
+      });
+    } else if (!watch) {
+      this.unwatch?.();
+      this.unwatch = null;
+    }
     const structure = this.structureKey();
     if (!prev || structure !== this.structure) {
       this.structure = structure;
       this.build();
+      this.setLayered(this.nested || !!this.gl);
+      if (this.gl && this.gl.canvas.parentElement !== this.el) this.el.prepend(this.gl.canvas);
       this.measure();
       this.bindPointer();
       this.changed();
@@ -1028,6 +1856,7 @@ var Lens = class {
   wanted = "none";
   changed() {
     this.version++;
+    this.gl?.invalidate();
     this.onChange?.();
   }
   setBackdrop(v) {
@@ -1051,6 +1880,12 @@ var Lens = class {
    * this one as it would through Apple's: what's behind, bent and frosted, this glass's light, and what's on it.
    */
   setNested(on) {
+    this.nested = on;
+    this.setLayered(on || !!this.gl);
+  }
+  nested = false;
+  /** The glass's own painting on a layer behind its content (see setNested), or on the element again. */
+  setLayered(on) {
     if (on === !!this.layer || this.shape) return;
     const el = this.el, own = ["position", "z-index", "border-image", ...BACKGROUND];
     if (on) {
@@ -1104,7 +1939,7 @@ var Lens = class {
    */
   batchSource() {
     const o = this.options;
-    if (!this.bends || this.maps.length !== 1 || this.isFree() || this.shape || this.layer || o.surface || o.backdrop || o.distortion > 0 || this.amount() <= 0 || !this.main) return null;
+    if (!this.bends || this.gl || this.maps.length !== 1 || this.isFree() || this.shape || this.layer || o.surface || o.backdrop || o.distortion > 0 || this.amount() <= 0 || !this.main) return null;
     const map = this.maps[0];
     if (!map.images[0].getAttribute("href") || !map.rimPx || !this.mapGrid) return null;
     const first = this.pre ?? this.main;
@@ -1123,8 +1958,59 @@ var Lens = class {
   /** What, in the options, decides which filter nodes there are. */
   structureKey() {
     const o = this.options;
-    const bends = supportsSvgBackdrop() && o.refraction > 0 && o.variant !== "identity";
-    return [bends, o.backdrop, !!o.surface, o.chromAberration > 0, o.bevelMode, o.blurAmount > 0, o.smooth, o.distortion > 0, o.opacity < 1, o.variant === "identity", o.magnify, this.isFree(), this.capped(), this.filled() ? this.host.env().dark ? "darken" : "lighten" : ""].join();
+    const gl = !!this.glNow;
+    const bends = (supportsSvgBackdrop() || gl) && o.refraction > 0 && o.variant !== "identity";
+    return [bends, gl, o.backdrop, !!o.surface, o.chromAberration > 0, o.bevelMode, o.blurAmount > 0, o.smooth, o.distortion > 0, o.opacity < 1, o.variant === "identity", o.magnify, this.isFree(), this.capped(), this.filled() ? this.host.env().dark ? "darken" : "lighten" : ""].join();
+  }
+  /**
+   * The element a shader bends as this glass's backdrop, or null: the compositor bends what's behind (Chromium), no
+   * source is named, nothing matches its selector (yet), it isn't an image, a video or a canvas, or it can't be read.
+   * globalThis.LIQUID_GLASS_WEBGL = true draws with the shader in Chromium too (to see or test it there).
+   */
+  glSource() {
+    const named = this.options.backdropSource;
+    if (!named || this.shape || !shaderHere()) return null;
+    let el = null;
+    if (typeof named === "string") {
+      try {
+        el = document.querySelector(named);
+      } catch {
+        warnOnce(named, `backdropSource: "${named}" is not a selector; the glass is a plain blur`);
+      }
+    } else el = named;
+    if (!isBackdropSource(el)) {
+      if (el) warnOnce(el, "backdropSource must be an <img>, <video> or <canvas>; the glass is a plain blur over", el);
+      return null;
+    }
+    if (this.glFailed?.el === el && this.glFailed.as === sourceIdentity(el)) return null;
+    return glSupported() ? el : null;
+  }
+  /** What the shader draws now (see GlFrame), or null: no glass, or its map isn't drawn yet. */
+  glFrame() {
+    const o = this.options, s = this.amount(), { w, h } = this;
+    if (!this.bends || s <= 0 || !w || !h || !this.passes.length || this.glMaps.length !== this.maps.length) return null;
+    const k = Math.max(this.bulge, 1) * (this.unitMaps ? o.refraction : 1) * s * Math.min(this.bulge, 1);
+    const passes = this.passes.length === 3 ? this.passes : [this.passes[0], this.passes[0], this.passes[0]];
+    const r = this.region.w ? this.region : { x: 0, y: 0, w, h }, m = this.margin;
+    const rect = this.mapRect ?? { x: -m, y: -m, w: r.w + 2 * m, h: r.h + 2 * m };
+    const frosted = o.blurAmount > 0;
+    return {
+      w,
+      h,
+      maps: this.glMaps,
+      mapRect: { x: r.x + rect.x, y: r.y + rect.y, w: rect.w, h: rect.h },
+      channels: passes.map((p) => ({ map: p.map, k: k * p.spread })),
+      reach: this.reach,
+      sigma: frosted ? this.frost() * s : 0,
+      fill: this.filled() ? { sigma: MAC_FILL_SIGMA * s, alpha: MAC_FILL_OPACITY * s, darken: this.host.env().dark } : null,
+      smooth: !frosted && o.smooth,
+      matrix: this.matrix(),
+      cap: this.capped() ? 1 + (macMaxLuma(Math.min(w, h)) - 1) * s : null,
+      opacity: o.opacity,
+      surface: o.surface ? { urls: o.surface, strength: s } : null,
+      cover: this.isFree(),
+      wideGamut: this.host.env().wideGamut !== false
+    };
   }
   /** A shape the element's own (rounded) box can't clip: the filter masks itself, and light and shadow are an image. */
   isFree() {
@@ -1156,6 +2042,7 @@ var Lens = class {
       }
       this.applyStrength();
       this.setBackdrop(s > 0 ? this.filterCss : "none");
+      if (this.gl && this.glNow) this.gl.setSource(this.glNow);
     }
     this.layout(true);
   }
@@ -1178,12 +2065,12 @@ var Lens = class {
   /** Follow running transitions and animations of --glass-* properties on the element, a frame at a time. */
   follow() {
     if (this.following) return;
-    const tick = () => {
+    const tick2 = () => {
       this.refresh();
       const running = this.el.getAnimations().some((a) => a.playState === "running");
-      this.following = running ? requestAnimationFrame(tick) : 0;
+      this.following = running ? requestAnimationFrame(tick2) : 0;
     };
-    this.following = requestAnimationFrame(tick);
+    this.following = requestAnimationFrame(tick2);
   }
   /** The frost and colour as CSS functions, scaled by the strength (glass that doesn't bend, and other browsers). */
   cssBackdrop() {
@@ -1235,7 +2122,13 @@ var Lens = class {
     this.passes = [];
     this.reach = 0;
     this.mapKey = "";
-    this.bends = supportsSvgBackdrop() && o.refraction > 0 && o.variant !== "identity";
+    const source = this.glNow;
+    this.bends = (supportsSvgBackdrop() || !!source) && o.refraction > 0 && o.variant !== "identity";
+    if (!source || !this.bends) {
+      this.gl?.destroy();
+      this.gl = null;
+      this.glMaps = [];
+    }
     const sigma = this.frost();
     if (!this.bends) {
       this.filterCss = o.variant === "identity" ? "none" : this.cssBackdrop();
@@ -1306,10 +2199,10 @@ var Lens = class {
       src = "SourceGraphic";
     }
     const pass = (result, spread, map) => {
-      const source = svgEl("feOffset", { in: src, dx: 0, dy: 0, result: `${result}in` });
+      const source2 = svgEl("feOffset", { in: src, dx: 0, dy: 0, result: `${result}in` });
       const node = svgEl("feDisplacementMap", { in: `${result}in`, in2: `map${map}`, xChannelSelector: "A", yChannelSelector: "R", result });
-      this.passes.push({ node, source, spread, map });
-      return [source, node];
+      this.passes.push({ node, source: source2, spread, map });
+      return [source2, node];
     };
     if (fringe) {
       const a = perChannel ? 0 : o.chromAberration * ABERRATION;
@@ -1340,6 +2233,28 @@ var Lens = class {
     }
     if (this.isFree()) {
       second.append(svgEl("feComposite", { in: out, in2: "map0_cover", operator: "in" }));
+    }
+    if (source) {
+      this.pre = fringe ? first : null;
+      this.main = second;
+      this.filterCss = "none";
+      this.gl ??= new GlGlass({
+        el: this.el,
+        frame: () => this.glFrame(),
+        // the source can't be read: the plain blur instead, until the source shows something else
+        failed: () => {
+          const el = this.glNow;
+          if (el) {
+            this.glFailed = { el, as: sourceIdentity(el) };
+            warnOnce(el, `backdropSource can't be read (another origin: it needs CORS headers and crossorigin="anonymous"); the glass is a plain blur over`, el);
+          }
+          this.refresh();
+        },
+        fallback: () => this.options.variant === "identity" || this.amount() <= 0 ? "none" : this.cssBackdrop()
+      }, source);
+      this.gl.setSource(source);
+      this.setBackdrop("none");
+      return;
     }
     const defs2 = filterDefs();
     if (fringe) {
@@ -1509,18 +2424,20 @@ var Lens = class {
       if (key !== this.mapKey) {
         this.mapKey = key;
         const entries = this.maps.map((map) => {
-          const k = `${key}|${map.fringe}`;
+          const k = `${key}|${map.fringe}${this.gl ? "|gl" : ""}`;
           return mapCache.get(k) ?? remember(mapCache, k, (() => {
             const profile = free && o.shape === "path" ? roundedRect(w, h, [0, 0, 0, 0]) : sub;
             const m = tableMap(sub, { refraction, bevel: zR, dome: o.bevelMode === 1, rim: o.bevelMode === 2, minify: o.bevelMode === 3, mac, magnify: o.magnify }, scale, moving ? 64 : 256, map.fringe, profile, grid);
-            return { urls: [0, 1, 2].slice(0, free ? 3 : 2).map((c) => greyDataURL(m, c)), rimPx: m.rimPx, margin: m.margin, rect: m.rect, grid: m.grid, tables: { ...encodeTables(m.tableX, m.tableY, m.bias), cover: m.tableB.join(" ") } };
+            const gl = this.gl ? { pixels: { width: m.width, height: m.height, data: m.data }, tableX: m.tableX, tableY: m.tableY, bias: m.bias, rimPx: m.rimPx } : void 0;
+            return { gl, urls: gl ? [] : [0, 1, 2].slice(0, free ? 3 : 2).map((c) => greyDataURL(m, c)), rimPx: m.rimPx, margin: m.margin, rect: m.rect, grid: m.grid, tables: { ...encodeTables(m.tableX, m.tableY, m.bias), cover: m.tableB.join(" ") } };
           })());
         });
         const maps = this.maps;
         applies.push(Promise.all(entries.flatMap((e) => e.urls.map(predecode))).then(() => () => {
           if (this.mapKey !== key || this.maps !== maps) return;
+          this.glMaps = entries.flatMap((e) => e.gl ? [e.gl] : []);
           entries.forEach((e, i) => {
-            maps[i].images.forEach((image2, c) => image2.setAttribute("href", e.urls[c]));
+            if (e.urls.length) maps[i].images.forEach((image2, c) => image2.setAttribute("href", e.urls[c]));
             maps[i].tables[0].children[0].setAttribute("tableValues", e.tables.across);
             for (const f of maps[i].tables[1].children) f.setAttribute("tableValues", e.tables.down);
             maps[i].cover?.children[0].setAttribute("tableValues", e.tables.cover);
@@ -1797,6 +2714,10 @@ var Lens = class {
     }
   }
   destroy() {
+    this.unwatch?.();
+    this.unwatch = null;
+    this.gl?.destroy();
+    this.gl = null;
     this.setNested(false);
     clearTimeout(this.settleTimer);
     cancelAnimationFrame(this.tween);
@@ -2029,16 +2950,16 @@ var GlassContainer = class {
   animate(ms = 400) {
     this.movingUntil = Math.max(this.movingUntil, performance.now() + ms);
     if (this.running) return;
-    const tick = () => {
+    const tick2 = () => {
       this.update();
-      if (performance.now() < this.movingUntil) this.running = requestAnimationFrame(tick);
+      if (performance.now() < this.movingUntil) this.running = requestAnimationFrame(tick2);
       else {
         this.running = 0;
         this.drawn = "";
         this.update();
       }
     };
-    this.running = requestAnimationFrame(tick);
+    this.running = requestAnimationFrame(tick2);
   }
   /** Change the glass's options (spacing too). */
   set(options) {
@@ -2069,7 +2990,7 @@ var GlassContainer = class {
 var SETTLE2 = 120;
 var MAX_SPREAD = 3;
 var nextGroup = 0;
-var EVENTS = ["transitionrun", "transitionend", "transitioncancel", "animationstart", "animationend", "animationcancel"];
+var EVENTS2 = ["transitionrun", "transitionend", "transitioncancel", "animationstart", "animationend", "animationcancel"];
 var GlassGroup = class {
   id = `lgg${++nextGroup}`;
   layer;
@@ -2132,7 +3053,7 @@ var GlassGroup = class {
     lens.onChange = m.touch;
     m.observer = new MutationObserver(m.touch);
     m.observer.observe(el, { attributes: true, attributeFilter: ["style", "class"] });
-    for (const t of EVENTS) el.addEventListener(t, m.touch);
+    for (const t of EVENTS2) el.addEventListener(t, m.touch);
     this.sizes.observe(el);
     this.members.push(m);
     this.schedule();
@@ -2150,7 +3071,7 @@ var GlassGroup = class {
     m.lens.onChange = null;
     m.lens.setBatched(false);
     m.observer.disconnect();
-    for (const t of EVENTS) m.el.removeEventListener(t, m.touch);
+    for (const t of EVENTS2) m.el.removeEventListener(t, m.touch);
     this.sizes.unobserve(m.el);
     if (m.saved) m.el.style.setProperty("isolation", m.saved);
     else m.el.style.removeProperty("isolation");

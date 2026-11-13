@@ -50,6 +50,11 @@ export declare class Lens {
     private passes;
     private stash;
     private bends;
+    private gl;
+    private glMaps;
+    private glNow;
+    private glFailed;
+    private unwatch;
     private w;
     private h;
     private radii;
@@ -98,6 +103,9 @@ export declare class Lens {
      * this one as it would through Apple's: what's behind, bent and frosted, this glass's light, and what's on it.
      */
     setNested(on: boolean): void;
+    private nested;
+    /** The glass's own painting on a layer behind its content (see setNested), or on the element again. */
+    private setLayered;
     /** A group draws (true) or stops drawing (false) this element's glass: its own filter goes off or back on, at once. */
     setBatched(on: boolean): void;
     /**
@@ -121,6 +129,14 @@ export declare class Lens {
     } | null;
     /** What, in the options, decides which filter nodes there are. */
     private structureKey;
+    /**
+     * The element a shader bends as this glass's backdrop, or null: the compositor bends what's behind (Chromium), no
+     * source is named, nothing matches its selector (yet), it isn't an image, a video or a canvas, or it can't be read.
+     * globalThis.LIQUID_GLASS_WEBGL = true draws with the shader in Chromium too (to see or test it there).
+     */
+    private glSource;
+    /** What the shader draws now (see GlFrame), or null: no glass, or its map isn't drawn yet. */
+    private glFrame;
     /** A shape the element's own (rounded) box can't clip: the filter masks itself, and light and shadow are an image. */
     private isFree;
     /** A free shape's field, for the element's size. */

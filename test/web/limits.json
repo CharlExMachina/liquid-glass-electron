@@ -1,0 +1,137 @@
+{
+  "defaults": {
+    "mean": 2.75,
+    "rim": 2.63,
+    "outliers": 0.23
+  },
+  "capsule": {
+    "mean": 2.95,
+    "rim": 2.58,
+    "outliers": 0.39
+  },
+  "circle": {
+    "mean": 2.7,
+    "rim": 3.07,
+    "outliers": 0.2
+  },
+  "nofringe": {
+    "mean": 2.76,
+    "rim": 2.64,
+    "outliers": 0.24
+  },
+  "unsmoothed": {
+    "mean": 6.74,
+    "rim": 8.01,
+    "outliers": 2.68
+  },
+  "strongfringe": {
+    "mean": 3.88,
+    "rim": 4.55,
+    "outliers": 0.91
+  },
+  "dome": {
+    "mean": 3.57,
+    "rim": 2.21,
+    "outliers": 0.5
+  },
+  "applelens": {
+    "mean": 1.54,
+    "rim": 1.91,
+    "outliers": 0.2
+  },
+  "switchlens": {
+    "mean": 1.98,
+    "rim": 2.04,
+    "outliers": 0.2
+  },
+  "frost": {
+    "mean": 1.78,
+    "rim": 2.29,
+    "outliers": 0.21
+  },
+  "regular": {
+    "mean": 0.97,
+    "rim": 1.02,
+    "outliers": 0.2
+  },
+  "clear": {
+    "mean": 0.95,
+    "rim": 1.45,
+    "outliers": 0.2
+  },
+  "regulardark": {
+    "mean": 0.92,
+    "rim": 0.97,
+    "outliers": 0.2
+  },
+  "smallregular": {
+    "mean": 1.65,
+    "rim": 1.88,
+    "outliers": 0.2
+  },
+  "colour": {
+    "mean": 4.21,
+    "rim": 4.71,
+    "outliers": 1.7
+  },
+  "opacity": {
+    "mean": 1.64,
+    "rim": 1.6,
+    "outliers": 0.2
+  },
+  "strength": {
+    "mean": 1.74,
+    "rim": 2.04,
+    "outliers": 0.2
+  },
+  "squircle": {
+    "mean": 3.74,
+    "rim": 3.74,
+    "outliers": 0.84
+  },
+  "path": {
+    "mean": 3.25,
+    "rim": 3.25,
+    "outliers": 0.41
+  },
+  "surface": {
+    "mean": 3.75,
+    "rim": 4.73,
+    "outliers": 0.33
+  },
+  "fitted": {
+    "mean": 2.96,
+    "rim": 2.78,
+    "outliers": 0.22
+  },
+  "contained": {
+    "mean": 3.59,
+    "rim": 3.51,
+    "outliers": 0.63
+  },
+  "edge": {
+    "mean": 3.88,
+    "rim": 4.13,
+    "outliers": 0.77
+  },
+  "edgefrost": {
+    "mean": 0.88,
+    "rim": 0.73,
+    "outliers": 0.2
+  },
+  "late": {
+    "mean": 2.75,
+    "rim": 2.63,
+    "outliers": 0.23
+  },
+  "retry": {
+    "mean": 3.97,
+    "rim": 4.63,
+    "outliers": 1.03
+  },
+  "replaced": {
+    "mean": 4.59,
+    "rim": 5.66,
+    "outliers": 0.9
+  }
+}

@@ -53,6 +53,7 @@ Options can also come from data attributes (`data-glass-refraction="0.4"`, `data
 | Bars over scrolling content | glass on a fixed/sticky bar; `scrollEdge(scroller, { style: 'soft' })` | `demo/demos/scroll.js` |
 | Apple's button styles | `glassButton(el, 'glass' \| 'prominent')`; accent from `--glass-accent` | `demo/demos/buttons.js` |
 | Glass over video, canvas, CSS animation | Nothing special: it bends whatever is drawn behind it, live | `demo/demos/video.js`, `demo/demos/drag.js` |
+| A website whose glass also bends in Safari and Firefox | Name the picture behind the glass: `backdropSource`. Read [Websites](#websites-safari-and-firefox) first | `demo/web/minimal.html`, `demo/web/web.js` |
 | Apple's glass as macOS 27 draws it | `variant: 'regular'` or `'clear'` (both frosted, `clear` more so with less colour, a lens along the rim; measured against SwiftUI's own, `pnpm test:native`); no variant for liquidglass's sharp bending; `blurAmount` for your own frost | `demo/demos/appearance.js`, `native/Glass.swift` |
 | Dark mode, Tinted, accessibility | `setEnvironment({ dark, appearance: 'tinted', reduceTransparency, increaseContrast, reduceMotion })` | `demo/demos/appearance.js` |
 | Every knob at once | the playground: it prints the `glass()` call for what you set | `demo/demos/playground.js` |
@@ -83,8 +84,56 @@ Options can also come from data attributes (`data-glass-refraction="0.4"`, `data
    off. Fade glass with its own `opacity` or `strength`.
 3. **The element's own border isn't drawn** (the light is a `border-image`). Use `edgeHighlight`.
 4. **Glass needs something behind it** to look like glass: photos, colour, text. Over a flat colour it's just a tint.
-5. **Chromium only** for the bending (Electron is Chromium); elsewhere it falls back to a blur.
+5. **Only Chromium bends whatever is behind the glass** (Electron is Chromium). Safari and Firefox bend the picture
+   named by `backdropSource` and nothing else; without one the glass falls back to a blur. Containers and glass inside
+   glass get no further than that picture there.
 6. **CSP:** `img-src` must allow `data:`.
+
+## Websites: Safari and Firefox
+
+Electron and Chrome need nothing from this section. Safari and Firefox can't bend what's behind an element, so there
+the glass bends one picture the page names, `backdropSource`, with a WebGL2 shader; Chromium ignores the option. Start
+from `demo/web/minimal.html` in the repository (one file, about 50 lines;
+https://github.com/CharlExMachina/liquid-glass-electron/blob/main/demo/web/minimal.html), or this:
+
+```html
+<img id="backdrop" src="photo.jpg" alt="">   <!-- position: fixed; inset: 0; width/height: 100%; object-fit: cover; z-index: -1 -->
+<nav data-glass="regular" data-glass-shape="capsule">…</nav>
+<div class="card" data-glass="regular">…</div>
+<script type="module">
+  import { autoGlass } from './liquid-glass.js';     // dist/liquid-glass.js, copied next to the page: one file, no imports
+  autoGlass('[data-glass]', { backdropSource: '#backdrop' });
+</script>
+```
+
+(`dist/liquid-glass.iife.js` is the same as a classic script, `window.LiquidGlass`; the `.min.js` of either is the
+same, smaller. With a bundler: `import { autoGlass } from 'liquid-glass-electron'`. Per element instead:
+`data-glass-backdrop-source="#backdrop"`.)
+
+1. **The source is an `<img>`, `<video>` or `<canvas>`**, or a selector for one. A CSS `background-image` can't be
+   named: draw the picture as an `<img>` with `object-fit: cover` (`object-fit` and `object-position` are followed).
+   Anything else named gets the plain blur, and a warning in the console that says why.
+2. **Keep the picture under the glass wherever the glass goes.** Where the glass leaves the picture it stops bending:
+   past the picture's edge it's the plain blur glass has without a source (frost and colour, nothing bent), and the
+   bent picture fades into that at the edge. A fixed or sticky bar over a page that scrolls past its hero is the usual
+   way to get there: make the picture `position: fixed` and as large as the window, as above. Over sections laid on
+   the picture, the glass still bends the picture, not the sections (rule 3), so keep them translucent enough that
+   this reads.
+3. **Only the picture is seen through the glass** there: in Safari and Firefox, text and elements between the picture
+   and the glass don't show through it (in Chromium they do, bent). Put text on the glass, not under it.
+4. **A selector is looked up again whenever the document changes**, so the picture may come after `glass()` (a
+   framework that renders it later), be replaced by another element the selector matches, or get another `src`: the
+   glass follows. Until something matches, the glass is the plain blur. Serve the page over http(s): Chrome loads no
+   ES module from `file://`.
+5. **Same origin**, or served with CORS headers and `crossorigin="anonymous"` on the element; otherwise the plain blur
+   (and a warning). It's tried again when the element's `src` or `crossorigin` changes, or another source is set.
+6. **What the shader doesn't do:** `container()` (falls back to the blur), glass inside glass sees only the picture,
+   `distortion`, `backdrop`, rotation. Groups don't apply and aren't needed.
+7. **Check it:** in Firefox or Safari each glass element has a `canvas[data-lg-layer="backdrop"]` child, drawn. No canvas
+   means the plain blur (no source, not an image/video/canvas, another origin without CORS, no WebGL2). A canvas with
+   a `backdrop-filter` of its own is glass that reaches past its picture (rule 2).
+   `globalThis.LIQUID_GLASS_WEBGL = true` before the first `glass()` draws with the shader in Chrome or Electron too,
+   to see it there.
 
 ## Rules for groups (glassGroup)
 
@@ -116,3 +165,8 @@ backdrop for all its members at once, before any of them paints. So:
 Glass is drawn by the compositor, so check it visually: capture the window (`webContents.capturePage()`) or record
 frames (`webContents.beginFrameSubscription`), as `demo/main.mjs --shot` and `--record` do, and look at the in-between
 frames of animations.
+
+In Safari and Firefox the glass is a canvas inside the element (`canvas[data-lg-layer="backdrop"]`), which a page can
+read back (`toDataURL()`): `pnpm test:web` does, against Chromium's own drawing of the same case. No such canvas means
+the glass fell back to the blur (no usable `backdropSource`; the console says which, if the page named one that
+can't be used).
