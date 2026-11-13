@@ -8,14 +8,18 @@
 // (no screen capture). Inside the glass, each case has a limit on how far from the compositor's it may be
 // (limits.json).
 //
-//   pnpm test:web                    every case in Electron, Safari and Firefox
+//   pnpm test:web                    every case in Electron, and in Safari and Firefox (on a Mac) or Firefox and
+//                                    WebKitGTK (on Linux; `epiphany`'s engine, through webkitgtk.py)
 //   pnpm test:web --browsers=electron,firefox     only these (electron needs no window on screen)
-//   pnpm test:web --case=defaults    one case
+//   pnpm test:web --browsers=electron,edge --host=0.0.0.0     any other name: the URL is printed, for a browser you
+//                                    open yourself (on this machine, or with --host on another: a phone, Windows)
+//   pnpm test:web --timeout=300      seconds a browser has to finish (120)
+//   pnpm test:web --case=defaults    one case (or several: --case=edge,late)
 //   pnpm test:web --calibrate        write limits.json from what the glass measures now, with room
 //   pnpm test:web --self-check       bend half as much again on purpose; fails unless the cases that bend catch it
 //   pnpm test:web --scale=2          the device scale to draw the reference at (the browsers' windows must be at it)
 import { app, BrowserWindow, nativeImage, nativeTheme } from 'electron';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { extname, join, resolve } from 'node:path';
@@ -28,9 +32,11 @@ const argv = process.argv.slice(2);
 const arg = (name) => argv.find((a) => a.startsWith(`--${name}=`))?.slice(name.length + 3);
 const calibrate = argv.includes('--calibrate'), selfCheck = argv.includes('--self-check');
 const scale = Number(arg('scale') ?? 1);
-const only = arg('case');
-const browsers = (arg('browsers') ?? (selfCheck ? 'electron' : 'electron,safari,firefox')).split(',');
-const cases = CASES.filter((c) => !only || c.name === only);
+const only = arg('case')?.split(',');
+const mac = process.platform === 'darwin';
+const browsers = (arg('browsers') ?? (selfCheck ? 'electron' : mac ? 'electron,safari,firefox' : process.platform === 'linux' ? 'electron,firefox,webkitgtk' : 'electron')).split(',');
+const host = arg('host') ?? '127.0.0.1', timeout = Number(arg('timeout') ?? 120) * 1000;
+const cases = CASES.filter((c) => !only || only.includes(c.name));
 const limitsFile = here('./limits.json');
 const limits = existsSync(limitsFile) ? JSON.parse(readFileSync(limitsFile, 'utf8')) : {};
 // the room calibrate leaves over what was measured (the worst of the browsers)
@@ -60,12 +66,12 @@ function backdrops() {
  * Inside the glass: the mean |difference| per channel (0..255), the same within 10 px of the edge (`rim`: where the
  * lens of frosted glass is, which the mean over all of it hardly sees), and the share of pixels off by more than 48.
  */
-function compare(ref, got, res) {
+function compare(ref, got, res, clear) {
   const a = ref.toBitmap(), b = got.toBitmap(), { width, height } = ref.getSize();
   const size = got.getSize();
   if (size.width !== width || size.height !== height) return { error: `sizes differ: the compositor's ${width} × ${height}, the shader's ${size.width} × ${size.height} (device scale ${res.dpr}; --scale=${res.dpr}?)` };
   const [, , w, h] = res.box, k = width / w, r = Math.min(res.radius, w / 2, h / 2);
-  let sum = 0, out = 0, n = 0, rimSum = 0, rimN = 0;
+  let sum = 0, out = 0, n = 0, rimSum = 0, rimN = 0, open = 0;
   for (let j = 0; j < height; j++) {
     for (let i = 0; i < width; i++) {
       const o = (j * width + i) * 4;
@@ -85,6 +91,11 @@ function compare(ref, got, res) {
         const d = Math.min(Math.max(qx, qy), 0) + Math.hypot(Math.max(qx, 0), Math.max(qy, 0)) - r;
         if (d > -1.5) continue;
         rim = d > -10;
+        // glass across its picture's edge: what the shader left clear (and the soft edge of what it drew) is counted
+        if (clear && b[o + 3] < 255) {
+          open++;
+          continue;
+        }
       }
       let px = 0;
       for (let c = 0; c < 3; c++) {
@@ -99,6 +110,8 @@ function compare(ref, got, res) {
     }
   }
   if (!n) return { error: 'no pixels inside the glass' };
+  const share = open / (n + open);
+  if (clear && (share < clear[0] || share > clear[1])) return { error: `${(share * 100).toFixed(1)}% of the glass left clear; between ${clear[0] * 100}% and ${clear[1] * 100}% is past its picture` };
   const mean = sum / (n * 3);
   return { mean, rim: rimN ? rimSum / (rimN * 3) : mean, outliers: (out / n) * 100 };
 }
@@ -112,7 +125,7 @@ app.whenReady().then(async () => {
 
   // what the browsers post: results per browser, and when each is done
   const posted = {}, done = {};
-  const server = createServer((req, res) => {
+  const answer = (req, res) => {
     const url = new URL(req.url, 'http://x');
     if (req.method === 'POST') {
       let body = '';
@@ -138,16 +151,21 @@ app.whenReady().then(async () => {
     }
     res.setHeader('content-type', TYPES[extname(file)] ?? 'application/octet-stream');
     res.end(readFileSync(file));
-  });
-  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  };
+  // twice: the second port is another origin to the page (and sends no CORS headers), for a source it may not read
+  const server = createServer(answer), other = createServer(answer);
+  for (const s of [server, other]) await new Promise((r) => s.listen(0, host, r));
   const base = `http://127.0.0.1:${server.address().port}/test/web/page.html`;
+  const query = (mode) => `?mode=${mode}&foreign=${other.address().port}`;
 
   /** A case in an Electron window: its result, and with `capture` the glass as the window shows it. */
   async function inElectron(c, mode, extra = '') {
     const win = new BrowserWindow({ width: 640, height: 400, useContentSize: true, show: false, focusable: false, webPreferences: { sandbox: true, contextIsolation: true, offscreen: true } });
     const errors = [];
-    win.webContents.on('console-message', (e) => { if (e.level === 'error') errors.push(e.message); });
-    await win.loadURL(`${base}?mode=${mode}&case=${c.name}${extra}`);
+    // the page's errors (not Electron's own scripts': its sandbox bundle reports one of its own in a page that has no
+    // picture for a while)
+    win.webContents.on('console-message', (e) => { if (e.level === 'error' && !e.sourceId.startsWith('node:electron/')) errors.push(e.message); });
+    await win.loadURL(`${base}${query(mode)}&case=${c.name}${extra}`);
     let result;
     for (let i = 0; i < 200 && !(result = await win.webContents.executeJavaScript('window.result')); i++) await sleep(50);
     result ??= { error: 'the page never finished' };
@@ -164,7 +182,7 @@ app.whenReady().then(async () => {
 
   const refs = {};
   for (const c of cases) {
-    if (c.expect === 'blur') continue;
+    if (c.expect) continue;
     const { result, shot } = await inElectron(c, 'ref');
     if (result.error) {
       console.log(`FAIL ${c.name}: the reference: ${result.error}`);
@@ -179,9 +197,9 @@ app.whenReady().then(async () => {
   async function inBrowser(browser) {
     posted[browser] = [];
     const finished = new Promise((r) => (done[browser] = r));
-    const url = `${base}?mode=gl&run=all&browser=${browser}`;
+    const url = `${base}${query('gl')}&run=all&browser=${browser}`;
     let close = () => {};
-    if (browser === 'safari') {
+    if (browser === 'safari' && mac) {
       let running = true;
       try { execFileSync('pgrep', ['-x', 'Safari']); } catch { running = false; }
       execFileSync('open', ['-g', '-a', 'Safari', url]);
@@ -199,16 +217,29 @@ app.whenReady().then(async () => {
       mkdirSync(dir, { recursive: true });
       writeFileSync(join(dir, 'user.js'), ['browser.shell.checkDefaultBrowser', 'browser.aboutwelcome.enabled', 'app.update.auto', 'app.update.enabled'].map((k) => `user_pref("${k}", false);`).join('\n')
         + '\nuser_pref("datareporting.policy.dataSubmissionPolicyBypassNotification", true);\nuser_pref("termsofuse.bypassNotification", true);\nuser_pref("app.update.disabledForTesting", true);\n');
-      execFileSync('open', ['-g', '-na', 'Firefox', '--args', '-profile', dir, '-no-remote', '-width', '900', '-height', '700', url]);
+      const args = ['-profile', dir, '-no-remote', '-width', '900', '-height', '700', url];
+      if (mac) execFileSync('open', ['-g', '-na', 'Firefox', '--args', ...args]);
+      else {
+        // elsewhere, started directly, at the scale the reference is drawn at
+        writeFileSync(join(dir, 'user.js'), `${readFileSync(join(dir, 'user.js'), 'utf8')}user_pref("layout.css.devPixelsPerPx", "${scale.toFixed(1)}");\n`);
+        spawn('firefox', args, { stdio: 'ignore', detached: true }).on('error', () => {}).unref();
+      }
       close = () => {
         try { execFileSync('pkill', ['-f', dir]); } catch {}
         rmSync(dir, { recursive: true, force: true });
       };
-    } else throw new Error(`no such browser: ${browser}`);
-    const info = await Promise.race([finished, sleep(120_000).then(() => null)]);
+    } else if (browser === 'webkitgtk' && process.platform === 'linux') {
+      // WebKitGTK (GNOME Web's engine, and Tauri's on Linux) in a window of its own
+      const child = spawn('python3', [here('./webkitgtk.py'), url], { stdio: 'ignore' }).on('error', () => {});
+      close = () => child.kill();
+    } else {
+      // any other: opened by whoever runs this (the page's address is this machine's; with --host, its name on the network)
+      console.log(`\n${browser}: open ${host === '127.0.0.1' ? url : url.replace('127.0.0.1', '<this machine>')}`);
+    }
+    const info = await Promise.race([finished, sleep(timeout).then(() => null)]);
     await sleep(300);
     close();
-    if (!info) posted[browser].push({ name: 'page', error: `${browser} didn't finish within two minutes (is it installed, and may this terminal open it?)` });
+    if (!info) posted[browser].push({ name: 'page', error: `${browser} didn't finish within ${timeout / 1000} s (is it installed, and may this terminal open it?)` });
     return posted[browser];
   }
 
@@ -218,21 +249,21 @@ app.whenReady().then(async () => {
     let results;
     if (browser === 'electron') {
       results = [];
-      for (const c of cases) if (!(selfCheck && c.expect === 'blur')) results.push((await inElectron(c, 'gl', selfCheck ? '&wrong=1' : '')).result);
-    } else results = (await inBrowser(browser)).filter((r) => !only || r.name === only || r.name === 'page');
+      for (const c of cases) if (!(selfCheck && c.expect)) results.push((await inElectron(c, 'gl', selfCheck ? '&wrong=1' : '')).result);
+    } else results = (await inBrowser(browser)).filter((r) => !only || only.includes(r.name) || r.name === 'page');
     console.log(`\n${browser}`);
     let caught = 0;
     for (const res of results) {
       const c = cases.find((k) => k.name === res.name);
       let m = res.error ? { error: res.error } : null;
-      if (!m && c?.expect === 'blur') {
+      if (!m && c?.expect) {
         console.log(`ok   ${res.name.padEnd(13)} fell back to ${res.blur}`);
         continue;
       }
       if (!m) {
         const got = nativeImage.createFromDataURL(res.image);
         writeFileSync(join(outDir, `${res.name}-${browser}.png`), got.toPNG());
-        m = compare(refs[res.name], got, res);
+        m = compare(refs[res.name], got, res, c?.clear);
       }
       if (m.error || !c) {
         failed++;
@@ -261,6 +292,7 @@ app.whenReady().then(async () => {
     }
   }
   server.close();
+  other.close();
   if (calibrate && !failed) {
     for (const [name, m] of Object.entries(measured)) limits[name] = { mean: room(m.mean, 0.3), rim: room(m.rim, 0.3), outliers: room(m.outliers, 0.2) };
     writeFileSync(limitsFile, `${JSON.stringify(limits, null, 2)}\n`);

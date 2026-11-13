@@ -905,6 +905,10 @@ function fieldLight(f, bevel, o, shadow, scale, pad, fill = null) {
 function isBackdropSource(el) {
   return !!el && (el instanceof HTMLImageElement || el instanceof HTMLVideoElement || el instanceof HTMLCanvasElement);
 }
+function sourceIdentity(el) {
+  if (el instanceof HTMLCanvasElement) return `${el.width}x${el.height}`;
+  return `${el.currentSrc}|${el.crossOrigin}`;
+}
 var supported = null;
 function glSupported() {
   if (supported !== null) return supported;
@@ -937,6 +941,11 @@ void main() {
   v = p;
   gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);
 }`;
+var INSIDE = `uniform vec4 uShown;   // what of the picture its element shows, in uv: from xy to zw
+float inside(vec2 uv, vec2 px) {
+  vec2 d = clamp(min(uv - uShown.xy, uShown.zw - uv) / max(px, vec2(1e-7)) + 0.5, 0.0, 1.0);
+  return d.x * d.y;
+}`;
 var COPY = `#version 300 es
 precision highp float;
 uniform sampler2D uSrc;
@@ -945,9 +954,12 @@ uniform vec4 uToUv;     // the element's px to the source's uv: p * xy + zw
 uniform vec2 uGx, uGy;  // the source's uv per texel of the output
 in vec2 v;
 out vec4 o;
+${INSIDE}
 void main() {
   vec2 p = uRegion.xy + v * uRegion.zw;
-  o = textureGrad(uSrc, clamp(p * uToUv.xy + uToUv.zw, 0.0, 1.0), uGx, uGy);
+  vec2 uv = p * uToUv.xy + uToUv.zw;
+  // past the picture: nothing (premultiplied, so the blur fades the picture out, not into its last row)
+  o = textureGrad(uSrc, clamp(uv, 0.0, 1.0), uGx, uGy) * inside(uv, vec2(uGx.x, uGy.y));
 }`;
 var BLUR = `#version 300 es
 precision highp float;
@@ -976,7 +988,7 @@ uniform vec4 uMapRect;
 uniform vec4 uToUv;         // the element's px to the backdrop texture's uv
 uniform vec2 uGx, uGy;      // the backdrop's uv per device pixel
 uniform float uPixel;       // a device pixel, in the element's px
-uniform vec4 uSrcBox;       // the source, in the element's px: none of it, no glass
+uniform vec2 uEdge;         // a device pixel in the backdrop's uv, where its edge is the picture's (0: it has the picture's edge in it, the frost's)
 uniform mat3 uColour;
 uniform vec3 uColourOffset;
 uniform float uFill, uCap, uOpacity, uSurface;
@@ -984,11 +996,17 @@ uniform bool uFlip, uSmooth, uDarken, uFringe, uCover;
 in vec2 v;
 out vec4 o;
 
+${INSIDE}
+
+// the backdrop at a place, premultiplied: nothing past the picture
 vec4 tap(vec2 p) {
-  return textureGrad(uBack, clamp(p * uToUv.xy + uToUv.zw, 0.0, 1.0), uGx, uGy);
+  vec2 uv = p * uToUv.xy + uToUv.zw;
+  vec4 c = textureGrad(uBack, clamp(uv, 0.0, 1.0), uGx, uGy);
+  return uEdge.x > 0.0 ? c * inside(uv, uEdge) : c;
 }
 
-vec3 back(vec2 p) {
+// the backdrop as the glass shows it, premultiplied
+vec4 back(vec2 p) {
   vec4 c;
   if (uSmooth) {
     // four taps half a pixel out, each the mean of four pixels: the 3 x 3 kernel 1 2 1, 2 4 2, 1 2 1
@@ -997,18 +1015,20 @@ vec3 back(vec2 p) {
   } else {
     c = tap(p);
   }
+  if (c.a <= 0.0) return vec4(0.0);
+  vec3 s = c.rgb / c.a;
   if (uFill > 0.0) {
-    vec3 w = textureLod(uWide, clamp(p * uToUv.xy + uToUv.zw, 0.0, 1.0), 0.0).rgb;
-    c.rgb = mix(c.rgb, uDarken ? min(c.rgb, w) : max(c.rgb, w), uFill);
+    vec4 w = textureLod(uWide, clamp(p * uToUv.xy + uToUv.zw, 0.0, 1.0), 0.0);
+    if (w.a > 0.0) s = mix(s, uDarken ? min(s, w.rgb / w.a) : max(s, w.rgb / w.a), uFill);
   }
   // the matrix, clipped as a filter clips; and macOS's cap on the luma, which keeps the hue
-  vec3 r = uColour * c.rgb + uColourOffset;
+  vec3 r = uColour * s + uColourOffset;
   vec3 col = clamp(r, 0.0, 1.0);
   if (uCap > 0.0) {
     float l = clamp(dot(vec3(0.2126, 0.7152, 0.0722), r), -1.0, 1.0);
     if (l > uCap) col *= uCap / l;
   }
-  return col;
+  return vec4(col * c.a, c.a);
 }
 
 vec2 shift(sampler2D map, sampler2D tab, vec4 info, vec2 p, out float edge) {
@@ -1024,22 +1044,22 @@ void main() {
   vec2 p = vec2(v.x, uFlip ? 1.0 - v.y : v.y) * uSize;
   float edge, unused;
   vec2 s0 = shift(uMap0, uTab0, uTabInfo[0], p, edge);
-  vec3 col;
+  vec4 col;
   if (uFringe) {
     vec2 s1 = shift(uMap1, uTab1, uTabInfo[1], p, unused), s2 = shift(uMap2, uTab2, uTabInfo[2], p, unused);
-    col = vec3(back(p + s0 * uK.x).r, back(p + s1 * uK.y).g, back(p + s2 * uK.z).b);
+    // each channel from its own place: there as much as the three are, between them
+    vec4 r = back(p + s0 * uK.x), g = back(p + s1 * uK.y), b = back(p + s2 * uK.z);
+    col = vec4(r.r, g.g, b.b, (r.a + g.a + b.a) / 3.0);
   } else {
     col = back(p + s0 * uK.x);
   }
   if (uOpacity < 1.0) col = mix(back(p), col, uOpacity);
-  if (uSurface > 0.0) {
+  if (uSurface > 0.0 && col.a > 0.0) {
     float gain = textureLod(uGain, p / uSize, 0.0).r, offset = textureLod(uOffset, p / uSize, 0.0).r;
-    col = clamp(col * (1.0 - uSurface + uSurface * gain) + uSurface * (offset - 0.5), 0.0, 1.0);
+    col.rgb = clamp(col.rgb / col.a * (1.0 - uSurface + uSurface * gain) + uSurface * (offset - 0.5), 0.0, 1.0) * col.a;
   }
-  float a = uCover ? clamp((edge * 255.0 - 128.0) / 8.0 + 0.5, 0.0, 1.0) : 1.0;
-  vec2 q = (p - uSrcBox.xy) / uSrcBox.zw;
-  a *= step(0.0, q.x) * step(q.x, 1.0) * step(0.0, q.y) * step(q.y, 1.0);
-  o = vec4(col * a, a);
+  // (where the glass sees none of the picture, none of it is drawn: what's under its canvas shows)
+  o = col * (uCover ? clamp((edge * 255.0 - 128.0) / 8.0 + 0.5, 0.0, 1.0) : 1.0);
 }`;
 var SCRATCH = 15;
 var Renderer = class {
@@ -1060,17 +1080,22 @@ var Renderer = class {
   p3 = false;
   lost = false;
   constructor() {
-    const options = { alpha: true, premultipliedAlpha: true, antialias: false, depth: false, stencil: false, preserveDrawingBuffer: false };
-    let canvas2 = typeof OffscreenCanvas === "function" ? new OffscreenCanvas(256, 256) : null;
-    let gl = canvas2?.getContext("webgl2", options) ?? null;
-    if (!gl) {
-      const element = document.createElement("canvas");
-      gl = element.getContext("webgl2", options);
-      canvas2 = element;
+    const options = { alpha: true, premultipliedAlpha: true, depth: false, stencil: false, preserveDrawingBuffer: false };
+    const off = typeof OffscreenCanvas === "function";
+    const ways = [...off ? [[true, false], [true, true]] : [], [false, false], [false, true]];
+    const check = readsBack();
+    for (const [offscreen, antialias] of ways) {
+      const canvas2 = offscreen ? new OffscreenCanvas(16, 16) : Object.assign(document.createElement("canvas"), { width: 16, height: 16 });
+      const gl = canvas2.getContext("webgl2", { ...options, antialias });
+      if (!gl) continue;
+      if (!check || arrives(canvas2, gl)) {
+        this.canvas = canvas2;
+        this.gl = gl;
+        break;
+      }
+      gl.getExtension("WEBGL_lose_context")?.loseContext();
     }
-    if (!gl) throw new Error("no WebGL2");
-    this.canvas = canvas2;
-    this.gl = gl;
+    if (!this.gl) throw new Error("no WebGL2 whose frame can be copied");
     this.canvas.addEventListener("webglcontextlost", (e) => {
       e.preventDefault();
       this.lost = true;
@@ -1176,10 +1201,14 @@ var Renderer = class {
     const gl = this.gl;
     let e = this.sources.get(el);
     if (!e) {
-      e = { texture: this.texture(el instanceof HTMLImageElement ? gl.LINEAR_MIPMAP_LINEAR : gl.LINEAR), key: "", version: 0, w: 0, h: 0, failed: false, frames: 0, watching: false };
+      e = { texture: this.texture(el instanceof HTMLImageElement ? gl.LINEAR_MIPMAP_LINEAR : gl.LINEAR), key: "", version: 0, w: 0, h: 0, failed: false, failedAs: "", frames: 0, watching: false };
       this.sources.set(el, e);
     }
-    if (e.failed) return e;
+    if (e.failed) {
+      if (e.failedAs === sourceIdentity(el)) return e;
+      e.failed = false;
+      e.key = "";
+    }
     let w, h, key;
     if (el instanceof HTMLImageElement) {
       if (!el.complete || !el.naturalWidth) return null;
@@ -1231,6 +1260,7 @@ var Renderer = class {
       e.version++;
     } catch {
       e.failed = true;
+      e.failedAs = sourceIdentity(el);
     }
     gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
     return e;
@@ -1301,7 +1331,7 @@ var Renderer = class {
    * The backdrop around the glass (`pad` px past it on each side), blurred by σ px: at a resolution the blur can't
    * tell from full, so its kernel stays 25 taps whatever σ is.
    */
-  frosted(src, f, toUv, scale, sigma, pad, slot) {
+  frosted(src, f, toUv, shown, scale, sigma, pad, slot) {
     const gl = this.gl;
     const texels = sigma * scale, q = Math.min(1, 2 ** -Math.ceil(Math.log2(Math.max(texels, 1e-3) / 4)));
     const region = { x: -pad, y: -pad, w: f.w + 2 * pad, h: f.h + 2 * pad };
@@ -1314,6 +1344,7 @@ var Renderer = class {
     gl.uniform4f(this.copy.at.uToUv, toUv[0], toUv[1], toUv[2], toUv[3]);
     gl.uniform2f(this.copy.at.uGx, toUv[0] * region.w / w, 0);
     gl.uniform2f(this.copy.at.uGy, 0, toUv[1] * region.h / h);
+    gl.uniform4f(this.copy.at.uShown, shown[0], shown[1], shown[2], shown[3]);
     this.run(a, 0, 0, w, h);
     gl.useProgram(this.blur.program);
     gl.uniform1i(this.blur.at.uTex, 0);
@@ -1372,22 +1403,23 @@ var Renderer = class {
     return true;
   }
   /** One glass, at its place on the WebGL canvas. */
-  draw({ f, src, glassBox, sourceBox, cw, ch, redraw, x = 0, y = 0 }) {
+  draw({ f, src, glassBox, sourceBox, shown: part, cw, ch, redraw, x = 0, y = 0 }) {
     const gl = this.gl;
     const sx = glassBox.w / f.w, sy = glassBox.h / f.h;
     const toUv = [sx / sourceBox.w, sy / sourceBox.h, (glassBox.x - sourceBox.x) / sourceBox.w, (glassBox.y - sourceBox.y) / sourceBox.h];
+    const shown = [(part.x - sourceBox.x) / sourceBox.w, (part.y - sourceBox.y) / sourceBox.h, (part.x + part.w - sourceBox.x) / sourceBox.w, (part.y + part.h - sourceBox.y) / sourceBox.h];
     const scale = cw / f.w;
     let back = src.texture, backToUv = toUv, wide = null;
     let gx = [toUv[0] / scale, 0], gy = [0, toUv[1] / (ch / f.h)];
     if (f.sigma > 0.01) {
       const tail = Math.ceil(3 * Math.max(f.sigma, f.fill?.sigma ?? 0));
       const pad = Math.ceil(f.reach) + tail + 2;
-      const frost = this.frosted(src, f, toUv, scale, f.sigma, pad, 0);
+      const frost = this.frosted(src, f, toUv, shown, scale, f.sigma, pad, 0);
       back = frost.texture;
       backToUv = [1 / frost.region.w, 1 / frost.region.h, -frost.region.x / frost.region.w, -frost.region.y / frost.region.h];
       gx = [0, 0];
       gy = [0, 0];
-      if (f.fill && f.fill.alpha > 0) wide = this.frosted(src, f, toUv, scale, f.fill.sigma, pad, 2).texture;
+      if (f.fill && f.fill.alpha > 0) wide = this.frosted(src, f, toUv, shown, scale, f.fill.sigma, pad, 2).texture;
     }
     const p = this.glass, at = p.at;
     gl.useProgram(p.program);
@@ -1420,7 +1452,8 @@ var Renderer = class {
     gl.uniform2f(at.uGx, gx[0], gx[1]);
     gl.uniform2f(at.uGy, gy[0], gy[1]);
     gl.uniform1f(at.uPixel, 1 / scale);
-    gl.uniform4f(at.uSrcBox, (sourceBox.x - glassBox.x) / sx, (sourceBox.y - glassBox.y) / sy, sourceBox.w / sx, sourceBox.h / sy);
+    gl.uniform2f(at.uEdge, gx[0], gy[1]);
+    gl.uniform4f(at.uShown, shown[0], shown[1], shown[2], shown[3]);
     const m = f.matrix;
     gl.uniformMatrix3fv(at.uColour, false, [m[0], m[5], m[10], m[1], m[6], m[11], m[2], m[7], m[12]]);
     gl.uniform3f(at.uColourOffset, m[3] + m[4], m[8] + m[9], m[13] + m[14]);
@@ -1436,11 +1469,41 @@ var Renderer = class {
     this.run(null, x, this.canvas.height - y - ch, cw, ch);
   }
 };
+function readsBack() {
+  const ctx = Object.assign(document.createElement("canvas"), { width: 2, height: 2 }).getContext("2d", { willReadFrequently: true });
+  if (!ctx) return false;
+  ctx.fillStyle = "#f00";
+  ctx.fillRect(0, 0, 2, 2);
+  const p = ctx.getImageData(0, 0, 1, 1).data;
+  return p[0] > 247 && p[1] < 8 && p[2] < 8 && p[3] > 247;
+}
+function arrives(canvas2, gl) {
+  try {
+    const ctx = Object.assign(document.createElement("canvas"), { width: 2, height: 2 }).getContext("2d", { willReadFrequently: true });
+    ctx.globalCompositeOperation = "copy";
+    for (const [r, b] of [[1, 0], [0, 1]]) {
+      gl.viewport(0, 0, canvas2.width, canvas2.height);
+      gl.clearColor(r, 0, b, 1);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+      const image2 = canvas2 instanceof HTMLCanvasElement ? canvas2 : canvas2.transferToImageBitmap();
+      ctx.drawImage(image2, 0, 0, 2, 2);
+      if (!(image2 instanceof HTMLCanvasElement)) image2.close();
+      const p = ctx.getImageData(0, 0, 1, 1).data;
+      if (Math.abs(p[0] - r * 255) > 8 || p[1] > 8 || Math.abs(p[2] - b * 255) > 8 || p[3] < 247) return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
 var shared = null;
 function renderer() {
   return shared ??= new Renderer();
 }
 var glasses = /* @__PURE__ */ new Set();
+var watchers = /* @__PURE__ */ new Set();
+var stale = false;
+var SOURCE_ATTRIBUTES = ["src", "srcset", "crossorigin", "id", "class"];
 var frame = 0;
 var timer = 0;
 var quiet = 0;
@@ -1449,6 +1512,18 @@ var mutations = null;
 var QUIET = 30;
 var REST = 1e3;
 var EVENTS = ["scroll", "wheel", "pointermove", "pointerdown", "pointerup", "touchmove", "keydown", "transitionrun", "animationstart", "load", "play", "seeked"];
+function watchSources(look) {
+  watchers.add(look);
+  listen(true);
+  return () => {
+    watchers.delete(look);
+    if (!glasses.size && !watchers.size) listen(false);
+  };
+}
+var changed = () => {
+  stale = true;
+  wake();
+};
 function drawDue() {
   const jobs = [];
   for (const g of glasses) {
@@ -1459,19 +1534,24 @@ function drawDue() {
 }
 function wake() {
   quiet = 0;
-  if (frame || !glasses.size) return;
+  if (frame || !(glasses.size || watchers.size)) return;
   clearTimeout(timer);
   timer = 0;
   frame = requestAnimationFrame(tick);
 }
 function tick() {
   frame = 0;
-  if (!glasses.size) return;
+  if (!glasses.size && !watchers.size) return;
+  if (stale) {
+    stale = false;
+    for (const look of [...watchers]) look();
+  }
   const drew = !document.hidden && drawDue();
   quiet = drew ? 0 : quiet + 1;
   if (quiet < QUIET) frame = requestAnimationFrame(tick);
   else timer = window.setTimeout(() => {
     timer = 0;
+    stale = true;
     frame = requestAnimationFrame(tick);
   }, REST);
 }
@@ -1485,13 +1565,18 @@ function listen(on) {
   if (on) {
     window.addEventListener("resize", wake);
     document.addEventListener("visibilitychange", wake);
-    mutations = new MutationObserver(wake);
-    mutations.observe(document.documentElement, { subtree: true, childList: true, attributes: true, attributeFilter: ["style", "class", "src", "hidden"] });
+    for (const type of ["load", "error"]) document.addEventListener(type, changed, { capture: true, passive: true });
+    mutations = new MutationObserver((records) => {
+      if (records.some((r) => r.type === "childList" || SOURCE_ATTRIBUTES.includes(r.attributeName))) stale = true;
+      wake();
+    });
+    mutations.observe(document.documentElement, { subtree: true, childList: true, attributes: true, attributeFilter: ["style", "hidden", ...SOURCE_ATTRIBUTES] });
   } else {
     mutations?.disconnect();
     mutations = null;
     window.removeEventListener("resize", wake);
     document.removeEventListener("visibilitychange", wake);
+    for (const type of ["load", "error"]) document.removeEventListener(type, changed, { capture: true });
     cancelAnimationFrame(frame);
     clearTimeout(timer);
     frame = timer = 0;
@@ -1505,7 +1590,9 @@ function pictureBox(el, src) {
   const left = (px("border-left-width") + px("padding-left")) * kx, top = (px("border-top-width") + px("padding-top")) * ky;
   const right = (px("border-right-width") + px("padding-right")) * kx, bottom = (px("border-bottom-width") + px("padding-bottom")) * ky;
   const content = { x: r.left + left, y: r.top + top, w: Math.max(r.width - left - right, 0), h: Math.max(r.height - top - bottom, 0) };
-  return fitRect(content, src.w * kx, src.h * ky, cs.objectFit, cs.objectPosition);
+  const picture = fitRect(content, src.w * kx, src.h * ky, cs.objectFit, cs.objectPosition);
+  const x = Math.max(picture.x, content.x), y = Math.max(picture.y, content.y);
+  return { picture, shown: { x, y, w: Math.max(Math.min(picture.x + picture.w, content.x + content.w) - x, 0), h: Math.max(Math.min(picture.y + picture.h, content.y + content.h) - y, 0) } };
 }
 var GlGlass = class {
   host;
@@ -1516,6 +1603,8 @@ var GlGlass = class {
   dirty = true;
   key = "";
   shown = false;
+  // the plain look under the canvas, while the glass looks past its picture
+  under = "none";
   constructor(host2, source) {
     this.host = host2;
     this.source = source;
@@ -1546,7 +1635,11 @@ var GlGlass = class {
       this.host.failed();
       return null;
     }
-    if (!f || !src || !f.w || !f.h) {
+    const el = this.host.el;
+    const glassBox = f && src ? boxOf(el.getBoundingClientRect()) : null;
+    const at = glassBox?.w && glassBox.h ? pictureBox(this.source, src) : null;
+    if (!f || !at?.shown.w || !at.shown.h) {
+      this.setUnder(f ? this.host.fallback() : "none");
       if (this.shown) {
         this.ctx?.clearRect(0, 0, this.canvas.width, this.canvas.height);
         this.shown = false;
@@ -1554,12 +1647,12 @@ var GlGlass = class {
       }
       return null;
     }
-    const el = this.host.el, glassBox = boxOf(el.getBoundingClientRect());
-    if (glassBox.x > innerWidth || glassBox.y > innerHeight || glassBox.x + glassBox.w < 0 || glassBox.y + glassBox.h < 0 || !glassBox.w || !glassBox.h) return null;
-    const sourceBox = pictureBox(this.source, src);
-    if (!sourceBox.w || !sourceBox.h) return null;
+    const box = glassBox, sourceBox = at.picture, shown = at.shown;
+    const within2 = box.x >= shown.x - 0.5 && box.y >= shown.y - 0.5 && box.x + box.w <= shown.x + shown.w + 0.5 && box.y + box.h <= shown.y + shown.h + 0.5;
+    this.setUnder(within2 || f.cover ? "none" : this.host.fallback());
+    if (box.x > innerWidth || box.y > innerHeight || box.x + box.w < 0 || box.y + box.h < 0) return null;
     const dpr = Math.min(devicePixelRatio || 1, 3);
-    const key = [glassBox.x - sourceBox.x, glassBox.y - sourceBox.y, glassBox.w, glassBox.h, sourceBox.w, sourceBox.h, f.w, f.h, dpr].map((v) => Math.round(v * 64)).join() + `|${src.version}`;
+    const key = [box.x - sourceBox.x, box.y - sourceBox.y, box.w, box.h, sourceBox.w, sourceBox.h, shown.x - sourceBox.x, shown.y - sourceBox.y, shown.w, shown.h, f.w, f.h, dpr].map((v) => Math.round(v * 64)).join() + `|${src.version}`;
     if (!this.dirty && key === this.key) return null;
     const cs = getComputedStyle(el), style = this.canvas.style;
     const set = (k, v) => {
@@ -1578,8 +1671,9 @@ var GlGlass = class {
     return {
       f,
       src,
-      glassBox,
+      glassBox: box,
       sourceBox,
+      shown,
       cw,
       ch,
       out: this.ctx,
@@ -1591,10 +1685,15 @@ var GlGlass = class {
       }
     };
   }
+  setUnder(css) {
+    if (css === this.under) return;
+    this.under = css;
+    this.canvas.style.setProperty("backdrop-filter", css);
+  }
   destroy() {
     glasses.delete(this);
     this.canvas.remove();
-    if (!glasses.size) listen(false);
+    if (!glasses.size && !watchers.size) listen(false);
   }
 };
 
@@ -1610,6 +1709,15 @@ var SETTLE = 120;
 var BACKGROUND = ["background-color", "background-image", "background-position", "background-size", "background-repeat", "background-origin", "background-clip"];
 var KEEP = ["1 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 1 0", "0 0 0 0 0  0 1 0 0 0  0 0 0 0 0  0 0 0 1 0", "0 0 0 0 0  0 0 0 0 0  0 0 1 0 0  0 0 0 1 0"];
 var nextId = 0;
+var shaderHere = () => !supportsSvgBackdrop() || !!globalThis.LIQUID_GLASS_WEBGL;
+var warned = /* @__PURE__ */ new WeakSet();
+var warnedNames = /* @__PURE__ */ new Set();
+function warnOnce(about, ...message) {
+  if (typeof about === "string" ? warnedNames.has(about) : warned.has(about)) return;
+  if (typeof about === "string") warnedNames.add(about);
+  else warned.add(about);
+  console.warn("liquid-glass-electron:", ...message);
+}
 var mapCache = /* @__PURE__ */ new Map();
 var lightCache = /* @__PURE__ */ new Map();
 var remember = (m, k, v) => {
@@ -1653,7 +1761,11 @@ var Lens = class {
   // filter's nodes are still made, as what holds the glass's state, but never put in the document.
   gl = null;
   glMaps = [];
-  glFailed = false;
+  // the source now (looked up with every refresh: a selector's match may be another element, or one at last)
+  glNow = null;
+  // a source that couldn't be read, and what it showed then: not tried again until it shows something else
+  glFailed = null;
+  unwatch = null;
   // geometry and the current map
   w = 0;
   h = 0;
@@ -1708,6 +1820,16 @@ var Lens = class {
     if (js) this.js = { ...this.js, ...js };
     const prev = this.options;
     this.options = resolve([fromCss(getComputedStyle(this.el)), fromData(this.el), this.js], this.host.env());
+    this.glNow = this.glSource();
+    const watch = !!this.options.backdropSource && !this.shape && shaderHere();
+    if (watch && !this.unwatch) {
+      this.unwatch = watchSources(() => {
+        if (this.glSource() !== this.glNow) this.refresh();
+      });
+    } else if (!watch) {
+      this.unwatch?.();
+      this.unwatch = null;
+    }
     const structure = this.structureKey();
     if (!prev || structure !== this.structure) {
       this.structure = structure;
@@ -1836,27 +1958,32 @@ var Lens = class {
   /** What, in the options, decides which filter nodes there are. */
   structureKey() {
     const o = this.options;
-    const gl = !!this.glSource();
+    const gl = !!this.glNow;
     const bends = (supportsSvgBackdrop() || gl) && o.refraction > 0 && o.variant !== "identity";
     return [bends, gl, o.backdrop, !!o.surface, o.chromAberration > 0, o.bevelMode, o.blurAmount > 0, o.smooth, o.distortion > 0, o.opacity < 1, o.variant === "identity", o.magnify, this.isFree(), this.capped(), this.filled() ? this.host.env().dark ? "darken" : "lighten" : ""].join();
   }
   /**
    * The element a shader bends as this glass's backdrop, or null: the compositor bends what's behind (Chromium), no
-   * source is named, it isn't an image, a video or a canvas, or it can't be read. globalThis.LIQUID_GLASS_WEBGL = true
-   * draws with the shader in Chromium too (to see or test it there).
+   * source is named, nothing matches its selector (yet), it isn't an image, a video or a canvas, or it can't be read.
+   * globalThis.LIQUID_GLASS_WEBGL = true draws with the shader in Chromium too (to see or test it there).
    */
   glSource() {
     const named = this.options.backdropSource;
-    if (!named || this.shape || this.glFailed) return null;
-    if (supportsSvgBackdrop() && !globalThis.LIQUID_GLASS_WEBGL) return null;
+    if (!named || this.shape || !shaderHere()) return null;
     let el = null;
     if (typeof named === "string") {
       try {
         el = document.querySelector(named);
       } catch {
+        warnOnce(named, `backdropSource: "${named}" is not a selector; the glass is a plain blur`);
       }
     } else el = named;
-    return isBackdropSource(el) && glSupported() ? el : null;
+    if (!isBackdropSource(el)) {
+      if (el) warnOnce(el, "backdropSource must be an <img>, <video> or <canvas>; the glass is a plain blur over", el);
+      return null;
+    }
+    if (this.glFailed?.el === el && this.glFailed.as === sourceIdentity(el)) return null;
+    return glSupported() ? el : null;
   }
   /** What the shader draws now (see GlFrame), or null: no glass, or its map isn't drawn yet. */
   glFrame() {
@@ -1915,8 +2042,7 @@ var Lens = class {
       }
       this.applyStrength();
       this.setBackdrop(s > 0 ? this.filterCss : "none");
-      const source = this.gl && this.glSource();
-      if (source) this.gl.setSource(source);
+      if (this.gl && this.glNow) this.gl.setSource(this.glNow);
     }
     this.layout(true);
   }
@@ -1996,7 +2122,7 @@ var Lens = class {
     this.passes = [];
     this.reach = 0;
     this.mapKey = "";
-    const source = this.glSource();
+    const source = this.glNow;
     this.bends = (supportsSvgBackdrop() || !!source) && o.refraction > 0 && o.variant !== "identity";
     if (!source || !this.bends) {
       this.gl?.destroy();
@@ -2115,11 +2241,16 @@ var Lens = class {
       this.gl ??= new GlGlass({
         el: this.el,
         frame: () => this.glFrame(),
-        // the source can't be read: the plain blur instead
+        // the source can't be read: the plain blur instead, until the source shows something else
         failed: () => {
-          this.glFailed = true;
+          const el = this.glNow;
+          if (el) {
+            this.glFailed = { el, as: sourceIdentity(el) };
+            warnOnce(el, `backdropSource can't be read (another origin: it needs CORS headers and crossorigin="anonymous"); the glass is a plain blur over`, el);
+          }
           this.refresh();
-        }
+        },
+        fallback: () => this.options.variant === "identity" || this.amount() <= 0 ? "none" : this.cssBackdrop()
       }, source);
       this.gl.setSource(source);
       this.setBackdrop("none");
@@ -2583,6 +2714,8 @@ var Lens = class {
     }
   }
   destroy() {
+    this.unwatch?.();
+    this.unwatch = null;
     this.gl?.destroy();
     this.gl = null;
     this.setNested(false);

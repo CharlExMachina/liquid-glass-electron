@@ -61,9 +61,10 @@ export interface GlassOptions {
     backdrop: string | null;
     /**
      * what's behind the glass, for browsers whose backdrop-filter can't bend (Safari, Firefox): an <img>, <video> or
-     * <canvas>, or a selector for one. The glass there bends that element's picture, drawn with WebGL; anything else
-     * behind the glass isn't seen through it. Without it, glass in those browsers is a plain blur. Chromium bends
-     * whatever is behind the glass and doesn't need it. null = none
+     * <canvas>, or a selector for one (looked up again when the document changes: the element may come later). The
+     * glass there bends that element's picture, drawn with WebGL; anything else behind the glass isn't seen through it,
+     * and where the glass reaches past the picture it's a plain blur. Without it, glass in those browsers is a plain
+     * blur. Chromium bends whatever is behind the glass and doesn't need it. null = none
      */
     backdropSource: string | Element | null;
     /** the colour tintStrength mixes toward (multiplied); null = liquidglass's cool glass (0.92, 0.95, 1.05) */

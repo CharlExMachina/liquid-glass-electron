@@ -206,15 +206,26 @@ glass(nav, { backdropSource: '#hero' });            // a selector, or the elemen
 <nav data-glass="regular" data-glass-backdrop-source="#hero">…</nav>
 ```
 
+For a website, start from [demo/web/minimal.html](demo/web/minimal.html) (one page to copy: a fixed picture, a fixed
+bar, a card), and read [Websites: Safari and Firefox](docs/AGENTS.md#websites-safari-and-firefox), which says how to
+lay the page out so the picture stays under the glass.
+
+A selector is looked up again whenever the document changes, so the picture may be added after `glass()`, replaced, or
+given another `src`, and the glass follows. Where the glass reaches past the picture's edge, the bent picture fades
+into the plain blur the glass has without a source; glass wholly past its picture is that blur.
+
 There, a WebGL2 fragment shader samples that element's picture through the same map and lookup tables as the SVG
 filter (bilinearly, where Chromium's displacement takes the nearest pixel), with the same frost, colour, fringe,
 surface and shape. One WebGL context draws every glass on the page; each glass shows its pixels in a canvas of its own
 behind its content, under the same light, fill and shadow as in Chromium. Chromium ignores the option and bends
-whatever is behind the glass, as always. `pnpm demo:web` serves a page to open in any browser.
+whatever is behind the glass, as always. `pnpm demo:web` serves a page to open in any browser. The context is made in
+the first way whose frame reaches a canvas as drawn, checked once (WebKitGTK 2.54 hands over an empty frame from an
+`OffscreenCanvas` context without antialiasing, so there it's made with it); with none, the glass is the plain blur.
 
-It matches Chromium's glass: `pnpm test:web` draws 22 cases (every bevel mode, the variants light and dark, fringe,
-frost, colour, opacity, strength, free shapes, a surface, `object-fit`) with the shader in Electron, Safari and Firefox,
-and compares each with what Chromium's compositor draws. On the machine below they differ by 0.5 to 3 levels of 255 on
+It matches Chromium's glass: `pnpm test:web` draws 27 cases (every bevel mode, the variants light and dark, fringe,
+frost, colour, opacity, strength, free shapes, a surface, `object-fit`, glass across its picture's edge, and a source
+that comes late, is replaced, or can't be read at first) with the shader in Electron, Safari and Firefox (on Linux:
+Firefox and WebKitGTK), and compares each with what Chromium's compositor draws. On the machine below they differ by 0.5 to 3 levels of 255 on
 average inside the glass (5 where `smooth` is off: the shader has none of the grain that option leaves in Chromium).
 
 Nothing is drawn unless something changed. A page gets no event when an element moves, so while anything is going on
@@ -248,9 +259,10 @@ points.
 What it doesn't do:
 
 - **Only the named picture is seen through the glass.** Text or other elements between the picture and the glass
-  aren't (they're covered by it). Without a `backdropSource`, or when it can't be used (no WebGL2, an image from
+  aren't (they're covered by it). Past the picture's edge there's nothing to bend: the glass is the plain blur there
+  (Chromium bends the page). Without a `backdropSource`, or when it can't be used (no WebGL2, an image from
   another origin served without CORS headers, an element that isn't an image, a video or a canvas), the glass is the
-  plain blur.
+  plain blur, and the console says why.
 - **Glass in a `container`, and glass inside other glass, sees no further than the picture**: containers fall back to
   the blur, and inner glass bends the picture, not the outer glass over it. Groups don't apply (there are no backdrop
   filters to share).
@@ -554,7 +566,7 @@ one, see `pnpm-workspace.yaml`) and Node 22.18 or later, which runs the unit tes
 pnpm test              # the optics, fields, maps, options and groups' geometry (node:test)
 pnpm test:visual       # screenshots in Electron against test/visual/baseline/
 pnpm test:native       # on a Mac: the glass against macOS's own, test/native/reference/ (see below)
-pnpm test:web          # on a Mac: the shader's glass in Electron, Safari and Firefox against the compositor's (see below)
+pnpm test:web          # the shader's glass in Electron, Safari and Firefox (Linux: Firefox, WebKitGTK) against the compositor's (see below)
 pnpm typecheck
 ```
 
@@ -569,8 +581,10 @@ Recording permission for the terminal, and stops if macOS's version, the display
 references'.
 
 `pnpm test:web` draws each case of `test/web/cases.js` as Chromium's compositor does (in Electron, off screen, in
-sRGB: the reference, drawn fresh every run), then with the shader in Electron, and in Safari and Firefox, which it
-opens on the page and closes again. The page reads the glass's canvas back, so nothing is captured from the screen and
+sRGB: the reference, drawn fresh every run), then with the shader in Electron, and in Safari and Firefox (on Linux,
+Firefox and WebKitGTK, the latter through `test/web/webkitgtk.py`: GTK 4, WebKitGTK 6.0 and PyGObject), which it
+opens on the page and closes again. Any other name in `--browsers=` prints the page's address for a browser you open
+yourself (`--host=0.0.0.0` for one on another machine). The page reads the glass's canvas back, so nothing is captured from the screen and
 it needs no permission. Each case has limits (`test/web/limits.json`, written by `--calibrate`) on the mean difference
 inside the glass, the same within 10 px of its edge, and the share of pixels far off; `--self-check` bends the glass
 half as much again on purpose and fails unless every case catches it. `--browsers=electron` runs without opening any.

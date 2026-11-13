@@ -60,9 +60,16 @@ export interface GlHost {
     frame(): GlFrame | null;
     /** the source can't be read (an image from another origin without CORS, a lost context that didn't come back) */
     failed(): void;
+    /** the plain look, as a backdrop-filter: what's under the glass where it looks past its picture ('none' for none) */
+    fallback(): string;
 }
 /** Whether `el` can be a glass's backdrop: an image, a video or a canvas. */
 export declare function isBackdropSource(el: Element | null): el is BackdropSource;
+/**
+ * What a source shows, as far as whether it may be read goes: one that couldn't be read is tried again when this
+ * changes (another src, a crossorigin attribute; a canvas is origin-clean again when it's resized).
+ */
+export declare function sourceIdentity(el: BackdropSource): string;
 /** Whether this browser draws WebGL2. */
 export declare function glSupported(): boolean;
 /**
@@ -81,6 +88,7 @@ interface Job {
     src: SourceEntry;
     glassBox: Box;
     sourceBox: Box;
+    shown: Box;
     cw: number;
     ch: number;
     out: CanvasRenderingContext2D;
@@ -96,9 +104,15 @@ interface SourceEntry {
     w: number;
     h: number;
     failed: boolean;
+    failedAs: string;
     frames: number;
     watching: boolean;
 }
+/**
+ * Call `look` whenever the document may have another source for a glass: an element added or removed, a src, an id or
+ * a class set, a picture loaded; and once a second besides. Returns what stops it.
+ */
+export declare function watchSources(look: () => void): () => void;
 /** One glass's canvas, and what it last drew. */
 export declare class GlGlass {
     private host;
@@ -108,12 +122,14 @@ export declare class GlGlass {
     private dirty;
     private key;
     private shown;
+    private under;
     constructor(host: GlHost, source: BackdropSource);
     setSource(source: BackdropSource): void;
     /** What the glass looks like changed: draw it again on the next frame. */
     invalidate(): void;
     /** What to draw, if the glass, the source or either's place changed since it was last drawn; null if nothing did. */
     prepare(): Job | null;
+    private setUnder;
     destroy(): void;
 }
 /** Draw every glass that's due now (a test waits on this instead of a frame). */

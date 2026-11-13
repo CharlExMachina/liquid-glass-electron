@@ -19,7 +19,7 @@ import { gridField, roundedRect, signedDistance, squircle, type Field } from './
 import { fieldLight, lightImage, tableMap, type MapGrid, type RGBA } from './maps.ts';
 import { ABERRATION, blurSigma, boxShadow, clampRadii, colorMatrix, MAC_LENS_REACH, macFrost, macLensSize, macMaxLuma, outlineShadow, tintGains, type Radii } from './optics.ts';
 import { encodeTables, filterDefs, greyDataURL, mapNodes, predecode, setAttrs, stashNodes, supportsSvgBackdrop, svgEl, toDataURL } from './dom.ts';
-import { GlGlass, glSupported, isBackdropSource, type BackdropSource, type GlFrame, type GlMap } from './webgl.ts';
+import { GlGlass, glSupported, isBackdropSource, sourceIdentity, watchSources, type BackdropSource, type GlFrame, type GlMap } from './webgl.ts';
 import { fromCss, fromData, MACOS_COLOUR, MACOS_SMALL_DARK, resolve, type Environment, type GlassOptions } from './options.ts';
 
 // Map pixels per CSS px: about this many pixels in a map (per-frame cost follows its bytes), between 0.08 and 0.5 per
@@ -42,6 +42,18 @@ const BACKGROUND = ['background-color', 'background-image', 'background-position
 const KEEP = ['1 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 1 0', '0 0 0 0 0  0 1 0 0 0  0 0 0 0 0  0 0 0 1 0', '0 0 0 0 0  0 0 0 0 0  0 0 1 0 0  0 0 0 1 0'];
 
 let nextId = 0;
+
+/** Whether glass here is drawn by a shader, given a source: where the compositor can't bend, or when asked for. */
+const shaderHere = () => !supportsSvgBackdrop() || !!(globalThis as { LIQUID_GLASS_WEBGL?: boolean }).LIQUID_GLASS_WEBGL;
+
+// what a page got wrong with a backdropSource, said once per source
+const warned = new WeakSet<Element>(), warnedNames = new Set<string>();
+function warnOnce(about: Element | string, ...message: unknown[]) {
+  if (typeof about === 'string' ? warnedNames.has(about) : warned.has(about)) return;
+  if (typeof about === 'string') warnedNames.add(about);
+  else warned.add(about);
+  console.warn('liquid-glass-electron:', ...message);
+}
 interface MapEntry { urls: string[]; rimPx: number; margin: number; rect: { x: number; y: number; w: number; h: number }; grid: MapGrid; tables: { down: string; across: string; cover: string }; gl?: GlMap }
 const mapCache = new Map<string, MapEntry>();
 const lightCache = new Map<string, { url: string; empty: string; slice: number; edge: number } | null>();
@@ -109,7 +121,11 @@ export class Lens {
   // filter's nodes are still made, as what holds the glass's state, but never put in the document.
   private gl: GlGlass | null = null;
   private glMaps: GlMap[] = [];
-  private glFailed = false;
+  // the source now (looked up with every refresh: a selector's match may be another element, or one at last)
+  private glNow: BackdropSource | null = null;
+  // a source that couldn't be read, and what it showed then: not tried again until it shows something else
+  private glFailed: { el: BackdropSource; as: string } | null = null;
+  private unwatch: (() => void) | null = null;
   // geometry and the current map
   private w = 0;
   private h = 0;
@@ -169,6 +185,17 @@ export class Lens {
     if (js) this.js = { ...this.js, ...js };
     const prev = this.options;
     this.options = resolve([fromCss(getComputedStyle(this.el)), fromData(this.el), this.js], this.host.env());
+    this.glNow = this.glSource();
+    // while a source is named where a shader would draw it: told when the document may have another for the name
+    const watch = !!this.options.backdropSource && !this.shape && shaderHere();
+    if (watch && !this.unwatch) {
+      this.unwatch = watchSources(() => {
+        if (this.glSource() !== this.glNow) this.refresh();
+      });
+    } else if (!watch) {
+      this.unwatch?.();
+      this.unwatch = null;
+    }
     const structure = this.structureKey();
     if (!prev || structure !== this.structure) {
       this.structure = structure;
@@ -311,29 +338,33 @@ export class Lens {
   /** What, in the options, decides which filter nodes there are. */
   private structureKey() {
     const o = this.options;
-    const gl = !!this.glSource();
+    const gl = !!this.glNow;
     const bends = (supportsSvgBackdrop() || gl) && o.refraction > 0 && o.variant !== 'identity';
     return [bends, gl, o.backdrop, !!o.surface, o.chromAberration > 0, o.bevelMode, o.blurAmount > 0, o.smooth, o.distortion > 0, o.opacity < 1, o.variant === 'identity', o.magnify, this.isFree(), this.capped(), this.filled() ? (this.host.env().dark ? 'darken' : 'lighten') : ''].join();
   }
 
   /**
    * The element a shader bends as this glass's backdrop, or null: the compositor bends what's behind (Chromium), no
-   * source is named, it isn't an image, a video or a canvas, or it can't be read. globalThis.LIQUID_GLASS_WEBGL = true
-   * draws with the shader in Chromium too (to see or test it there).
+   * source is named, nothing matches its selector (yet), it isn't an image, a video or a canvas, or it can't be read.
+   * globalThis.LIQUID_GLASS_WEBGL = true draws with the shader in Chromium too (to see or test it there).
    */
   private glSource(): BackdropSource | null {
     const named = this.options.backdropSource;
-    if (!named || this.shape || this.glFailed) return null;
-    if (supportsSvgBackdrop() && !(globalThis as { LIQUID_GLASS_WEBGL?: boolean }).LIQUID_GLASS_WEBGL) return null;
+    if (!named || this.shape || !shaderHere()) return null;
     let el: Element | null = null;
     if (typeof named === 'string') {
       try {
         el = document.querySelector(named);
       } catch {
-        // not a selector
+        warnOnce(named, `backdropSource: "${named}" is not a selector; the glass is a plain blur`);
       }
     } else el = named;
-    return isBackdropSource(el) && glSupported() ? el : null;
+    if (!isBackdropSource(el)) {
+      if (el) warnOnce(el, 'backdropSource must be an <img>, <video> or <canvas>; the glass is a plain blur over', el);
+      return null;
+    }
+    if (this.glFailed?.el === el && this.glFailed.as === sourceIdentity(el)) return null;
+    return glSupported() ? el : null;
   }
 
   /** What the shader draws now (see GlFrame), or null: no glass, or its map isn't drawn yet. */
@@ -397,8 +428,7 @@ export class Lens {
       }
       this.applyStrength();
       this.setBackdrop(s > 0 ? this.filterCss : 'none');
-      const source = this.gl && this.glSource();
-      if (source) this.gl!.setSource(source);
+      if (this.gl && this.glNow) this.gl.setSource(this.glNow);
     }
     this.layout(true);
   }
@@ -491,7 +521,7 @@ export class Lens {
     this.passes = [];
     this.reach = 0;
     this.mapKey = '';
-    const source = this.glSource();
+    const source = this.glNow;
     this.bends = (supportsSvgBackdrop() || !!source) && o.refraction > 0 && o.variant !== 'identity';
     if (!source || !this.bends) {
       this.gl?.destroy();
@@ -642,11 +672,16 @@ export class Lens {
       this.gl ??= new GlGlass({
         el: this.el,
         frame: () => this.glFrame(),
-        // the source can't be read: the plain blur instead
+        // the source can't be read: the plain blur instead, until the source shows something else
         failed: () => {
-          this.glFailed = true;
+          const el = this.glNow;
+          if (el) {
+            this.glFailed = { el, as: sourceIdentity(el) };
+            warnOnce(el, 'backdropSource can\'t be read (another origin: it needs CORS headers and crossorigin="anonymous"); the glass is a plain blur over', el);
+          }
           this.refresh();
         },
+        fallback: () => (this.options.variant === 'identity' || this.amount() <= 0 ? 'none' : this.cssBackdrop()),
       }, source);
       this.gl.setSource(source);
       this.setBackdrop('none');
@@ -1162,6 +1197,8 @@ export class Lens {
   }
 
   destroy() {
+    this.unwatch?.();
+    this.unwatch = null;
     this.gl?.destroy();
     this.gl = null;
     this.setNested(false);

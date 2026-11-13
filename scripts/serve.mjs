@@ -26,4 +26,4 @@ const server = createServer((req, res) => {
   res.setHeader('content-range', `bytes ${from}-${to}/${data.length}`);
   res.end(data.subarray(from, to + 1));
 });
-server.listen(Number(process.env.PORT ?? 4173), '127.0.0.1', () => console.log(`http://127.0.0.1:${server.address().port}/demo/web/  (open it in Safari, Firefox or Chrome; Ctrl+C to stop)`));
+server.listen(Number(process.env.PORT ?? 4173), '127.0.0.1', () => console.log(`http://127.0.0.1:${server.address().port}/demo/web/  (open it in Safari, Firefox or Chrome; Ctrl+C to stop)\nhttp://127.0.0.1:${server.address().port}/demo/web/minimal.html  (the smallest page to copy)`));

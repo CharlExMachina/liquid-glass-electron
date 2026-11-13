@@ -52,7 +52,9 @@ export declare class Lens {
     private bends;
     private gl;
     private glMaps;
+    private glNow;
     private glFailed;
+    private unwatch;
     private w;
     private h;
     private radii;
@@ -129,8 +131,8 @@ export declare class Lens {
     private structureKey;
     /**
      * The element a shader bends as this glass's backdrop, or null: the compositor bends what's behind (Chromium), no
-     * source is named, it isn't an image, a video or a canvas, or it can't be read. globalThis.LIQUID_GLASS_WEBGL = true
-     * draws with the shader in Chromium too (to see or test it there).
+     * source is named, nothing matches its selector (yet), it isn't an image, a video or a canvas, or it can't be read.
+     * globalThis.LIQUID_GLASS_WEBGL = true draws with the shader in Chromium too (to see or test it there).
      */
     private glSource;
     /** What the shader draws now (see GlFrame), or null: no glass, or its map isn't drawn yet. */

@@ -4,7 +4,10 @@
 
 - Bending, fringe, frost, colour, opacity, strength, surface, free shapes: the same look as Chromium's.
 - The source: an `<img>`, `<video>` or `<canvas>`, with `object-fit` and `object-position`.
-- The fallback to a plain blur: no source, or one the page may not read (another origin without CORS).
+- The fallback to a plain blur: no source, or one the page may not read (another origin without CORS); tried again
+  when the source changes.
+- A source named by a selector: looked up again when the document changes (added late, replaced).
+- Glass across its picture's edge: the picture bent as far as it goes, the plain blur under the rest.
 - Redrawing when the glass or the source moves, and only then.
 
 ## How to get to it (user POV)
@@ -15,9 +18,9 @@ or Firefox. `pnpm demo:web` serves such a page: drag the lens and the panel, swi
 ## Driving it with test:web
 
 ```bash
-pnpm test:web                      # 22 cases × Electron, Safari, Firefox, and the two fallbacks
+pnpm test:web                      # 27 cases × Electron, Safari, Firefox, and the three fallbacks
 pnpm test:web --case=regulardark   # one case
-pnpm test:web --self-check         # must print: 22 of 22 cases caught the glass bent wrong
+pnpm test:web --self-check         # must print: 27 of 27 cases caught the glass bent wrong
 pnpm bench:web safari,firefox glass idle,move,scroll,n30,video
 ```
 
@@ -32,4 +35,10 @@ all within `test/web/limits.json`. After a change meant to move the glass, `--ca
 - The page reads the glass's canvas back, which holds the bending only: the light, shadow and outline are off in the
   cases (they're CSS in both paths). To see the whole, open `pnpm demo:web`.
 - At a device scale other than 1, pass `--scale=2`, so the reference is drawn at the browsers' scale.
-- Firefox started as a child of a script reports its profile missing; the runners start it through `open -na`.
+- Firefox started as a child of a script reports its profile missing on a Mac; the runners start it through
+  `open -na` there (on Linux, directly).
+- The edge cases (`edge`, `edgefrost`) compare what the shader drew and count what it left clear (`clear` in
+  cases.js): past the picture the compositor bends the page, which the shader hasn't got.
+- WebKitGTK 2.54 gives an empty frame from an `OffscreenCanvas` WebGL2 context made with `antialias: false`; the
+  renderer checks once that its frame arrives and makes the context another way if not. A browser that fails every
+  way gets the blur: `no shader canvas` in every case.

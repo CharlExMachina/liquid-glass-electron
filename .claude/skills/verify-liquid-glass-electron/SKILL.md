@@ -29,14 +29,16 @@ git status --short dist         # dist/ is committed: a change in src/ must come
 ```
 
 `pnpm test:web` opens Safari and Firefox through `open`, which a sandboxed shell may not do; run it unsandboxed.
-`--browsers=electron` needs neither.
+`--browsers=electron` needs neither. On Linux it starts `firefox` and WebKitGTK (`test/web/webkitgtk.py`: python,
+PyGObject, GTK 4, WebKitGTK 6.0) itself; they need a display (`xvfb-run` does) and WebGL2.
 
 ## Drive
 
 | What | Command | Passes when |
 |---|---|---|
-| The shader's glass against the compositor's, in Electron, Safari and Firefox | `pnpm test:web` | every case prints `ok`, then `all passed` |
-| That those cases would catch wrong glass | `pnpm test:web --self-check` | `22 of 22 cases caught the glass bent wrong` |
+| The shader's glass against the compositor's, in Electron, Safari and Firefox (Linux: Firefox, WebKitGTK) | `pnpm test:web` | every case prints `ok`, then `all passed` |
+| The same in a browser you open yourself (Edge, a phone, Windows) | `pnpm test:web --browsers=electron,edge --host=0.0.0.0` | open the address it prints; every case prints `ok` |
+| That those cases would catch wrong glass | `pnpm test:web --self-check` | `27 of 27 cases caught the glass bent wrong` |
 | Chromium's glass against saved captures | `pnpm test:visual` | `all passed` (the baselines belong to the machine that wrote them: on another, write yours from `main` with `--update` first, then compare the branch) |
 | The variants against macOS's own glass | `pnpm test:native` | on a Mac whose macOS version, display gamut and scale match `test/native/reference/index.json`; it stops otherwise |
 | Cost per frame in Chrome, Safari and Firefox | `pnpm bench:web` | read the table it prints: frames per second and CPU per scene |
