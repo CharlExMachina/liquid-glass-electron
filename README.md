@@ -511,8 +511,6 @@ liquidglass's look is two; its blur fill and dark cap add nodes Skia draws with 
   content, so the inner one sees through it, as Apple's does), but inside such glass, keep a `mix-blend-mode` in an
   element of its own (`isolation: isolate` on its parent): blending isolates the outer glass, which then sees nothing
   behind it.
-- **The page can't read the pixels behind an element**, so the glass can't switch between light and dark by itself, as
-  Apple's small controls do over changing content. Set the theme (`data-glass-theme`, `setEnvironment({ dark })`).
 - **A glass element's own border isn't drawn**: the light is a `border-image`. Its border width still lays out. Use
   `edgeHighlight` instead of a border.
 - **Bending samples the nearest pixel** (that's Chromium's feDisplacementMap), so the backdrop is smoothed slightly
