@@ -69,7 +69,7 @@ export declare function ownGrid(w: number, h: number, scale: number, margin: num
  * straight edges is the point itself. The image reaches `margin` px past the edge, so the outermost pixels are
  * interpolated rather than clamped.
  */
-export declare function tableMap(f: Field, o: Optics, scale: number, N?: number, fringe?: number, profile?: Field, grid?: MapGrid | null): TableMap;
+export declare function tableMap(f: Field, o: Optics, scale: number, N?: number, profile?: Field, grid?: MapGrid | null): TableMap;
 export interface FieldLight {
     /** the light inside the shape, its shadow outside it, and its coverage (for mask-image), all the same size */
     light: Pixels;

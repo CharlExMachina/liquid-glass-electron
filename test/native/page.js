@@ -13,6 +13,7 @@ const MUTATE = {
   frost: (g) => ({ blurAmount: VARIANTS[g.variant ?? 'regular'].blurAmount * 0.7 }),
   colour: () => ({ saturation: 0.15 }),
   outline: () => ({ outline: 0, outlineTop: 0 }),
+  nofringe: () => ({ chromAberration: 0 }),
 };
 const mutate = MUTATE[q.get('mutate')] ?? (() => ({}));
 

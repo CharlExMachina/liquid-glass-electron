@@ -142,5 +142,29 @@
   "near": 1,
   "p95": 4.8,
   "bias": 0.9
+ },
+ "circle-clear-light-rampx-circle-fringe": {
+  "inside": 1.6,
+  "rim": 2.2,
+  "edge": 8.8,
+  "near": 1,
+  "p95": 3.5,
+  "bias": 1.2
+ },
+ "circle-clear-light-rampy-circle-fringe": {
+  "inside": 1.4,
+  "rim": 2.4,
+  "edge": 8.1,
+  "near": 1,
+  "p95": 4.8,
+  "bias": 0.8
+ },
+ "circle-clear-light-coast-fringe": {
+  "inside": 1.2,
+  "rim": 1.6,
+  "edge": 5.5,
+  "near": 1,
+  "p95": 2.3,
+  "bias": 1
  }
 }

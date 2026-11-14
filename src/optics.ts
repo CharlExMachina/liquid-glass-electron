@@ -5,10 +5,29 @@
 import type { Field } from './field.ts';
 
 export const IOR = 1.5;
-// liquidglass fringes by chromAberration × 18 × 2 px at the rim, where the bevel shifts by about 43 px (at its
-// defaults). Here each channel is bent by its own share of the bevel's shift, red further and blue less: 1.7 per
-// unit of aberration on either side, as Libre Hub's engine has it.
-export const ABERRATION = 1.7;
+// Colour fringing is macOS's: its glass filter's own aberration (glassBackground's inputAberration*, which macOS 27's
+// glass leaves unset), measured with them set (docs/APPLE.md). Green follows the lens; across (left and right edges)
+// blue is sampled a distance Δ further along the lens's shift and red as far short of it, and down (top and bottom
+// edges) the other way round, red further, as macOS's filter does. Δ falls off from the rim as the lens's shift does
+// and is the same however strongly the glass bends (none where it doesn't bend at all). Here Δ at the rim is
+// chromAberration × FRINGE px: liquidglass's fringe there (its red sampled chromAberration × 36 px from green).
+export const FRINGE = 36;
+
+/**
+ * A colour channel's share of the lens's shift along one axis, with macOS's fringe: `fringe` 1 for the channel sampled
+ * further (blue across, red down), −1 for the one sampled short, 0 for green; `rimPx` the lens's largest shift at
+ * refraction 1, `full` the refraction (with a press's). Further is chromAberration × FRINGE px at the rim, whatever the
+ * refraction; nothing without bending.
+ */
+export function fringeShare(fringe: number, chromAberration: number, rimPx: number, full: number) {
+  if (!fringe || !rimPx || !full) return 1;
+  return 1 + (fringe * chromAberration * FRINGE) / (rimPx * Math.abs(full));
+}
+
+/** Red's, green's and blue's shares of the lens's shift, across and down (see fringeShare). */
+export function fringeShares(chromAberration: number, rimPx: number, full: number) {
+  return [-1, 0, 1].map((c) => ({ x: fringeShare(c, chromAberration, rimPx, full), y: fringeShare(-c, chromAberration, rimPx, full) }));
+}
 
 export const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), hi);
 export const smoothstep = (a: number, b: number, x: number) => {
@@ -178,19 +197,6 @@ export function shiftAt(x: number, y: number, f: Field, o: Optics): [number, num
   const m = o.magnify ? o.refraction * 4 * depth : 0;
   const [px, py] = f.pull(x, y);
   return [gx * k + px * m, gy * k + py * m];
-}
-
-/**
- * liquidglass's colour fringe at a point: how far red is sampled from green (blue the same amount the other way), px,
- * along the surface normal: chromAberration × 36 × (0.3 + 0.7 × edge) × |N.xy|, outward. Nothing in the flat middle.
- */
-export function fringeAt(x: number, y: number, f: Field, bevel: number, chroma: number): [number, number] {
-  const [gx, gy, d] = gradient(f, x, y, Math.max(bevel, 1));
-  const n = Math.hypot(gx, gy, 1);
-  const edge = smoothstep(f.shortHalf * 0.35, 0, d);
-  const k = chroma * 36 * (0.3 + 0.7 * edge);
-  // N.xy = −grad / |(−grad, 1)|: outward
-  return [(-gx / n) * k, (-gy / n) * k];
 }
 
 // ---------------------------------------------------------------- lighting

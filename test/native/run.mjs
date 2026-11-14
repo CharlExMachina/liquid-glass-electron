@@ -5,8 +5,8 @@
 //
 //   pnpm test:native               compare (writes test/native/out/report.html: macOS, this library, the difference)
 //   pnpm test:native --update      capture macOS's references again (macOS 26+, the command line tools' swiftc)
-//   pnpm test:native --self-check  draw the glass wrong on purpose (no lens, less frost, other colour, no outline) and
-//                                  check that the cases catch each: a test that can't fail proves nothing
+//   pnpm test:native --self-check  draw the glass wrong on purpose (no lens, less frost, other colour, no outline, no
+//                                  fringe) and check that the cases catch each: a test that can't fail proves nothing
 //   pnpm test:native --calibrate   write limits.json from what the glass measures now, with room for rounding
 //   pnpm test:native --case=<regex>
 //
@@ -40,7 +40,7 @@ const RIM = 24, EDGE = 2, NEAR = 40, FAR = 1;
 // the mean signed difference inside (too bright or too dark overall)
 const MEASURES = ['inside', 'rim', 'edge', 'near', 'p95', 'bias'];
 // what --self-check breaks, as options on top of each glass's (page.js), and how many cases must catch it
-const MUTATIONS = { nolens: 3, frost: 3, colour: 3, outline: 1 };
+const MUTATIONS = { nolens: 3, frost: 3, colour: 3, outline: 1, nofringe: 1 };
 
 /** The part of the window kept: the glass's box and MARGIN around it, device px. */
 function crop(c) {

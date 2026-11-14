@@ -151,10 +151,10 @@ backdrop for all its members at once, before any of them paints. So:
    a size change, hover, press, drag: the member gets its own filter at once, in the same frame. A move that touches
    nothing on it (a stylesheet rule, a layout shift, `el.animate()`) is seen a frame later. It goes back into the group
    once it has stayed put for ~120 ms; one that keeps moving keeps its own filter meanwhile.
-4. **What stays out on its own** (glass of its own, still correct): free shapes (`squircle`, `path`), `bevelMode: 1`
-   with fringing, `distortion`, `backdrop`, glass that doesn't bend, `position: sticky`, `group: false`, and members
-   with `opacity`, `filter`, `mask`, `clip-path`, `mix-blend-mode`, a rotation or a scale on them. A group made by
-   `glass()` also leaves out glass far from the rest (its layer would be over 3× the glass in it).
+4. **What stays out on its own** (glass of its own, still correct): free shapes (`squircle`, `path`), `distortion`,
+   `backdrop`, glass that doesn't bend, `position: sticky`, `group: false`, and members with `opacity`, `filter`,
+   `mask`, `clip-path`, `mix-blend-mode`, a rotation or a scale on them. A group made by `glass()` also leaves out glass
+   far from the rest (its layer would be over 3× the glass in it).
 5. In-flow members (`static`/`relative`) make their parent `position: relative` if it's static, so the layer moves
    with them (a group made by `glass()` only if that moves nothing else in the parent; otherwise they keep their own
    filters); members are `isolation: isolate` while the group draws them (a backdrop filter made them stacking contexts

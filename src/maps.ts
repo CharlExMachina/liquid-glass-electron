@@ -1,6 +1,6 @@
 // The images the glass is made of, as raw RGBA pixels: no DOM, so they can be tested and drawn anywhere.
 import type { Field } from './field.ts';
-import { boxShadowAlpha, fringeAt, lightAt, shiftAt, type Lighting, type Optics, type Radii } from './optics.ts';
+import { boxShadowAlpha, lightAt, shiftAt, type Lighting, type Optics, type Radii } from './optics.ts';
 
 export interface Pixels {
   width: number;
@@ -126,14 +126,8 @@ export function ownGrid(w: number, h: number, scale: number, margin: number): Ma
  * straight edges is the point itself. The image reaches `margin` px past the edge, so the outermost pixels are
  * interpolated rather than clamped.
  */
-export function tableMap(f: Field, o: Optics, scale: number, N = 256, fringe = 0, profile: Field = f, grid: MapGrid | null = null): TableMap {
-  // `fringe` ≠ 0: this channel's map, sampled liquidglass's colour fringe further out (red, > 0) or in (blue, < 0)
-  const shift = (x: number, y: number): [number, number] => {
-    const [sx, sy] = shiftAt(x, y, f, o);
-    if (!fringe) return [sx, sy];
-    const [fx, fy] = fringeAt(x, y, f, o.bevel, Math.abs(fringe));
-    return [sx + Math.sign(fringe) * fx, sy + Math.sign(fringe) * fy];
-  };
+export function tableMap(f: Field, o: Optics, scale: number, N = 256, profile: Field = f, grid: MapGrid | null = null): TableMap {
+  const shift = (x: number, y: number) => shiftAt(x, y, f, o);
   const zR = Math.min(Math.max(o.bevel, 1), f.shortHalf);
   const margin = Math.ceil(2 / scale);
   const g = grid ?? ownGrid(f.w, f.h, scale, margin);

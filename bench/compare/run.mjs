@@ -12,6 +12,9 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 app.commandLine.appendSwitch('force-device-scale-factor', '1');
+// liquidglass draws with requestAnimationFrame, which a covered window stops
+app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
+app.commandLine.appendSwitch('disable-renderer-backgrounding');
 const arg = (k, d) => process.argv.find((a) => a.startsWith(`--${k}=`))?.slice(k.length + 3) ?? d;
 const cfg = arg('cfg', '{}'), photo = arg('photo', 'coast'), engine = arg('engine', 'ours'), file = arg('file', '');
 const out = fileURLToPath(new URL('./out/', import.meta.url));
@@ -29,7 +32,9 @@ app.whenReady().then(async () => {
     win.showInactive();
     for (let i = 0; i < 200 && !(await win.webContents.executeJavaScript('!!window.ready')); i++) await new Promise((r) => setTimeout(r, 50));
     await new Promise((r) => setTimeout(r, 600));
-    const img = await win.webContents.capturePage();
+    let img = await win.webContents.capturePage();
+    // a Mac's Retina display captures at 2× whatever the forced scale factor: back to the scene's size
+    if (img.getSize().width !== W) img = img.resize({ width: W, height: H, quality: 'best' });
     win.destroy();
     writeFileSync(`${out}${engine}-${photo}.png`, img.toPNG());
     return img;

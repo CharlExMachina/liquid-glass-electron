@@ -37,12 +37,13 @@ export interface GlMap {
 export interface GlFrame {
   w: number;
   h: number;
-  /** one map, or one per colour channel (a dome's fringe) */
-  maps: GlMap[];
+  /** the map */
+  map: GlMap;
   /** where the map is stretched over */
   mapRect: Box;
-  /** red, green and blue: which map, and how many times its shift */
-  channels: { map: number; k: number }[];
+  /** red, green and blue: how many times the map's shift across, and down (they differ with colour fringing) */
+  kx: [number, number, number];
+  ky: [number, number, number];
   /** the furthest the backdrop is read from past the edge, px */
   reach: number;
   /** the frost, σ px; and macOS's blur fill, laid over it */
@@ -182,12 +183,13 @@ void main() {
   o = sum / total;
 }`;
 
-// The glass: per colour channel, where the map says the backdrop is seen from, then colour, surface and shape.
+// The glass: where the map says the backdrop is seen from (per colour channel, with fringing), then colour, surface
+// and shape.
 const GLASS = `#version 300 es
 precision highp float;
-uniform sampler2D uBack, uWide, uMap0, uMap1, uMap2, uTab0, uTab1, uTab2, uGain, uOffset;
-uniform vec4 uTabInfo[3];   // entries, bias, rimPx
-uniform vec3 uK;            // red, green, blue: times the map's shift
+uniform sampler2D uBack, uWide, uMap, uTab, uGain, uOffset;
+uniform vec4 uTabInfo;      // entries, bias, rimPx
+uniform vec3 uKx, uKy;      // red, green, blue: times the map's shift across, and down
 uniform vec2 uSize;         // the element, px
 uniform vec4 uMapRect;
 uniform vec4 uToUv;         // the element's px to the backdrop texture's uv
@@ -210,8 +212,8 @@ vec4 tap(vec2 p) {
   return uEdge.x > 0.0 ? c * inside(uv, uEdge) : c;
 }
 
-// the backdrop as the glass shows it, premultiplied
-vec4 back(vec2 p) {
+// the backdrop the glass bends, not premultiplied (the frost, and macOS's blur fill laid over it)
+vec4 raw(vec2 p) {
   vec4 c;
   if (uSmooth) {
     // four taps half a pixel out, each the mean of four pixels: the 3 x 3 kernel 1 2 1, 2 4 2, 1 2 1
@@ -226,8 +228,14 @@ vec4 back(vec2 p) {
     vec4 w = textureLod(uWide, clamp(p * uToUv.xy + uToUv.zw, 0.0, 1.0), 0.0);
     if (w.a > 0.0) s = mix(s, uDarken ? min(s, w.rgb / w.a) : max(s, w.rgb / w.a), uFill);
   }
-  // the matrix, clipped as a filter clips; and macOS's cap on the luma, which keeps the hue
-  vec3 r = uColour * s + uColourOffset;
+  return vec4(s, c.a);
+}
+
+// the glass's colour, premultiplied: the matrix, clipped as a filter clips; and macOS's cap on the luma, which keeps
+// the hue
+vec4 colour(vec4 c) {
+  if (c.a <= 0.0) return vec4(0.0);
+  vec3 r = uColour * c.rgb + uColourOffset;
   vec3 col = clamp(r, 0.0, 1.0);
   if (uCap > 0.0) {
     float l = clamp(dot(vec3(0.2126, 0.7152, 0.0722), r), -1.0, 1.0);
@@ -236,27 +244,29 @@ vec4 back(vec2 p) {
   return vec4(col * c.a, c.a);
 }
 
-vec2 shift(sampler2D map, sampler2D tab, vec4 info, vec2 p, out float edge) {
-  vec3 m = textureLod(map, (p - uMapRect.xy) / uMapRect.zw, 0.0).rgb;
+vec4 back(vec2 p) { return colour(raw(p)); }
+
+vec2 shift(vec2 p, out float edge) {
+  vec3 m = textureLod(uMap, (p - uMapRect.xy) / uMapRect.zw, 0.0).rgb;
   edge = m.b;
-  vec2 t = m.rg * (info.x - 1.0), i = min(floor(t), info.x - 2.0), f = t - i;
-  float x = mix(texelFetch(tab, ivec2(int(i.x), 0), 0).r, texelFetch(tab, ivec2(int(i.x) + 1, 0), 0).r, f.x);
-  float y = mix(texelFetch(tab, ivec2(int(i.y), 0), 0).g, texelFetch(tab, ivec2(int(i.y) + 1, 0), 0).g, f.y);
-  return (vec2(x, y) - info.y - 0.5) * 2.0 * info.z;
+  vec2 t = m.rg * (uTabInfo.x - 1.0), i = min(floor(t), uTabInfo.x - 2.0), f = t - i;
+  float x = mix(texelFetch(uTab, ivec2(int(i.x), 0), 0).r, texelFetch(uTab, ivec2(int(i.x) + 1, 0), 0).r, f.x);
+  float y = mix(texelFetch(uTab, ivec2(int(i.y), 0), 0).g, texelFetch(uTab, ivec2(int(i.y) + 1, 0), 0).g, f.y);
+  return (vec2(x, y) - uTabInfo.y - 0.5) * 2.0 * uTabInfo.z;
 }
 
 void main() {
   vec2 p = vec2(v.x, uFlip ? 1.0 - v.y : v.y) * uSize;
-  float edge, unused;
-  vec2 s0 = shift(uMap0, uTab0, uTabInfo[0], p, edge);
+  float edge;
+  vec2 s0 = shift(p, edge);
   vec4 col;
   if (uFringe) {
-    vec2 s1 = shift(uMap1, uTab1, uTabInfo[1], p, unused), s2 = shift(uMap2, uTab2, uTabInfo[2], p, unused);
-    // each channel from its own place: there as much as the three are, between them
-    vec4 r = back(p + s0 * uK.x), g = back(p + s1 * uK.y), b = back(p + s2 * uK.z);
-    col = vec4(r.r, g.g, b.b, (r.a + g.a + b.a) / 3.0);
+    // each channel from its own place along the shift, there as much as the three are, between them; coloured after,
+    // as macOS colours its fringe
+    vec4 r = raw(p + s0 * vec2(uKx.x, uKy.x)), g = raw(p + s0 * vec2(uKx.y, uKy.y)), b = raw(p + s0 * vec2(uKx.z, uKy.z));
+    col = colour(vec4(r.r, g.g, b.b, (r.a + g.a + b.a) / 3.0));
   } else {
-    col = back(p + s0 * uK.x);
+    col = back(p + s0 * vec2(uKx.y, uKy.y));
   }
   if (uOpacity < 1.0) col = mix(back(p), col, uOpacity);
   if (uSurface > 0.0 && col.a > 0.0) {
@@ -676,27 +686,25 @@ class Renderer {
     gl.useProgram(p.program);
     this.bind(0, back);
     this.bind(1, wide ?? back);
-    const maps = [0, 1, 2].map((c) => f.maps[f.channels[c].map]);
-    maps.forEach((m, c) => {
-      this.bind(2 + c, this.mapTexture(m));
-      this.bind(5 + c, this.tableTexture(m));
-    });
+    this.bind(2, this.mapTexture(f.map));
+    this.bind(3, this.tableTexture(f.map));
     let surface = 0;
     if (f.surface && f.surface.strength > 0) {
       const gain = this.image(f.surface.urls[0], redraw), offset = this.image(f.surface.urls[1], redraw);
       if (gain && offset) {
-        this.bind(8, gain);
-        this.bind(9, offset);
+        this.bind(4, gain);
+        this.bind(5, offset);
         surface = f.surface.strength;
       }
     }
     if (!surface) {
-      this.bind(8, back);
-      this.bind(9, back);
+      this.bind(4, back);
+      this.bind(5, back);
     }
-    ['uBack', 'uWide', 'uMap0', 'uMap1', 'uMap2', 'uTab0', 'uTab1', 'uTab2', 'uGain', 'uOffset'].forEach((name, unit) => gl.uniform1i(at[name], unit));
-    gl.uniform4fv(at.uTabInfo, maps.flatMap((m) => [m.tableX.length, m.bias, m.rimPx, 0]));
-    gl.uniform3f(at.uK, f.channels[0].k, f.channels[1].k, f.channels[2].k);
+    ['uBack', 'uWide', 'uMap', 'uTab', 'uGain', 'uOffset'].forEach((name, unit) => gl.uniform1i(at[name], unit));
+    gl.uniform4f(at.uTabInfo, f.map.tableX.length, f.map.bias, f.map.rimPx, 0);
+    gl.uniform3f(at.uKx, f.kx[0], f.kx[1], f.kx[2]);
+    gl.uniform3f(at.uKy, f.ky[0], f.ky[1], f.ky[2]);
     gl.uniform2f(at.uSize, f.w, f.h);
     gl.uniform4f(at.uMapRect, f.mapRect.x, f.mapRect.y, f.mapRect.w, f.mapRect.h);
     gl.uniform4f(at.uToUv, backToUv[0], backToUv[1], backToUv[2], backToUv[3]);
@@ -716,7 +724,7 @@ class Renderer {
     gl.uniform1i(at.uFlip, 1);
     gl.uniform1i(at.uSmooth, f.smooth && f.sigma <= 0.01 ? 1 : 0);
     gl.uniform1i(at.uDarken, f.fill?.darken ? 1 : 0);
-    gl.uniform1i(at.uFringe, f.channels.some((c) => c.map !== f.channels[0].map || c.k !== f.channels[0].k) ? 1 : 0);
+    gl.uniform1i(at.uFringe, [0, 2].some((c) => f.kx[c] !== f.kx[1] || f.ky[c] !== f.ky[1]) ? 1 : 0);
     gl.uniform1i(at.uCover, f.cover ? 1 : 0);
     // its place from the canvas's top-left corner (the canvas's rows run up)
     this.run(null, x, this.canvas.height - y - ch, cw, ch);

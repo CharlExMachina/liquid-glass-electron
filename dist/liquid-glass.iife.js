@@ -405,7 +405,14 @@ var LiquidGlass = (() => {
 
   // src/optics.ts
   var IOR = 1.5;
-  var ABERRATION = 1.7;
+  var FRINGE = 36;
+  function fringeShare(fringe, chromAberration, rimPx, full) {
+    if (!fringe || !rimPx || !full) return 1;
+    return 1 + fringe * chromAberration * FRINGE / (rimPx * Math.abs(full));
+  }
+  function fringeShares(chromAberration, rimPx, full) {
+    return [-1, 0, 1].map((c) => ({ x: fringeShare(c, chromAberration, rimPx, full), y: fringeShare(-c, chromAberration, rimPx, full) }));
+  }
   var clamp = (v, lo, hi) => Math.min(Math.max(v, lo), hi);
   var smoothstep = (a, b, x) => {
     const t = clamp((x - a) / (b - a), 0, 1);
@@ -531,13 +538,6 @@ var LiquidGlass = (() => {
     const m = o.magnify ? o.refraction * 4 * depth : 0;
     const [px, py] = f.pull(x, y);
     return [gx * k + px * m, gy * k + py * m];
-  }
-  function fringeAt(x, y, f, bevel, chroma) {
-    const [gx, gy, d] = gradient(f, x, y, Math.max(bevel, 1));
-    const n = Math.hypot(gx, gy, 1);
-    const edge = smoothstep(f.shortHalf * 0.35, 0, d);
-    const k = chroma * 36 * (0.3 + 0.7 * edge);
-    return [-gx / n * k, -gy / n * k];
   }
   var unit = (x, y, z) => {
     const l = Math.hypot(x, y, z);
@@ -778,13 +778,8 @@ var LiquidGlass = (() => {
     const width = Math.max(2, Math.round((w + 2 * margin) * scale)), height2 = Math.max(2, Math.round((h + 2 * margin) * scale));
     return { x: -margin, y: -margin, px: (w + 2 * margin) / width, py: (h + 2 * margin) / height2, width, height: height2 };
   }
-  function tableMap(f, o, scale, N = 256, fringe = 0, profile = f, grid = null) {
-    const shift = (x, y) => {
-      const [sx, sy] = shiftAt(x, y, f, o);
-      if (!fringe) return [sx, sy];
-      const [fx, fy] = fringeAt(x, y, f, o.bevel, Math.abs(fringe));
-      return [sx + Math.sign(fringe) * fx, sy + Math.sign(fringe) * fy];
-    };
+  function tableMap(f, o, scale, N = 256, profile = f, grid = null) {
+    const shift = (x, y) => shiftAt(x, y, f, o);
     const zR = Math.min(Math.max(o.bevel, 1), f.shortHalf);
     const margin = Math.ceil(2 / scale);
     const g = grid ?? ownGrid(f.w, f.h, scale, margin);
@@ -1023,9 +1018,9 @@ void main() {
 }`;
   var GLASS = `#version 300 es
 precision highp float;
-uniform sampler2D uBack, uWide, uMap0, uMap1, uMap2, uTab0, uTab1, uTab2, uGain, uOffset;
-uniform vec4 uTabInfo[3];   // entries, bias, rimPx
-uniform vec3 uK;            // red, green, blue: times the map's shift
+uniform sampler2D uBack, uWide, uMap, uTab, uGain, uOffset;
+uniform vec4 uTabInfo;      // entries, bias, rimPx
+uniform vec3 uKx, uKy;      // red, green, blue: times the map's shift across, and down
 uniform vec2 uSize;         // the element, px
 uniform vec4 uMapRect;
 uniform vec4 uToUv;         // the element's px to the backdrop texture's uv
@@ -1048,8 +1043,8 @@ vec4 tap(vec2 p) {
   return uEdge.x > 0.0 ? c * inside(uv, uEdge) : c;
 }
 
-// the backdrop as the glass shows it, premultiplied
-vec4 back(vec2 p) {
+// the backdrop the glass bends, not premultiplied (the frost, and macOS's blur fill laid over it)
+vec4 raw(vec2 p) {
   vec4 c;
   if (uSmooth) {
     // four taps half a pixel out, each the mean of four pixels: the 3 x 3 kernel 1 2 1, 2 4 2, 1 2 1
@@ -1064,8 +1059,14 @@ vec4 back(vec2 p) {
     vec4 w = textureLod(uWide, clamp(p * uToUv.xy + uToUv.zw, 0.0, 1.0), 0.0);
     if (w.a > 0.0) s = mix(s, uDarken ? min(s, w.rgb / w.a) : max(s, w.rgb / w.a), uFill);
   }
-  // the matrix, clipped as a filter clips; and macOS's cap on the luma, which keeps the hue
-  vec3 r = uColour * s + uColourOffset;
+  return vec4(s, c.a);
+}
+
+// the glass's colour, premultiplied: the matrix, clipped as a filter clips; and macOS's cap on the luma, which keeps
+// the hue
+vec4 colour(vec4 c) {
+  if (c.a <= 0.0) return vec4(0.0);
+  vec3 r = uColour * c.rgb + uColourOffset;
   vec3 col = clamp(r, 0.0, 1.0);
   if (uCap > 0.0) {
     float l = clamp(dot(vec3(0.2126, 0.7152, 0.0722), r), -1.0, 1.0);
@@ -1074,27 +1075,29 @@ vec4 back(vec2 p) {
   return vec4(col * c.a, c.a);
 }
 
-vec2 shift(sampler2D map, sampler2D tab, vec4 info, vec2 p, out float edge) {
-  vec3 m = textureLod(map, (p - uMapRect.xy) / uMapRect.zw, 0.0).rgb;
+vec4 back(vec2 p) { return colour(raw(p)); }
+
+vec2 shift(vec2 p, out float edge) {
+  vec3 m = textureLod(uMap, (p - uMapRect.xy) / uMapRect.zw, 0.0).rgb;
   edge = m.b;
-  vec2 t = m.rg * (info.x - 1.0), i = min(floor(t), info.x - 2.0), f = t - i;
-  float x = mix(texelFetch(tab, ivec2(int(i.x), 0), 0).r, texelFetch(tab, ivec2(int(i.x) + 1, 0), 0).r, f.x);
-  float y = mix(texelFetch(tab, ivec2(int(i.y), 0), 0).g, texelFetch(tab, ivec2(int(i.y) + 1, 0), 0).g, f.y);
-  return (vec2(x, y) - info.y - 0.5) * 2.0 * info.z;
+  vec2 t = m.rg * (uTabInfo.x - 1.0), i = min(floor(t), uTabInfo.x - 2.0), f = t - i;
+  float x = mix(texelFetch(uTab, ivec2(int(i.x), 0), 0).r, texelFetch(uTab, ivec2(int(i.x) + 1, 0), 0).r, f.x);
+  float y = mix(texelFetch(uTab, ivec2(int(i.y), 0), 0).g, texelFetch(uTab, ivec2(int(i.y) + 1, 0), 0).g, f.y);
+  return (vec2(x, y) - uTabInfo.y - 0.5) * 2.0 * uTabInfo.z;
 }
 
 void main() {
   vec2 p = vec2(v.x, uFlip ? 1.0 - v.y : v.y) * uSize;
-  float edge, unused;
-  vec2 s0 = shift(uMap0, uTab0, uTabInfo[0], p, edge);
+  float edge;
+  vec2 s0 = shift(p, edge);
   vec4 col;
   if (uFringe) {
-    vec2 s1 = shift(uMap1, uTab1, uTabInfo[1], p, unused), s2 = shift(uMap2, uTab2, uTabInfo[2], p, unused);
-    // each channel from its own place: there as much as the three are, between them
-    vec4 r = back(p + s0 * uK.x), g = back(p + s1 * uK.y), b = back(p + s2 * uK.z);
-    col = vec4(r.r, g.g, b.b, (r.a + g.a + b.a) / 3.0);
+    // each channel from its own place along the shift, there as much as the three are, between them; coloured after,
+    // as macOS colours its fringe
+    vec4 r = raw(p + s0 * vec2(uKx.x, uKy.x)), g = raw(p + s0 * vec2(uKx.y, uKy.y)), b = raw(p + s0 * vec2(uKx.z, uKy.z));
+    col = colour(vec4(r.r, g.g, b.b, (r.a + g.a + b.a) / 3.0));
   } else {
-    col = back(p + s0 * uK.x);
+    col = back(p + s0 * vec2(uKx.y, uKy.y));
   }
   if (uOpacity < 1.0) col = mix(back(p), col, uOpacity);
   if (uSurface > 0.0 && col.a > 0.0) {
@@ -1468,27 +1471,25 @@ void main() {
       gl.useProgram(p.program);
       this.bind(0, back);
       this.bind(1, wide ?? back);
-      const maps = [0, 1, 2].map((c) => f.maps[f.channels[c].map]);
-      maps.forEach((m2, c) => {
-        this.bind(2 + c, this.mapTexture(m2));
-        this.bind(5 + c, this.tableTexture(m2));
-      });
+      this.bind(2, this.mapTexture(f.map));
+      this.bind(3, this.tableTexture(f.map));
       let surface = 0;
       if (f.surface && f.surface.strength > 0) {
         const gain = this.image(f.surface.urls[0], redraw), offset = this.image(f.surface.urls[1], redraw);
         if (gain && offset) {
-          this.bind(8, gain);
-          this.bind(9, offset);
+          this.bind(4, gain);
+          this.bind(5, offset);
           surface = f.surface.strength;
         }
       }
       if (!surface) {
-        this.bind(8, back);
-        this.bind(9, back);
+        this.bind(4, back);
+        this.bind(5, back);
       }
-      ["uBack", "uWide", "uMap0", "uMap1", "uMap2", "uTab0", "uTab1", "uTab2", "uGain", "uOffset"].forEach((name, unit2) => gl.uniform1i(at[name], unit2));
-      gl.uniform4fv(at.uTabInfo, maps.flatMap((m2) => [m2.tableX.length, m2.bias, m2.rimPx, 0]));
-      gl.uniform3f(at.uK, f.channels[0].k, f.channels[1].k, f.channels[2].k);
+      ["uBack", "uWide", "uMap", "uTab", "uGain", "uOffset"].forEach((name, unit2) => gl.uniform1i(at[name], unit2));
+      gl.uniform4f(at.uTabInfo, f.map.tableX.length, f.map.bias, f.map.rimPx, 0);
+      gl.uniform3f(at.uKx, f.kx[0], f.kx[1], f.kx[2]);
+      gl.uniform3f(at.uKy, f.ky[0], f.ky[1], f.ky[2]);
       gl.uniform2f(at.uSize, f.w, f.h);
       gl.uniform4f(at.uMapRect, f.mapRect.x, f.mapRect.y, f.mapRect.w, f.mapRect.h);
       gl.uniform4f(at.uToUv, backToUv[0], backToUv[1], backToUv[2], backToUv[3]);
@@ -1507,7 +1508,7 @@ void main() {
       gl.uniform1i(at.uFlip, 1);
       gl.uniform1i(at.uSmooth, f.smooth && f.sigma <= 0.01 ? 1 : 0);
       gl.uniform1i(at.uDarken, f.fill?.darken ? 1 : 0);
-      gl.uniform1i(at.uFringe, f.channels.some((c) => c.map !== f.channels[0].map || c.k !== f.channels[0].k) ? 1 : 0);
+      gl.uniform1i(at.uFringe, [0, 2].some((c) => f.kx[c] !== f.kx[1] || f.ky[c] !== f.ky[1]) ? 1 : 0);
       gl.uniform1i(at.uCover, f.cover ? 1 : 0);
       this.run(null, x, this.canvas.height - y - ch, cw, ch);
     }
@@ -1751,6 +1752,10 @@ void main() {
   var SETTLE = 120;
   var BACKGROUND = ["background-color", "background-image", "background-position", "background-size", "background-repeat", "background-origin", "background-clip"];
   var KEEP = ["1 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 1 0", "0 0 0 0 0  0 1 0 0 0  0 0 0 0 0  0 0 0 1 0", "0 0 0 0 0  0 0 0 0 0  0 0 1 0 0  0 0 0 1 0"];
+  var downScale = (k) => {
+    const q = +k.toFixed(5), o = +(0.5 * (1 - q)).toFixed(5);
+    return `${q} 0 0 0 ${o}  0 ${q} 0 0 ${o}  0 0 ${q} 0 ${o}  0 0 0 1 0`;
+  };
   var nextId = 0;
   var shaderHere = () => !supportsSvgBackdrop() || !!globalThis.LIQUID_GLASS_WEBGL;
   var warned = /* @__PURE__ */ new WeakSet();
@@ -1777,7 +1782,7 @@ void main() {
     // the filters and the nodes that change
     pre = null;
     main = null;
-    // One map, or with a dome's fringe three (red, green, blue: liquidglass's fringe doesn't follow the dome's shift)
+    // the map (drawn for refraction 1: the shift is linear in it, so a scale stands for it)
     maps = [];
     colour = null;
     // macOS's cap on dark glass's brightness: a table from the luma (in the colour's alpha) to how much it's dimmed
@@ -1789,21 +1794,22 @@ void main() {
     mixNode = null;
     // the surface (GlassOptions.surface): its image, and the composites that apply its gain and offset
     surface = null;
-    // what backdrop-filter is while there's glass, the filter's structure (rebuilt only when it changes), and whether
-    // the maps are drawn for refraction 1 (the shift is linear in it, so a scale stands for it)
+    // what backdrop-filter is while there's glass, and the filter's structure (rebuilt only when it changes)
     filterCss = "none";
     structure = "";
-    unitMaps = true;
     following = 0;
     lightUrl = null;
+    // the bending passes: one, or with fringing red's, green's and blue's (`channel` 0, 1, 2)
     passes = [];
+    // with fringing, red's and blue's maps (see applyStrength)
+    fringeMaps = [];
     stash = false;
     bends = false;
     // Where backdrop-filter can't bend (Safari, Firefox) and the page names what's behind the glass
     // (GlassOptions.backdropSource): a shader draws the glass on a canvas behind the glass's layer (webgl.ts). The
     // filter's nodes are still made, as what holds the glass's state, but never put in the document.
     gl = null;
-    glMaps = [];
+    glMap = null;
     // the source now (looked up with every refresh: a selector's match may be another element, or one at last)
     glNow = null;
     // a source that couldn't be read, and what it showed then: not tried again until it shows something else
@@ -1982,7 +1988,7 @@ void main() {
      */
     batchSource() {
       const o = this.options;
-      if (!this.bends || this.gl || this.maps.length !== 1 || this.isFree() || this.shape || this.layer || o.surface || o.backdrop || o.distortion > 0 || this.amount() <= 0 || !this.main) return null;
+      if (!this.bends || this.gl || this.isFree() || this.shape || this.layer || o.surface || o.backdrop || o.distortion > 0 || this.amount() <= 0 || !this.main) return null;
       const map = this.maps[0];
       if (!map.images[0].getAttribute("href") || !map.rimPx || !this.mapGrid) return null;
       const first = this.pre ?? this.main;
@@ -2003,7 +2009,7 @@ void main() {
       const o = this.options;
       const gl = !!this.glNow;
       const bends = (supportsSvgBackdrop() || gl) && o.refraction > 0 && o.variant !== "identity";
-      return [bends, gl, o.backdrop, !!o.surface, o.chromAberration > 0, o.bevelMode, o.blurAmount > 0, o.smooth, o.distortion > 0, o.opacity < 1, o.variant === "identity", o.magnify, this.isFree(), this.capped(), this.filled() ? this.host.env().dark ? "darken" : "lighten" : ""].join();
+      return [bends, gl, o.backdrop, !!o.surface, o.chromAberration > 0, o.chromAberration > 0 && this.mixesColour(), o.bevelMode, o.blurAmount > 0, o.smooth, o.distortion > 0, o.opacity < 1, o.variant === "identity", o.magnify, this.isFree(), this.capped(), this.filled() ? this.host.env().dark ? "darken" : "lighten" : ""].join();
     }
     /**
      * The element a shader bends as this glass's backdrop, or null: the compositor bends what's behind (Chromium), no
@@ -2031,18 +2037,18 @@ void main() {
     /** What the shader draws now (see GlFrame), or null: no glass, or its map isn't drawn yet. */
     glFrame() {
       const o = this.options, s = this.amount(), { w, h } = this;
-      if (!this.bends || s <= 0 || !w || !h || !this.passes.length || this.glMaps.length !== this.maps.length) return null;
-      const k = Math.max(this.bulge, 1) * (this.unitMaps ? o.refraction : 1) * s * Math.min(this.bulge, 1);
-      const passes = this.passes.length === 3 ? this.passes : [this.passes[0], this.passes[0], this.passes[0]];
+      if (!this.bends || s <= 0 || !w || !h || !this.passes.length || !this.glMap) return null;
+      const full = Math.max(this.bulge, 1) * o.refraction, k = full * s * Math.min(this.bulge, 1), shares = this.shares(full);
       const r = this.region.w ? this.region : { x: 0, y: 0, w, h }, m = this.margin;
       const rect = this.mapRect ?? { x: -m, y: -m, w: r.w + 2 * m, h: r.h + 2 * m };
       const frosted = o.blurAmount > 0;
       return {
         w,
         h,
-        maps: this.glMaps,
+        map: this.glMap,
         mapRect: { x: r.x + rect.x, y: r.y + rect.y, w: rect.w, h: rect.h },
-        channels: passes.map((p) => ({ map: p.map, k: k * p.spread })),
+        kx: [0, 1, 2].map((c) => k * shares[c].x),
+        ky: [0, 1, 2].map((c) => k * shares[c].y),
         reach: this.reach,
         sigma: frosted ? this.frost() * s : 0,
         fill: this.filled() ? { sigma: MAC_FILL_SIGMA * s, alpha: MAC_FILL_OPACITY * s, darken: this.host.env().dark } : null,
@@ -2079,10 +2085,6 @@ void main() {
         this.mixNode?.setAttribute("k2", String(o.opacity));
         this.mixNode?.setAttribute("k3", String(1 - o.opacity));
         this.applySurface();
-        if (this.passes.length === 3 && this.unitMaps) {
-          const a = o.chromAberration * ABERRATION;
-          this.passes.forEach((p, k) => p.spread = 1 + (k - 1) * a);
-        }
         this.applyStrength();
         this.setBackdrop(s > 0 ? this.filterCss : "none");
         if (this.gl && this.glNow) this.gl.setSource(this.glNow);
@@ -2163,6 +2165,7 @@ void main() {
       this.pre = this.main = this.colour = this.blurNode = this.mixNode = this.capNode = this.fillBlur = this.fillAlpha = this.surface = null;
       this.maps = [];
       this.passes = [];
+      this.fringeMaps = [];
       this.reach = 0;
       this.mapKey = "";
       const source = this.glNow;
@@ -2170,7 +2173,7 @@ void main() {
       if (!source || !this.bends) {
         this.gl?.destroy();
         this.gl = null;
-        this.glMaps = [];
+        this.glMap = null;
       }
       const sigma = this.frost();
       if (!this.bends) {
@@ -2207,50 +2210,48 @@ void main() {
         );
         src = "grain";
       }
-      this.colour = svgEl("feColorMatrix", { in: src, type: "matrix", values: this.matrix().join(" "), result: "coloured" });
-      first.append(this.colour);
-      src = "coloured";
-      if (this.capped()) {
-        this.capNode = svgEl("feComponentTransfer", { in: src, result: "dimmed" }, svgEl("feFuncA", { type: "table", tableValues: this.capTable() }));
-        first.append(
+      const colourInto = (filter, input) => {
+        this.colour = svgEl("feColorMatrix", { in: input, type: "matrix", values: this.matrix().join(" "), result: "coloured" });
+        filter.append(this.colour);
+        if (!this.capped()) return "coloured";
+        this.capNode = svgEl("feComponentTransfer", { in: "coloured", result: "dimmed" }, svgEl("feFuncA", { type: "table", tableValues: this.capTable() }));
+        filter.append(
           this.capNode,
           svgEl("feFlood", { "flood-color": "#000", "flood-opacity": 1, result: "black" }),
           svgEl("feComposite", { in: "dimmed", in2: "black", operator: "over", result: "capped0" }),
           // where the backdrop is transparent (a transparent or vibrant window's), the glass stays so
           svgEl("feComposite", { in: "capped0", in2: "SourceGraphic", operator: "in", result: "capped" })
         );
-        src = "capped";
-      }
-      const perChannel = fringe && o.bevelMode === 1;
-      this.unitMaps = !perChannel;
-      const fringes = perChannel ? [1, 0, -1].map((k) => k * o.chromAberration) : [0];
+        return "capped";
+      };
+      const late = fringe && this.mixesColour();
+      if (!late) src = colourInto(first, src);
       const mergeNodes = [svgEl("feMergeNode", { in: src })];
-      fringes.forEach((f, i) => {
-        const { images: images2, nodes, tables, cover } = mapNodes(`map${i}raw`, fringe ? `side${i}` : `map${i}`, this.isFree() ? 3 : 2, fringe);
-        first.append(...nodes);
-        let shifts = [];
-        if (fringe) {
-          images2.forEach((_, c) => mergeNodes.push(svgEl("feMergeNode", { in: `side${i}_${c}` })));
-          const stashed = stashNodes(`map${i}`, images2.length);
-          shifts = stashed.shifts;
-          second.append(...stashed.nodes);
-        }
-        this.maps.push({ images: images2, tables, cover, shifts, fringe: f, rimPx: 0 });
-      });
+      const { images: images2, nodes, tables, cover } = mapNodes("map0raw", fringe ? "side0" : "map0", this.isFree() ? 3 : 2, fringe);
+      first.append(...nodes);
+      let shifts = [];
+      if (fringe) {
+        images2.forEach((_, c) => mergeNodes.push(svgEl("feMergeNode", { in: `side0_${c}` })));
+        const stashed = stashNodes("map0", images2.length);
+        shifts = stashed.shifts;
+        second.append(...stashed.nodes);
+      }
+      this.maps.push({ images: images2, tables, cover, shifts, rimPx: 0 });
       if (fringe) {
         first.append(svgEl("feMerge", {}, ...mergeNodes));
         src = "SourceGraphic";
       }
-      const pass = (result, spread, map) => {
+      const pass = (result, channel, map) => {
         const source2 = svgEl("feOffset", { in: src, dx: 0, dy: 0, result: `${result}in` });
-        const node = svgEl("feDisplacementMap", { in: `${result}in`, in2: `map${map}`, xChannelSelector: "A", yChannelSelector: "R", result });
-        this.passes.push({ node, source: source2, spread, map });
+        const node = svgEl("feDisplacementMap", { in: `${result}in`, in2: map, xChannelSelector: "A", yChannelSelector: "R", result });
+        this.passes.push({ node, source: source2, channel, map: 0 });
         return [source2, node];
       };
       if (fringe) {
-        const a = perChannel ? 0 : o.chromAberration * ABERRATION;
+        this.fringeMaps = ["mapr", "mapb"].map((m) => svgEl("feColorMatrix", { in: "map0s1", type: "matrix", values: downScale(1), result: `${m}_d` }));
+        this.fringeMaps.forEach((n, i) => second.append(n, svgEl("feComposite", { in: n.getAttribute("result"), in2: "map0_a", operator: "in", result: ["mapr", "mapb"][i] })));
         ["r", "g", "b"].forEach((ch, k) => second.append(
-          ...pass(`${ch}0`, 1 + (k - 1) * a, perChannel ? k : 0),
+          ...pass(`${ch}0`, k, ["mapr", "map0", "mapb"][k]),
           svgEl("feColorMatrix", { in: `${ch}0`, type: "matrix", values: KEEP[k], result: ch })
         ));
         second.append(
@@ -2258,19 +2259,20 @@ void main() {
           svgEl("feComposite", { in: "rg", in2: "b", operator: "lighter", result: "bent" })
         );
       } else {
-        second.append(...pass("bent", 1, 0));
+        second.append(...pass("bent", 1, "map0"));
       }
       if (o.opacity < 1) {
         this.mixNode = svgEl("feComposite", { in: "bent", in2: src, operator: "arithmetic", k2: o.opacity, k3: 1 - o.opacity, result: "mixed" });
         second.append(this.mixNode);
       }
       let out = this.mixNode ? "mixed" : "bent";
+      if (late) out = colourInto(second, out);
       if (o.surface) {
-        const images2 = ["gain", "offset"].map((result, i) => svgEl("feImage", { href: o.surface[i], preserveAspectRatio: "none", result }));
+        const images3 = ["gain", "offset"].map((result, i) => svgEl("feImage", { href: o.surface[i], preserveAspectRatio: "none", result }));
         const gain = svgEl("feComposite", { in: out, in2: "gain", operator: "arithmetic", result: "gained" });
         const offset = svgEl("feComposite", { in: "gained", in2: "offset", operator: "arithmetic", result: "surfaced0" });
-        second.append(images2[0], gain, images2[1], offset, svgEl("feComposite", { in: "surfaced0", in2: out, operator: "in", result: "surfaced" }));
-        this.surface = { images: images2, gain, offset };
+        second.append(images3[0], gain, images3[1], offset, svgEl("feComposite", { in: "surfaced0", in2: out, operator: "in", result: "surfaced" }));
+        this.surface = { images: images3, gain, offset };
         this.applySurface();
         out = "surfaced";
       }
@@ -2344,6 +2346,11 @@ void main() {
         out[18] = 0;
       }
       return out.map((v) => +v.toFixed(4));
+    }
+    /** Whether the colour mixes the channels (so that it widens a fringe it comes after), rather than scaling each. */
+    mixesColour() {
+      const o = this.options;
+      return o.saturation !== 0 || o.colorMatrix !== null || this.capped();
     }
     /** Whether macOS's blur fill applies (regular glass, bevelMode 4). */
     filled() {
@@ -2461,16 +2468,15 @@ void main() {
       const sub = region.x || region.y || region.w !== w || region.h !== h ? within(field, region) : field;
       if (this.bends && this.maps.length) {
         const scale = mapScale(region.w / Math.sqrt(this.shape?.detail() ?? 1), region.h, moving, o.bevelMode === 3);
-        const refraction = this.unitMaps ? 1 : o.refraction;
         const grid = this.shape || free ? null : this.grid;
-        const key = [w, h, ...radii, zR, refraction, o.bevelMode, +o.magnify, scale, mac?.amount ?? 0, mac?.height ?? 0, ...this.maps.map((m) => m.fringe)].map((v) => Math.round(v * 400) / 400).join(":") + (this.shape ? `|${this.shape.key()}` : "") + (free ? `|${o.shape}|${o.path}|${o.pathBox}|${o.cornerRadius}` : "") + (grid ? `|${Object.values(grid).join(",")}` : "");
+        const key = [w, h, ...radii, zR, o.bevelMode, +o.magnify, scale, mac?.amount ?? 0, mac?.height ?? 0].map((v) => Math.round(v * 400) / 400).join(":") + (this.shape ? `|${this.shape.key()}` : "") + (free ? `|${o.shape}|${o.path}|${o.pathBox}|${o.cornerRadius}` : "") + (grid ? `|${Object.values(grid).join(",")}` : "");
         if (key !== this.mapKey) {
           this.mapKey = key;
-          const entries = this.maps.map((map) => {
-            const k = `${key}|${map.fringe}${this.gl ? "|gl" : ""}`;
+          const entries = this.maps.map(() => {
+            const k = `${key}${this.gl ? "|gl" : ""}`;
             return mapCache.get(k) ?? remember(mapCache, k, (() => {
               const profile = free && o.shape === "path" ? roundedRect(w, h, [0, 0, 0, 0]) : sub;
-              const m = tableMap(sub, { refraction, bevel: zR, dome: o.bevelMode === 1, rim: o.bevelMode === 2, minify: o.bevelMode === 3, mac, magnify: o.magnify }, scale, moving ? 64 : 256, map.fringe, profile, grid);
+              const m = tableMap(sub, { refraction: 1, bevel: zR, dome: o.bevelMode === 1, rim: o.bevelMode === 2, minify: o.bevelMode === 3, mac, magnify: o.magnify }, scale, moving ? 64 : 256, profile, grid);
               const gl = this.gl ? { pixels: { width: m.width, height: m.height, data: m.data }, tableX: m.tableX, tableY: m.tableY, bias: m.bias, rimPx: m.rimPx } : void 0;
               return { gl, urls: gl ? [] : [0, 1, 2].slice(0, free ? 3 : 2).map((c) => greyDataURL(m, c)), rimPx: m.rimPx, margin: m.margin, rect: m.rect, grid: m.grid, tables: { ...encodeTables(m.tableX, m.tableY, m.bias), cover: m.tableB.join(" ") } };
             })());
@@ -2478,7 +2484,7 @@ void main() {
           const maps = this.maps;
           applies.push(Promise.all(entries.flatMap((e) => e.urls.map(predecode))).then(() => () => {
             if (this.mapKey !== key || this.maps !== maps) return;
-            this.glMaps = entries.flatMap((e) => e.gl ? [e.gl] : []);
+            this.glMap = entries[0].gl ?? null;
             entries.forEach((e, i) => {
               if (e.urls.length) maps[i].images.forEach((image2, c) => image2.setAttribute("href", e.urls[c]));
               maps[i].tables[0].children[0].setAttribute("tableValues", e.tables.across);
@@ -2621,10 +2627,13 @@ void main() {
     // ---------------------------------------------------------------- strength, hover, press, drag
     applyStrength() {
       this.changed();
-      const full = Math.max(this.bulge, 1) * (this.unitMaps ? this.options.refraction : 1), k = full * this.amount() * Math.min(this.bulge, 1);
+      const full = Math.max(this.bulge, 1) * this.options.refraction, k = full * this.amount() * Math.min(this.bulge, 1);
+      const shares = this.shares(full);
       let most2 = 0;
-      for (const { node, source, spread, map } of this.passes) {
-        const rim = 4 * (this.maps[map]?.rimPx ?? 0) * spread, scale = +(rim * k).toFixed(3);
+      for (const { node, source, channel, map } of this.passes) {
+        const { x, y } = shares[channel], share = channel === 0 ? Math.max(x, y / 2) : x;
+        if (channel !== 1 && this.fringeMaps.length) this.fringeMaps[channel / 2].setAttribute("values", downScale(share ? y / share : 1));
+        const rim = 4 * (this.maps[map]?.rimPx ?? 0) * share, scale = +(rim * k).toFixed(3);
         node.setAttribute("scale", String(scale));
         source.setAttribute("dx", String(scale / 4));
         most2 = Math.max(most2, Math.abs(rim * full) / 2);
@@ -2634,6 +2643,13 @@ void main() {
         this.reach = reach;
         this.place();
       }
+    }
+    /**
+     * Red's, green's and blue's shares of the lens's shift, across and down: 1, and with fringing macOS's (fringeShares):
+     * Δ px further or short at the rim, falling off inward as the shift does.
+     */
+    shares(full) {
+      return fringeShares(this.passes.length === 3 ? this.options.chromAberration : 0, this.maps[0]?.rimPx ?? 0, full);
     }
     tweenBulge(to) {
       cancelAnimationFrame(this.tween);
