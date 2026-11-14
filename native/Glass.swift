@@ -40,6 +40,27 @@ struct SceneSpec: Decodable {
   var glass: [GlassSpec]
   /// put the glass in one GlassEffectContainer of this spacing
   var container: Double?
+  /// macOS's colour fringe, which its glass leaves unset: the glass filter's inputAberrationAmount (points) on every
+  /// glass of the scene, with inputAberrationHeight its lens's own height (inputInnerRefractionHeight) and
+  /// inputAberrationAngle `aberrationAngle` (radians; 3π/2 by default: blue sampled further along the lens's shift)
+  var aberration: Double?
+  var aberrationAngle: Double?
+}
+
+/// Every layer under `layer` that draws glass (a CABackdropLayer with the glassBackground filter).
+func glassLayers(_ layer: CALayer) -> [CALayer] {
+  let own = (layer.filters ?? []).contains { "\($0)".contains("glassBackground") } ? [layer] : []
+  return own + (layer.sublayers ?? []).flatMap(glassLayers)
+}
+
+/// Sets the glass filter's aberration (see SceneSpec.aberration) on every glass in `view`.
+func setAberration(_ view: NSView, amount: Double, angle: Double) {
+  for layer in glassLayers(view.layer!) {
+    let lens = layer.value(forKeyPath: "filters.glassBackground.inputInnerRefractionHeight") as? Double ?? 20
+    layer.setValue(amount, forKeyPath: "filters.glassBackground.inputAberrationAmount")
+    layer.setValue(lens, forKeyPath: "filters.glassBackground.inputAberrationHeight")
+    layer.setValue(angle, forKeyPath: "filters.glassBackground.inputAberrationAngle")
+  }
 }
 
 func color(hex: String) -> Color {
@@ -173,8 +194,16 @@ final class SceneRunner: NSObject {
     } else {
       win.orderFrontRegardless()
     }
+    // the aberration once the glass is drawn, and again once it has settled (the first scene's glass can come later
+    // than that, and SwiftUI may draw it anew), a few frames before it's captured
+    let settled = scene.aberration == nil ? 0.8 : 1.0
+    if let amount = scene.aberration {
+      for t in [0.3, 0.6, 0.8] {
+        DispatchQueue.main.asyncAfter(deadline: .now() + t) { setAberration(win.contentView!, amount: amount, angle: scene.aberrationAngle ?? 1.5 * .pi) }
+      }
+    }
     // glass settles over a few frames
-    DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+    DispatchQueue.main.asyncAfter(deadline: .now() + settled) {
       print("READY \(scene.name) \(win.windowNumber)")
       fflush(stdout)
     }

@@ -45,6 +45,31 @@ layers (a `CABackdropLayer` with a `glassBackground` filter):
   faces sideways (here, box-shadows a device pixel each way). `.interactive()` glass at rest draws the same as plain
   glass.
 
+## Colour fringing: macOS's model, which its glass doesn't use
+
+The glass filter has colour fringing all the same (`inputAberrationAmount`, `inputAberrationHeight`,
+`inputAberrationOffset`, `inputAberrationAngle`), and `chromAberration` here follows it. Measured on macOS 27.0.1 with
+those inputs set on SwiftUI's glass, over ramps that show where each channel is sampled from to a pixel (and in the
+native comparison's fringe cases, `native/Glass.swift` sets them):
+
+- **Green follows the lens; red and blue split either way of it** by a distance Δ, linear in the amount. Δ falls off
+  from the edge as the lens's shift does (with `inputAberrationHeight` the lens's own height, the same profile), and
+  it's the same however strongly the glass bends: at half the refraction, the same Δ. Without refraction, no fringe.
+- **The split's direction comes from the angle**, but it isn't radial at any angle: at 3π/2 blue is sampled further in
+  on the left and right edges and red further in on the top and bottom ones (the edge's normal with its vertical part
+  turned over). Here it's that: blue further across, red further down.
+- **It's coloured after**: the channels split first, then macOS's colour matrix, which widens the split as much as
+  it saturates. Here a colour that mixes the channels (`saturation`, macOS's matrix) comes after the bend too.
+- `inputAberrationOffset` moves the fall-off inward, the outermost points all getting the edge's Δ (not used here).
+
+Two things the filter does aren't reproduced, since they depend on how macOS stores the backdrop rather than on the
+glass. It scales the fringe by the shape of the glass's box: square glass of any size and place gives 0.8 × the amount ×
+the lens's profile, but across a box twice as wide as tall it's about 1.75× that, and down it 0.56× (roughly (w/h)^0.85
+and its inverse, varying with the size and place). And frost of 10 points or more (clear glass's in an inactive window)
+narrows it, to about 0.65× at the rim.
+
+Δ at the edge is `chromAberration` × 36 px here: liquidglass's fringe at the rim, whose option this is.
+
 What wasn't measured, and so is this library's guess rather than macOS's: macOS's Liquid Glass tint (System Settings ›
 Appearance, `NSGlassTintAmount`; the references are at its Clear end, 0, and `appearance: 'tinted'` still adds this
 library's own frost and fill), Increase Contrast and Reduce Transparency (system-wide settings; their adjustments are

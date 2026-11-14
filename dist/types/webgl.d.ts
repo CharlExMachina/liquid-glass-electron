@@ -20,15 +20,13 @@ export interface GlMap {
 export interface GlFrame {
     w: number;
     h: number;
-    /** one map, or one per colour channel (a dome's fringe) */
-    maps: GlMap[];
+    /** the map */
+    map: GlMap;
     /** where the map is stretched over */
     mapRect: Box;
-    /** red, green and blue: which map, and how many times its shift */
-    channels: {
-        map: number;
-        k: number;
-    }[];
+    /** red, green and blue: how many times the map's shift across, and down (they differ with colour fringing) */
+    kx: [number, number, number];
+    ky: [number, number, number];
     /** the furthest the backdrop is read from past the edge, px */
     reach: number;
     /** the frost, σ px; and macOS's blur fill, laid over it */

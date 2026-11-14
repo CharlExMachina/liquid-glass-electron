@@ -12,9 +12,9 @@ nothing on screen changes it costs nothing at all.
 
 - **The optics are [liquidglass](https://github.com/ybouane/liquidglass)'s**, at the same option names and defaults: a
   quarter-circle bevel that bends light where it enters and where it leaves, slight magnification toward the middle,
-  colour fringing at the rim, and its Fresnel, specular and edge light. At its defaults this library's glass differs
-  from liquidglass's about as much as liquidglass differs from itself moved by one pixel (see
-  [the comparison](#compared-with-liquidglass)).
+  and its Fresnel, specular and edge light; colour fringing at the rim is macOS's own glass filter's, at liquidglass's
+  width. At its defaults this library's glass differs from liquidglass's about as much as liquidglass differs from
+  itself moved by one pixel (see [the comparison](#compared-with-liquidglass)).
 - **Apple's knobs:** regular, clear and identity glass, regular and clear as macOS 27 draws them (measured against
   SwiftUI's own glass on a Mac: [the comparison](#compared-with-macos)), the lens of iOS 26's small controls (measured
   from an iPhone), tints, interactive glass, capsules, circles, concentric and continuous ("squircle") corners, containers
@@ -134,7 +134,7 @@ liquidglass's options, with its defaults:
 | `refraction` | 0.69 | How much the bevel bends what's behind it. 0 = no bending at all (light, fill and shadow only, which cost nothing per frame) |
 | `zRadius` | 40 | The bevel's depth, px: how far in from the edge it curves |
 | `bevelMode` | 0 | 0 = a pill with a bevelled rim; 1 = a dome that magnifies the whole element; 2 = Apple's lens (this library's): the rim magnifies toward the middle, most at the edge and fading out `zRadius` px in, and the middle is flat; 3 = Apple's switch lens, measured from iOS's switch: it shrinks what's behind it, and its rim folds back (scaled to the element, not `zRadius`); 4 = macOS 27's glass, measured against SwiftUI's: the rim samples inward along its normal, by an amount and height that follow the element's shorter side (`zRadius` caps the height), and the frost follows it too (the `regular` and `clear` variants are this) |
-| `chromAberration` | 0.05 | Colour fringing at the rim. Two more passes per frame; 0 for less work |
+| `chromAberration` | 0.05 | Colour fringing at the rim, as macOS's glass filter fringes (blue further along the lens's shift, red as much short), at liquidglass's width: chromAberration × 36 px either way of green at the rim. Costs more per frame (three bending passes where there'd be one); 0 for less work |
 | `blurAmount` | 0 | Frost: 1 ≈ a 7.6 px blur |
 | `saturation`, `brightness` | 0, 0 | Boosts (0.5 = 1.5×), on top of `baseBrightness` |
 | `tintStrength` | 0 | A tint toward liquidglass's cool glass, or toward `tint` |
@@ -400,8 +400,7 @@ fires as soon as it moves, for nothing per frame meanwhile. What a group needs (
 - **Siblings that don't overlap, with nothing painted between them near their edges.** The layer bends the backdrop
   of all of them before any paints, so one member's rim doesn't bend another member's glass (or a sibling drawn between
   them), as separate glass within a few dozen px would. That's Apple's rule too: glass doesn't sample other glass.
-- Free shapes (`squircle`, `path`), a dome's fringe (`bevelMode: 1` with `chromAberration`), `distortion`, `backdrop`,
-  sticky members, and members with their own `opacity`, `filter`, `mask`, `clip-path`, `mix-blend-mode`, rotation or
+- Free shapes (`squircle`, `path`), `distortion`, `backdrop`, sticky members, and members with their own `opacity`, `filter`, `mask`, `clip-path`, `mix-blend-mode`, rotation or
   scale keep a filter of their own (correct, just not cheaper).
 
 ## Compared with liquidglass
@@ -475,9 +474,10 @@ Clear glass measures 0.4–0.8 at every size from a 28 px capsule to a 500 × 30
 
 - Two blind judges (agents shown each scene as A and B, native on a random side, and four labelled examples of native
   glass on other photos) told the earlier variants from macOS in 24 of 24 trials, and these in 12 of 24: chance.
-- The test (`pnpm test:native`) holds each of its 18 cases to within a quarter of what it measures now, inside the glass,
-  at its rim, at its edge and just outside it, and `pnpm test:native --self-check` draws the glass wrong on purpose
-  (the lens off, 30% less frost, a little more saturation, no outline) and checks that the cases catch each.
+- The test (`pnpm test:native`) holds each of its 21 cases to within a quarter of what it measures now, inside the glass,
+  at its rim, at its edge and just outside it (three of them with macOS's colour fringe turned on in its filter), and
+  `pnpm test:native --self-check` draws the glass wrong on purpose (the lens off, 30% less frost, a little more
+  saturation, no outline, no fringe) and checks that the cases catch each.
 - Dark regular glass is the furthest from macOS (about 3–5 levels): macOS caps its brightness by luma and blends a
   wider blur over it by darken, and the fit of both is weakest there.
 
@@ -521,9 +521,12 @@ liquidglass's look is two; its blur fill and dark cap add nodes Skia draws with 
 - **Specular highlights and strong edge light are laid over as white**, where liquidglass adds them to the colour: at
   high `specular` they're dimmer over mid-tones than liquidglass's. At its defaults (`specular` 0) it makes no
   visible difference.
-- **Colour fringing follows Libre Hub's model**: each channel bent by its own share of the bevel's shift. At the
-  default `chromAberration` it matches liquidglass (see the comparison); turned up, its fringes are about twice as wide
-  at the rim as liquidglass's. A dome (`bevelMode` 1) uses liquidglass's exact fringe.
+- **Colour fringing is macOS's model**, measured from its glass filter's own aberration, which macOS 27's glass leaves
+  unset ([docs/APPLE.md](docs/APPLE.md#colour-fringing-macoss-model-which-its-glass-doesnt-use)): green follows the
+  lens, blue is sampled further along its shift and red short of it across (the other way round down), by a distance
+  that falls off from the rim as the shift does and doesn't grow with `refraction`. At the rim it's liquidglass's
+  width, `chromAberration` × 36 px either way of green. macOS also scales its fringe by the shape of the glass's box
+  and narrows it under heavy frost; neither is reproduced.
 - **Maps are small**: a few thousand pixels, exact along straight edges thanks to their lookup tables, approximate in
   tight corners of large elements. They're drawn on the CPU when an element's size settles (a few ms), and stretched
   while it's changing; containers and morphs moving their shapes draw them every frame, at half the resolution.

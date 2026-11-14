@@ -1,6 +1,18 @@
 import type { Field } from './field.js';
 export declare const IOR = 1.5;
-export declare const ABERRATION = 1.7;
+export declare const FRINGE = 36;
+/**
+ * A colour channel's share of the lens's shift along one axis, with macOS's fringe: `fringe` 1 for the channel sampled
+ * further (blue across, red down), −1 for the one sampled short, 0 for green; `rimPx` the lens's largest shift at
+ * refraction 1, `full` the refraction (with a press's). Further is chromAberration × FRINGE px at the rim, whatever the
+ * refraction; nothing without bending.
+ */
+export declare function fringeShare(fringe: number, chromAberration: number, rimPx: number, full: number): number;
+/** Red's, green's and blue's shares of the lens's shift, across and down (see fringeShare). */
+export declare function fringeShares(chromAberration: number, rimPx: number, full: number): {
+    x: number;
+    y: number;
+}[];
 export declare const clamp: (v: number, lo: number, hi: number) => number;
 export declare const smoothstep: (a: number, b: number, x: number) => number;
 /** The height of the bevel `d` px in from the edge: a quarter circle of radius `zR`, flat beyond it. */
@@ -71,11 +83,6 @@ export declare function macMaxLuma(s: number): number;
  * the magnification, as liquidglass's shader computes them.
  */
 export declare function shiftAt(x: number, y: number, f: Field, o: Optics): [number, number];
-/**
- * liquidglass's colour fringe at a point: how far red is sampled from green (blue the same amount the other way), px,
- * along the surface normal: chromAberration × 36 × (0.3 + 0.7 × edge) × |N.xy|, outward. Nothing in the flat middle.
- */
-export declare function fringeAt(x: number, y: number, f: Field, bevel: number, chroma: number): [number, number];
 export interface Lighting {
     fresnel: number;
     edge: number;

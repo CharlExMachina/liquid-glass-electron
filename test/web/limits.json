@@ -5,9 +5,9 @@
     "outliers": 0.23
   },
   "capsule": {
-    "mean": 2.95,
-    "rim": 2.58,
-    "outliers": 0.39
+    "mean": 3.52,
+    "rim": 3.61,
+    "outliers": 0.72
   },
   "circle": {
     "mean": 2.7,

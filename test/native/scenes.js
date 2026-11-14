@@ -33,5 +33,6 @@ export function toOptions(g) {
   else if (g.shape === 'squircle') Object.assign(o, { shape: 'squircle', cornerRadius: g.radius ?? 0 });
   else o.cornerRadius = g.radius ?? 0;
   if (g.tint) o.fill = g.tint;
+  if (g.chromAberration !== undefined) o.chromAberration = g.chromAberration;
   return o;
 }

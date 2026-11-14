@@ -17,7 +17,7 @@
 // Light doesn't bend: Fresnel, specular and edge light are a border-image, painted once and kept.
 import { gridField, roundedRect, signedDistance, squircle, type Field } from './field.ts';
 import { fieldLight, lightImage, tableMap, type MapGrid, type RGBA } from './maps.ts';
-import { ABERRATION, blurSigma, boxShadow, clampRadii, colorMatrix, MAC_LENS_REACH, macFrost, macLensSize, macMaxLuma, outlineShadow, tintGains, type Radii } from './optics.ts';
+import { blurSigma, boxShadow, clampRadii, colorMatrix, fringeShares, MAC_LENS_REACH, macFrost, macLensSize, macMaxLuma, outlineShadow, tintGains, type Radii } from './optics.ts';
 import { encodeTables, filterDefs, greyDataURL, mapNodes, predecode, setAttrs, stashNodes, supportsSvgBackdrop, svgEl, toDataURL } from './dom.ts';
 import { GlGlass, glSupported, isBackdropSource, sourceIdentity, watchSources, type BackdropSource, type GlFrame, type GlMap } from './webgl.ts';
 import { fromCss, fromData, MACOS_COLOUR, MACOS_SMALL_DARK, resolve, type Environment, type GlassOptions } from './options.ts';
@@ -40,6 +40,14 @@ const SETTLE = 120;
 const BACKGROUND = ['background-color', 'background-image', 'background-position', 'background-size', 'background-repeat', 'background-origin', 'background-clip'];
 // Keeps the green channel only, and so on: the fringe's three passes are added up.
 const KEEP = ['1 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 1 0', '0 0 0 0 0  0 1 0 0 0  0 0 0 0 0  0 0 0 1 0', '0 0 0 0 0  0 0 0 0 0  0 0 1 0 0  0 0 0 1 0'];
+/**
+ * A map's down grey (0.5 ± ¼, see mapNodes) scaled by `k` about ½, which stands for no shift. It stays a grey: Chromium
+ * turns a map whose channels differ into the display's colour space, mixing them.
+ */
+const downScale = (k: number) => {
+  const q = +k.toFixed(5), o = +(0.5 * (1 - q)).toFixed(5);
+  return `${q} 0 0 0 ${o}  0 ${q} 0 0 ${o}  0 0 ${q} 0 ${o}  0 0 0 1 0`;
+};
 
 let nextId = 0;
 
@@ -94,8 +102,8 @@ export class Lens {
   // the filters and the nodes that change
   private pre: SVGFilterElement | null = null;
   private main: SVGFilterElement | null = null;
-  // One map, or with a dome's fringe three (red, green, blue: liquidglass's fringe doesn't follow the dome's shift)
-  private maps: { images: SVGFEImageElement[]; tables: [SVGFEComponentTransferElement, SVGFEComponentTransferElement]; cover: SVGFEComponentTransferElement | null; shifts: SVGFEOffsetElement[]; fringe: number; rimPx: number }[] = [];
+  // the map (drawn for refraction 1: the shift is linear in it, so a scale stands for it)
+  private maps: { images: SVGFEImageElement[]; tables: [SVGFEComponentTransferElement, SVGFEComponentTransferElement]; cover: SVGFEComponentTransferElement | null; shifts: SVGFEOffsetElement[]; rimPx: number }[] = [];
   private colour: SVGFEColorMatrixElement | null = null;
   // macOS's cap on dark glass's brightness: a table from the luma (in the colour's alpha) to how much it's dimmed
   private capNode: SVGFEComponentTransferElement | null = null;
@@ -106,21 +114,22 @@ export class Lens {
   private mixNode: SVGFECompositeElement | null = null;
   // the surface (GlassOptions.surface): its image, and the composites that apply its gain and offset
   private surface: { images: [SVGFEImageElement, SVGFEImageElement]; gain: SVGFECompositeElement; offset: SVGFECompositeElement } | null = null;
-  // what backdrop-filter is while there's glass, the filter's structure (rebuilt only when it changes), and whether
-  // the maps are drawn for refraction 1 (the shift is linear in it, so a scale stands for it)
+  // what backdrop-filter is while there's glass, and the filter's structure (rebuilt only when it changes)
   private filterCss = 'none';
   private structure = '';
-  private unitMaps = true;
   private following = 0;
   private lightUrl: { url: string; empty: string; shadow?: string; mask?: string; box?: { x: number; y: number; w: number; h: number }; slice?: number; edge?: number; field?: boolean; free?: number } | null = null;
-  private passes: { node: SVGFEDisplacementMapElement; source: SVGFEOffsetElement; spread: number; map: number }[] = [];
+  // the bending passes: one, or with fringing red's, green's and blue's (`channel` 0, 1, 2)
+  private passes: { node: SVGFEDisplacementMapElement; source: SVGFEOffsetElement; channel: number; map: number }[] = [];
+  // with fringing, red's and blue's maps (see applyStrength)
+  private fringeMaps: SVGFEColorMatrixElement[] = [];
   private stash = false;
   private bends = false;
   // Where backdrop-filter can't bend (Safari, Firefox) and the page names what's behind the glass
   // (GlassOptions.backdropSource): a shader draws the glass on a canvas behind the glass's layer (webgl.ts). The
   // filter's nodes are still made, as what holds the glass's state, but never put in the document.
   private gl: GlGlass | null = null;
-  private glMaps: GlMap[] = [];
+  private glMap: GlMap | null = null;
   // the source now (looked up with every refresh: a selector's match may be another element, or one at last)
   private glNow: BackdropSource | null = null;
   // a source that couldn't be read, and what it showed then: not tried again until it shows something else
@@ -321,7 +330,7 @@ export class Lens {
    */
   batchSource(): { filters: SVGFilterElement[]; images: SVGFEImageElement[]; tables: [SVGFEComponentTransferElement, SVGFEComponentTransferElement]; shifts: SVGFEOffsetElement[]; side: number; margin: number; right: number; grid: MapGrid; mapMargin: number } | null {
     const o = this.options;
-    if (!this.bends || this.gl || this.maps.length !== 1 || this.isFree() || this.shape || this.layer || o.surface || o.backdrop || o.distortion > 0 || this.amount() <= 0 || !this.main) return null;
+    if (!this.bends || this.gl || this.isFree() || this.shape || this.layer || o.surface || o.backdrop || o.distortion > 0 || this.amount() <= 0 || !this.main) return null;
     const map = this.maps[0];
     if (!map.images[0].getAttribute('href') || !map.rimPx || !this.mapGrid) return null;
     const first = this.pre ?? this.main;
@@ -340,7 +349,7 @@ export class Lens {
     const o = this.options;
     const gl = !!this.glNow;
     const bends = (supportsSvgBackdrop() || gl) && o.refraction > 0 && o.variant !== 'identity';
-    return [bends, gl, o.backdrop, !!o.surface, o.chromAberration > 0, o.bevelMode, o.blurAmount > 0, o.smooth, o.distortion > 0, o.opacity < 1, o.variant === 'identity', o.magnify, this.isFree(), this.capped(), this.filled() ? (this.host.env().dark ? 'darken' : 'lighten') : ''].join();
+    return [bends, gl, o.backdrop, !!o.surface, o.chromAberration > 0, o.chromAberration > 0 && this.mixesColour(), o.bevelMode, o.blurAmount > 0, o.smooth, o.distortion > 0, o.opacity < 1, o.variant === 'identity', o.magnify, this.isFree(), this.capped(), this.filled() ? (this.host.env().dark ? 'darken' : 'lighten') : ''].join();
   }
 
   /**
@@ -370,19 +379,19 @@ export class Lens {
   /** What the shader draws now (see GlFrame), or null: no glass, or its map isn't drawn yet. */
   private glFrame(): GlFrame | null {
     const o = this.options, s = this.amount(), { w, h } = this;
-    if (!this.bends || s <= 0 || !w || !h || !this.passes.length || this.glMaps.length !== this.maps.length) return null;
+    if (!this.bends || s <= 0 || !w || !h || !this.passes.length || !this.glMap) return null;
     // the shift's share, as applyStrength gives the filter's passes
-    const k = Math.max(this.bulge, 1) * (this.unitMaps ? o.refraction : 1) * s * Math.min(this.bulge, 1);
-    const passes = this.passes.length === 3 ? this.passes : [this.passes[0], this.passes[0], this.passes[0]];
+    const full = Math.max(this.bulge, 1) * o.refraction, k = full * s * Math.min(this.bulge, 1), shares = this.shares(full);
     // where the map is: as place() puts the filter's
     const r = this.region.w ? this.region : { x: 0, y: 0, w, h }, m = this.margin;
     const rect = this.mapRect ?? { x: -m, y: -m, w: r.w + 2 * m, h: r.h + 2 * m };
     const frosted = o.blurAmount > 0;
     return {
       w, h,
-      maps: this.glMaps,
+      map: this.glMap,
       mapRect: { x: r.x + rect.x, y: r.y + rect.y, w: rect.w, h: rect.h },
-      channels: passes.map((p) => ({ map: p.map, k: k * p.spread })),
+      kx: [0, 1, 2].map((c) => k * shares[c].x) as [number, number, number],
+      ky: [0, 1, 2].map((c) => k * shares[c].y) as [number, number, number],
       reach: this.reach,
       sigma: frosted ? this.frost() * s : 0,
       fill: this.filled() ? { sigma: MAC_FILL_SIGMA * s, alpha: MAC_FILL_OPACITY * s, darken: this.host.env().dark } : null,
@@ -422,10 +431,6 @@ export class Lens {
       this.mixNode?.setAttribute('k2', String(o.opacity));
       this.mixNode?.setAttribute('k3', String(1 - o.opacity));
       this.applySurface();
-      if (this.passes.length === 3 && this.unitMaps) {
-        const a = o.chromAberration * ABERRATION;
-        this.passes.forEach((p, k) => (p.spread = 1 + (k - 1) * a));
-      }
       this.applyStrength();
       this.setBackdrop(s > 0 ? this.filterCss : 'none');
       if (this.gl && this.glNow) this.gl.setSource(this.glNow);
@@ -519,6 +524,7 @@ export class Lens {
     this.pre = this.main = this.colour = this.blurNode = this.mixNode = this.capNode = this.fillBlur = this.fillAlpha = this.surface = null;
     this.maps = [];
     this.passes = [];
+    this.fringeMaps = [];
     this.reach = 0;
     this.mapKey = '';
     const source = this.glNow;
@@ -526,7 +532,7 @@ export class Lens {
     if (!source || !this.bends) {
       this.gl?.destroy();
       this.gl = null;
-      this.glMaps = [];
+      this.glMap = null;
     }
     const sigma = this.frost();
 
@@ -581,40 +587,40 @@ export class Lens {
       );
       src = 'grain';
     }
-    this.colour = svgEl('feColorMatrix', { in: src, type: 'matrix', values: this.matrix().join(' '), result: 'coloured' });
-    first.append(this.colour);
-    src = 'coloured';
-    if (this.capped()) {
+    const colourInto = (filter: SVGFilterElement, input: string) => {
+      this.colour = svgEl('feColorMatrix', { in: input, type: 'matrix', values: this.matrix().join(' '), result: 'coloured' });
+      filter.append(this.colour);
+      if (!this.capped()) return 'coloured';
       // macOS keeps dark glass from getting bright, by the luma, keeping the hue: the colour matrix puts 0.5 + luma / 2
       // in alpha (never so small that the colour, premultiplied by it, loses its precision), a table turns that into
       // how much to dim, min(1, cap / luma), and laid over black the colour is multiplied by it. Skia folds the matrix
       // and the table into one colour filter, drawn with the composite.
-      this.capNode = svgEl('feComponentTransfer', { in: src, result: 'dimmed' }, svgEl('feFuncA', { type: 'table', tableValues: this.capTable() }));
-      first.append(this.capNode, svgEl('feFlood', { 'flood-color': '#000', 'flood-opacity': 1, result: 'black' }),
+      this.capNode = svgEl('feComponentTransfer', { in: 'coloured', result: 'dimmed' }, svgEl('feFuncA', { type: 'table', tableValues: this.capTable() }));
+      filter.append(this.capNode, svgEl('feFlood', { 'flood-color': '#000', 'flood-opacity': 1, result: 'black' }),
         svgEl('feComposite', { in: 'dimmed', in2: 'black', operator: 'over', result: 'capped0' }),
         // where the backdrop is transparent (a transparent or vibrant window's), the glass stays so
         svgEl('feComposite', { in: 'capped0', in2: 'SourceGraphic', operator: 'in', result: 'capped' }));
-      src = 'capped';
-    }
+      return 'capped';
+    };
+    // macOS colours its glass after the fringe has moved the channels apart, so a colour that mixes them (saturation,
+    // macOS's own matrix) widens the fringe: then the colour comes after the bend. Otherwise it's the same either way,
+    // and here is cheaper.
+    const late = fringe && this.mixesColour();
+    if (!late) src = colourInto(first, src);
 
     // The map: the image and its lookup tables; with fringing, beside the element in filter 1's output, which
     // filter 2 reads from there.
-    const perChannel = fringe && o.bevelMode === 1;
-    this.unitMaps = !perChannel;
-    const fringes = perChannel ? [1, 0, -1].map((k) => k * o.chromAberration) : [0];
     const mergeNodes = [svgEl('feMergeNode', { in: src })];
-    fringes.forEach((f, i) => {
-      const { images, nodes, tables, cover } = mapNodes(`map${i}raw`, fringe ? `side${i}` : `map${i}`, this.isFree() ? 3 : 2, fringe);
-      first.append(...nodes);
-      let shifts: SVGFEOffsetElement[] = [];
-      if (fringe) {
-        images.forEach((_, c) => mergeNodes.push(svgEl('feMergeNode', { in: `side${i}_${c}` })));
-        const stashed = stashNodes(`map${i}`, images.length as 2 | 3);
-        shifts = stashed.shifts;
-        second.append(...stashed.nodes);
-      }
-      this.maps.push({ images, tables, cover, shifts, fringe: f, rimPx: 0 });
-    });
+    const { images, nodes, tables, cover } = mapNodes('map0raw', fringe ? 'side0' : 'map0', this.isFree() ? 3 : 2, fringe);
+    first.append(...nodes);
+    let shifts: SVGFEOffsetElement[] = [];
+    if (fringe) {
+      images.forEach((_, c) => mergeNodes.push(svgEl('feMergeNode', { in: `side0_${c}` })));
+      const stashed = stashNodes('map0', images.length as 2 | 3);
+      shifts = stashed.shifts;
+      second.append(...stashed.nodes);
+    }
+    this.maps.push({ images, tables, cover, shifts, rimPx: 0 });
     if (fringe) {
       first.append(svgEl('feMerge', {}, ...mergeNodes));
       src = 'SourceGraphic';
@@ -622,23 +628,26 @@ export class Lens {
 
     // a displacement, and its source moved by the quarter of its scale that the map's across channel starts from (see
     // mapNodes)
-    const pass = (result: string, spread: number, map: number) => {
+    const pass = (result: string, channel: number, map: string) => {
       const source = svgEl('feOffset', { in: src, dx: 0, dy: 0, result: `${result}in` });
-      const node = svgEl('feDisplacementMap', { in: `${result}in`, in2: `map${map}`, xChannelSelector: 'A', yChannelSelector: 'R', result });
-      this.passes.push({ node, source, spread, map });
+      const node = svgEl('feDisplacementMap', { in: `${result}in`, in2: map, xChannelSelector: 'A', yChannelSelector: 'R', result });
+      this.passes.push({ node, source, channel, map: 0 });
       return [source, node];
     };
     if (fringe) {
-      // Real glass bends blue further than red: each channel is bent by its own amount, then they're added up (an
-      // additive blend, the cheapest way Chromium has to add two images). A pill's channels share one map, bent by
-      // its own share of the shift each; a dome's have a map each, with liquidglass's fringe in it.
-      const a = perChannel ? 0 : o.chromAberration * ABERRATION;
-      ['r', 'g', 'b'].forEach((ch, k) => second.append(...pass(`${ch}0`, 1 + (k - 1) * a, perChannel ? k : 0),
+      // macOS's fringe (see FRINGE): each channel is bent by its own amount along the lens's shift, blue the furthest
+      // across and red the furthest down, then they're added up (an additive blend, the cheapest way Chromium has to add
+      // two images). What macOS adds and takes off falls off from the rim as the lens's shift does, so red's and blue's
+      // maps are the lens's, their down greys scaled (see applyStrength) from the stashed one while it's opaque (scaled
+      // once it's joined, under alpha, a byte of it would be up to two of the shift), and joined with its across.
+      this.fringeMaps = ['mapr', 'mapb'].map((m) => svgEl('feColorMatrix', { in: 'map0s1', type: 'matrix', values: downScale(1), result: `${m}_d` }));
+      this.fringeMaps.forEach((n, i) => second.append(n, svgEl('feComposite', { in: n.getAttribute('result')!, in2: 'map0_a', operator: 'in', result: ['mapr', 'mapb'][i] })));
+      ['r', 'g', 'b'].forEach((ch, k) => second.append(...pass(`${ch}0`, k, ['mapr', 'map0', 'mapb'][k]),
         svgEl('feColorMatrix', { in: `${ch}0`, type: 'matrix', values: KEEP[k], result: ch })));
       second.append(svgEl('feComposite', { in: 'r', in2: 'g', operator: 'lighter', result: 'rg' }),
         svgEl('feComposite', { in: 'rg', in2: 'b', operator: 'lighter', result: 'bent' }));
     } else {
-      second.append(...pass('bent', 1, 0));
+      second.append(...pass('bent', 1, 'map0'));
     }
     if (o.opacity < 1) {
       // less glass: a mix with the (smoothed, coloured) backdrop
@@ -646,6 +655,7 @@ export class Lens {
       second.append(this.mixNode);
     }
     let out = this.mixNode ? 'mixed' : 'bent';
+    if (late) out = colourInto(second, out);
     if (o.surface) {
       // The surface: the glass times one image, plus the other less ½ (see GlassOptions.surface), clipped as
       // compositing clips. They're greys, as the maps are: colour management (sRGB to the display's gamut) would mix a
@@ -733,6 +743,12 @@ export class Lens {
       out[18] = 0;
     }
     return out.map((v) => +v.toFixed(4));
+  }
+
+  /** Whether the colour mixes the channels (so that it widens a fringe it comes after), rather than scaling each. */
+  private mixesColour() {
+    const o = this.options;
+    return o.saturation !== 0 || o.colorMatrix !== null || this.capped();
   }
 
   /** Whether macOS's blur fill applies (regular glass, bevelMode 4). */
@@ -885,18 +901,17 @@ export class Lens {
     const sub = region.x || region.y || region.w !== w || region.h !== h ? within(field, region) : field;
     if (this.bends && this.maps.length) {
       const scale = mapScale(region.w / Math.sqrt(this.shape?.detail() ?? 1), region.h, moving, o.bevelMode === 3);
-      const refraction = this.unitMaps ? 1 : o.refraction;
       const grid = this.shape || free ? null : this.grid;
-      const key = [w, h, ...radii, zR, refraction, o.bevelMode, +o.magnify, scale, mac?.amount ?? 0, mac?.height ?? 0, ...this.maps.map((m) => m.fringe)].map((v) => Math.round(v * 400) / 400).join(':')
+      const key = [w, h, ...radii, zR, o.bevelMode, +o.magnify, scale, mac?.amount ?? 0, mac?.height ?? 0].map((v) => Math.round(v * 400) / 400).join(':')
         + (this.shape ? `|${this.shape.key()}` : '') + (free ? `|${o.shape}|${o.path}|${o.pathBox}|${o.cornerRadius}` : '') + (grid ? `|${Object.values(grid).join(',')}` : '');
       if (key !== this.mapKey) {
         this.mapKey = key;
-        const entries = this.maps.map((map) => {
-          const k = `${key}|${map.fringe}${this.gl ? '|gl' : ''}`;
+        const entries = this.maps.map(() => {
+          const k = `${key}${this.gl ? '|gl' : ''}`;
           return mapCache.get(k) ?? remember(mapCache, k, (() => {
             // a path's edges are anywhere: its tables come from a plain box's straight edges
             const profile = free && o.shape === 'path' ? roundedRect(w, h, [0, 0, 0, 0]) : sub;
-            const m = tableMap(sub, { refraction, bevel: zR, dome: o.bevelMode === 1, rim: o.bevelMode === 2, minify: o.bevelMode === 3, mac, magnify: o.magnify }, scale, moving ? 64 : 256, map.fringe, profile, grid);
+            const m = tableMap(sub, { refraction: 1, bevel: zR, dome: o.bevelMode === 1, rim: o.bevelMode === 2, minify: o.bevelMode === 3, mac, magnify: o.magnify }, scale, moving ? 64 : 256, profile, grid);
             // the shader reads the map's pixels and tables as they are; the filter, an image per channel
             const gl = this.gl ? { pixels: { width: m.width, height: m.height, data: m.data }, tableX: m.tableX, tableY: m.tableY, bias: m.bias, rimPx: m.rimPx } : undefined;
             return { gl, urls: gl ? [] : [0, 1, 2].slice(0, free ? 3 : 2).map((c) => greyDataURL(m, c)), rimPx: m.rimPx, margin: m.margin, rect: m.rect, grid: m.grid, tables: { ...encodeTables(m.tableX, m.tableY, m.bias), cover: m.tableB.join(' ') } };
@@ -905,7 +920,7 @@ export class Lens {
         const maps = this.maps;
         applies.push(Promise.all(entries.flatMap((e) => e.urls.map(predecode))).then(() => () => {
           if (this.mapKey !== key || this.maps !== maps) return;
-          this.glMaps = entries.flatMap((e) => (e.gl ? [e.gl] : []));
+          this.glMap = entries[0].gl ?? null;
           entries.forEach((e, i) => {
             if (e.urls.length) maps[i].images.forEach((image, c) => image.setAttribute('href', e.urls[c]));
             maps[i].tables[0].children[0].setAttribute('tableValues', e.tables.across);
@@ -1046,11 +1061,18 @@ export class Lens {
 
   private applyStrength() {
     this.changed();
-    const full = Math.max(this.bulge, 1) * (this.unitMaps ? this.options.refraction : 1), k = full * this.amount() * Math.min(this.bulge, 1);
+    const full = Math.max(this.bulge, 1) * this.options.refraction, k = full * this.amount() * Math.min(this.bulge, 1);
+    const shares = this.shares(full);
     let most = 0;
-    for (const { node, source, spread, map } of this.passes) {
+    // A pass has one scale, but red and blue are bent by different shares across and down (1 − δ and 1 + δ, and the
+    // other way round): each is bent by its share across and reads down from a map of its own, where it's scaled to its
+    // share down. Red's down is scaled up, to twice at most (its range is ±¼ about ½): past that, a fringe of over a
+    // third of the lens's shift, red is bent by half its share down and its across overstated.
+    for (const { node, source, channel, map } of this.passes) {
+      const { x, y } = shares[channel], share = channel === 0 ? Math.max(x, y / 2) : x;
+      if (channel !== 1 && this.fringeMaps.length) this.fringeMaps[channel / 2].setAttribute('values', downScale(share ? y / share : 1));
       // the map's channels span half their range (see mapNodes): the scale is twice what it would be
-      const rim = 4 * (this.maps[map]?.rimPx ?? 0) * spread, scale = +(rim * k).toFixed(3);
+      const rim = 4 * (this.maps[map]?.rimPx ?? 0) * share, scale = +(rim * k).toFixed(3);
       node.setAttribute('scale', String(scale));
       source.setAttribute('dx', String(scale / 4));
       // its source is read from up to half the scale to the right: the filters reach that far, for the glass at full
@@ -1062,6 +1084,14 @@ export class Lens {
       this.reach = reach;
       this.place();
     }
+  }
+
+  /**
+   * Red's, green's and blue's shares of the lens's shift, across and down: 1, and with fringing macOS's (fringeShares):
+   * Δ px further or short at the rim, falling off inward as the shift does.
+   */
+  private shares(full: number) {
+    return fringeShares(this.passes.length === 3 ? this.options.chromAberration : 0, this.maps[0]?.rimPx ?? 0, full);
   }
 
   private tweenBulge(to: number) {

@@ -160,7 +160,8 @@ app.whenReady().then(async () => {
 
   /** A case in an Electron window: its result, and with `capture` the glass as the window shows it. */
   async function inElectron(c, mode, extra = '') {
-    const win = new BrowserWindow({ width: 640, height: 400, useContentSize: true, show: false, focusable: false, webPreferences: { sandbox: true, contextIsolation: true, offscreen: true } });
+    // (an offscreen window draws at 1× whatever the forced scale factor, but for one it's given)
+    const win = new BrowserWindow({ width: 640, height: 400, useContentSize: true, show: false, focusable: false, webPreferences: { sandbox: true, contextIsolation: true, offscreen: scale === 1 ? true : { deviceScaleFactor: scale } } });
     const errors = [];
     // the page's errors (not Electron's own scripts': its sandbox bundle reports one of its own in a page that has no
     // picture for a while)

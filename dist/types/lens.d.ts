@@ -44,14 +44,14 @@ export declare class Lens {
     private surface;
     private filterCss;
     private structure;
-    private unitMaps;
     private following;
     private lightUrl;
     private passes;
+    private fringeMaps;
     private stash;
     private bends;
     private gl;
-    private glMaps;
+    private glMap;
     private glNow;
     private glFailed;
     private unwatch;
@@ -166,6 +166,8 @@ export declare class Lens {
      * tint, after `colorMatrix` if there is one; with macOS's cap on brightness, the luma in alpha too (see build).
      */
     private matrix;
+    /** Whether the colour mixes the channels (so that it widens a fringe it comes after), rather than scaling each. */
+    private mixesColour;
     /** Whether macOS's blur fill applies (regular glass, bevelMode 4). */
     private filled;
     /** Whether macOS's cap on dark regular glass's brightness applies. */
@@ -203,6 +205,11 @@ export declare class Lens {
      */
     private applyLight;
     private applyStrength;
+    /**
+     * Red's, green's and blue's shares of the lens's shift, across and down: 1, and with fringing macOS's (fringeShares):
+     * Δ px further or short at the rim, falling off inward as the shift does.
+     */
+    private shares;
     private tweenBulge;
     private setPressed;
     private recolour;

@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { roundedRect } from '../../src/field.ts';
-import { blurSigma, boxShadow, boxShadowAlpha, colorMatrix, fringeAt, height, macFrost, macLens, macLensSize, macMaxLuma, outlineShadow, shiftAt, slope, switchLens, tintGains } from '../../src/optics.ts';
+import { blurSigma, boxShadow, boxShadowAlpha, colorMatrix, FRINGE, fringeShare, fringeShares, height, macFrost, macLens, macLensSize, macMaxLuma, outlineShadow, shiftAt, slope, switchLens, tintGains } from '../../src/optics.ts';
 
 const near = (a: number, b: number, eps = 1e-6, msg?: string) => assert.ok(Math.abs(a - b) <= eps, msg ?? `${a} ≉ ${b}`);
 const defaults = { refraction: 0.69, bevel: 40, dome: false, magnify: true };
@@ -54,15 +54,25 @@ test('a dome moves every sample toward the middle by refraction × 0.35 × depth
   near(y, 0, 1e-9);
 });
 
-test('the colour fringe follows the bevel\'s normal and is nothing on the flat top', () => {
-  const f = roundedRect(420, 220, [40, 40, 40, 40]);
-  const [fx, fy] = fringeAt(1, 110, f, 40, 0.05);
-  assert.ok(fx < 0 && Math.abs(fy) < 1e-9, 'outward at the left edge');
-  // at the rim: chroma × 36 × (0.3 + 0.7 × edge) × |N.xy|, edge ≈ 1 there
-  assert.ok(Math.abs(fx) > 1.5 && Math.abs(fx) < 1.8);
-  const [ix, iy] = fringeAt(210, 110, f, 40, 0.05);
-  near(ix, 0, 1e-9);
-  near(iy, 0, 1e-9);
+test('the colour fringe is macOS\'s: a fixed Δ either way of the lens, blue further across and red further down, whatever the refraction', () => {
+  // at the rim, where the shift is rimPx × refraction: Δ = chromAberration × FRINGE px either way of green
+  for (const refraction of [0.5, 1, 2]) {
+    const rim = 40 * refraction;
+    near(rim * fringeShare(1, 0.05, 40, refraction) - rim, 0.05 * FRINGE, 1e-9);
+    near(rim - rim * fringeShare(-1, 0.05, 40, refraction), 0.05 * FRINGE, 1e-9);
+    near(fringeShare(0, 0.05, 40, refraction), 1);
+  }
+  // blue further along the shift whichever way the lens bends
+  near(-40 * fringeShare(1, 0.05, 40, -1) + 40, -0.05 * FRINGE, 1e-9);
+  // no bending, no fringe (macOS draws none without its lens); nor before the map is drawn
+  near(fringeShare(1, 0.05, 40, 0), 1);
+  near(fringeShare(1, 0.05, 0, 1), 1);
+  // across, blue is the one further; down, red (as macOS's filter has it); green follows the lens both ways
+  const [r, g, b] = fringeShares(0.05, 40, 1);
+  assert.ok(b.x > 1 && r.x < 1 && r.y > 1 && b.y < 1);
+  near(g.x, 1);
+  near(g.y, 1);
+  near(r.y, b.x, 1e-12);
 });
 
 test('blurAmount is three passes of liquidglass\'s 9-tap blur, as one Gaussian', () => {
