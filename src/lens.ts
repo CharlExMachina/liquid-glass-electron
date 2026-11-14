@@ -16,11 +16,11 @@
 // shift (see tableMap). It's drawn again when the element's size settles; while it's changing, the old one stretches.
 // Light doesn't bend: Fresnel, specular and edge light are a border-image, painted once and kept.
 import { gridField, roundedRect, signedDistance, squircle, type Field } from './field.ts';
-import { fieldLight, lightImage, tableMap, type MapGrid, type RGBA } from './maps.ts';
+import { fieldLight, keyLightImage, keyLightTable, lightImage, tableMap, type MapGrid, type Pixels, type RGBA } from './maps.ts';
 import { blurSigma, boxShadow, clampRadii, colorMatrix, fringeShares, MAC_LENS_REACH, macFrost, macLensSize, macMaxLuma, outlineShadow, tintGains, type Radii } from './optics.ts';
-import { encodeTables, filterDefs, greyDataURL, mapNodes, predecode, setAttrs, stashNodes, supportsSvgBackdrop, svgEl, toDataURL } from './dom.ts';
+import { encodeTables, filterDefs, zeroResidual, greyDataURL, mapNodes, predecode, setAttrs, stashNodes, supportsSvgBackdrop, svgEl, toDataURL } from './dom.ts';
 import { GlGlass, glSupported, isBackdropSource, sourceIdentity, watchSources, type BackdropSource, type GlFrame, type GlMap } from './webgl.ts';
-import { fromCss, fromData, MACOS_COLOUR, MACOS_SMALL_DARK, resolve, type Environment, type GlassOptions } from './options.ts';
+import { fromCss, fromData, MACOS_COLOUR, MACOS_COLOUR_ACTIVE, MACOS_SMALL_ACTIVE, MACOS_SMALL_DARK, resolve, type Environment, type GlassOptions } from './options.ts';
 
 // Map pixels per CSS px: about this many pixels in a map (per-frame cost follows its bytes), between 0.08 and 0.5 per
 // px. Small glass gets a finer map, which is cheap, and its corners are most of it. The switch lens (bevelMode 3) has
@@ -49,6 +49,18 @@ const downScale = (k: number) => {
   return `${q} 0 0 0 ${o}  0 ${q} 0 0 ${o}  0 0 ${q} 0 ${o}  0 0 0 1 0`;
 };
 
+/** Whether the backdrop is smoothed as macOS samples it at 2× (a device pixel is half a point or less). */
+const pointSmoothing = () => (typeof devicePixelRatio === 'number' ? devicePixelRatio : 1) >= 1.75;
+
+/** The smoothing's feConvolveMatrix: macOS's at 2× (see the filter), or the 3×3 binomial. */
+function smoothKernel(point: boolean): Record<string, string | number> {
+  if (!point) return { order: 3, kernelMatrix: '1 2 1 2 4 2 1 2 1', divisor: 16 };
+  const k = [1, 3, 3, 1];
+  // a pixel's taps from two up and left of it to one down and right: what each pixel of the backdrop spreads to is the
+  // other way, centred half a pixel right and down of it
+  return { order: 4, targetX: 2, targetY: 2, kernelMatrix: k.flatMap((a) => k.map((b) => a * b)).join(' '), divisor: 64 };
+}
+
 let nextId = 0;
 
 /** Whether glass here is drawn by a shader, given a source: where the compositor can't bend, or when asked for. */
@@ -64,6 +76,8 @@ function warnOnce(about: Element | string, ...message: unknown[]) {
 }
 interface MapEntry { urls: string[]; rimPx: number; margin: number; rect: { x: number; y: number; w: number; h: number }; grid: MapGrid; tables: { down: string; across: string; cover: string }; gl?: GlMap }
 const mapCache = new Map<string, MapEntry>();
+// the key light's images (keyLightImage), by size, shape and scale: its pixels (for the shader) and a PNG of them
+const keyCache = new Map<string, { pixels: Pixels; url: string }>();
 const lightCache = new Map<string, { url: string; empty: string; slice: number; edge: number } | null>();
 const remember = <K, V>(m: Map<K, V>, k: K, v: V) => {
   if (m.size > 200) m.delete(m.keys().next().value as K);
@@ -103,7 +117,7 @@ export class Lens {
   private pre: SVGFilterElement | null = null;
   private main: SVGFilterElement | null = null;
   // the map (drawn for refraction 1: the shift is linear in it, so a scale stands for it)
-  private maps: { images: SVGFEImageElement[]; tables: [SVGFEComponentTransferElement, SVGFEComponentTransferElement]; cover: SVGFEComponentTransferElement | null; shifts: SVGFEOffsetElement[]; rimPx: number }[] = [];
+  private maps: { images: SVGFEImageElement[]; tables: [SVGFEComponentTransferElement, SVGFEComponentTransferElement]; cover: SVGFEComponentTransferElement | null; shifts: SVGFEOffsetElement[]; rimPx: number; zero: { x: number; y: number } }[] = [];
   private colour: SVGFEColorMatrixElement | null = null;
   // macOS's cap on dark glass's brightness: a table from the luma (in the colour's alpha) to how much it's dimmed
   private capNode: SVGFEComponentTransferElement | null = null;
@@ -114,6 +128,11 @@ export class Lens {
   private mixNode: SVGFECompositeElement | null = null;
   // the surface (GlassOptions.surface): its image, and the composites that apply its gain and offset
   private surface: { images: [SVGFEImageElement, SVGFEImageElement]; gain: SVGFECompositeElement; offset: SVGFECompositeElement } | null = null;
+  // macOS's key light (GlassOptions.keyLight): its image, the table of how strong it is by the glass's level, and the
+  // image's pixels for the shader
+  private key: { image: SVGFEImageElement; table: SVGFEComponentTransferElement } | null = null;
+  private keyPixels: Pixels | null = null;
+  private keyKey = '';
   // what backdrop-filter is while there's glass, and the filter's structure (rebuilt only when it changes)
   private filterCss = 'none';
   private structure = '';
@@ -324,19 +343,22 @@ export class Lens {
    * What a group needs to draw this element's glass in a filter of its own, or null if it can't: glass that doesn't
    * bend, a free shape, a dome's per-channel maps, noise (it's in the filter's coordinates), CSS filters in front, a
    * surface (images in the element's box), glass with glass inside (it paints on a layer of its own), or no map yet.
+   * `key`: the key light's image and its pixels, which the group draws over its own layer for each member.
    * `filters` are the element's own filter elements (the group copies them), `images` its map's (a grey per channel),
    * `side` how far the map is stashed beside the element, `margin` how far the filters reach past it (and `right`, past
    * its right side, which can be further).
    */
-  batchSource(): { filters: SVGFilterElement[]; images: SVGFEImageElement[]; tables: [SVGFEComponentTransferElement, SVGFEComponentTransferElement]; shifts: SVGFEOffsetElement[]; side: number; margin: number; right: number; grid: MapGrid; mapMargin: number } | null {
+  batchSource(): { filters: SVGFilterElement[]; images: SVGFEImageElement[]; tables: [SVGFEComponentTransferElement, SVGFEComponentTransferElement]; shifts: SVGFEOffsetElement[]; side: number; margin: number; right: number; grid: MapGrid; mapMargin: number; key: { image: SVGFEImageElement; pixels: Pixels } | null } | null {
     const o = this.options;
     if (!this.bends || this.gl || this.isFree() || this.shape || this.layer || o.surface || o.backdrop || o.distortion > 0 || this.amount() <= 0 || !this.main) return null;
+    if (this.keyed() && (!this.key || !this.keyPixels)) return null;
     const map = this.maps[0];
     if (!map.images[0].getAttribute('href') || !map.rimPx || !this.mapGrid) return null;
     const first = this.pre ?? this.main;
     return {
       filters: this.pre ? [this.pre, this.main] : [this.main],
       images: map.images, tables: map.tables, shifts: map.shifts,
+      key: this.key && this.keyPixels ? { image: this.key.image, pixels: this.keyPixels } : null,
       side: map.shifts.length ? -Number(map.shifts[0].getAttribute('dx')) : 0,
       margin: -Number(first.getAttribute('x')),
       right: Number(first.getAttribute('width')) - this.w + Number(first.getAttribute('x')),
@@ -349,7 +371,7 @@ export class Lens {
     const o = this.options;
     const gl = !!this.glNow;
     const bends = (supportsSvgBackdrop() || gl) && o.refraction > 0 && o.variant !== 'identity';
-    return [bends, gl, o.backdrop, !!o.surface, o.chromAberration > 0, o.chromAberration > 0 && this.mixesColour(), o.bevelMode, o.blurAmount > 0, o.smooth, o.distortion > 0, o.opacity < 1, o.variant === 'identity', o.magnify, this.isFree(), this.capped(), this.filled() ? (this.host.env().dark ? 'darken' : 'lighten') : ''].join();
+    return [bends, gl, o.backdrop, !!o.surface, o.chromAberration > 0, o.chromAberration > 0 && this.mixesColour(), o.bevelMode, o.blurAmount > 0, o.smooth && (pointSmoothing() ? 'point' : 'pixel'), o.distortion > 0, o.opacity < 1, o.variant === 'identity', o.magnify, this.isFree(), this.capped(), this.filled() ? (this.host.env().dark ? 'darken' : 'lighten') : '', this.keyed()].join();
   }
 
   /**
@@ -397,9 +419,10 @@ export class Lens {
       fill: this.filled() ? { sigma: MAC_FILL_SIGMA * s, alpha: MAC_FILL_OPACITY * s, darken: this.host.env().dark } : null,
       smooth: !frosted && o.smooth,
       matrix: this.matrix(),
-      cap: this.capped() ? 1 + (macMaxLuma(Math.min(w, h)) - 1) * s : null,
+      cap: this.capped() ? 1 + (this.maxLuma() - 1) * s : null,
       opacity: o.opacity,
       surface: o.surface ? { urls: o.surface, strength: s } : null,
+      key: this.keyed() && this.keyPixels ? { pixels: this.keyPixels, table: this.keyTable() } : null,
       cover: this.isFree(),
       wideGamut: this.host.env().wideGamut !== false,
     };
@@ -431,6 +454,7 @@ export class Lens {
       this.mixNode?.setAttribute('k2', String(o.opacity));
       this.mixNode?.setAttribute('k3', String(1 - o.opacity));
       this.applySurface();
+      this.key?.table.childNodes.forEach((f) => (f as Element).setAttribute('tableValues', this.keyTable().join(' ')));
       this.applyStrength();
       this.setBackdrop(s > 0 ? this.filterCss : 'none');
       if (this.gl && this.glNow) this.gl.setSource(this.glNow);
@@ -449,6 +473,16 @@ export class Lens {
     });
     setAttrs(n.gain, { k1: +s.toFixed(4), k2: +(1 - s).toFixed(4) });
     setAttrs(n.offset, { k2: 1, k3: +s.toFixed(4), k4: +(-s / 2).toFixed(4) });
+  }
+
+  /** Whether there's macOS's key light. */
+  private keyed() {
+    return (this.options.keyLight ?? 0) > 0;
+  }
+
+  /** The key light's table at the current strength: clear glass's by its level, any other's the same throughout. */
+  private keyTable() {
+    return keyLightTable(this.options.variant === 'clear', (this.options.keyLight ?? 0) * this.amount());
   }
 
   /** The strength, 0..1. */
@@ -521,7 +555,8 @@ export class Lens {
     const o = this.options;
     this.pre?.remove();
     this.main?.remove();
-    this.pre = this.main = this.colour = this.blurNode = this.mixNode = this.capNode = this.fillBlur = this.fillAlpha = this.surface = null;
+    this.pre = this.main = this.colour = this.blurNode = this.mixNode = this.capNode = this.fillBlur = this.fillAlpha = this.surface = this.key = null;
+    this.keyKey = '';
     this.maps = [];
     this.passes = [];
     this.fringeMaps = [];
@@ -571,10 +606,14 @@ export class Lens {
         src = 'smooth';
       }
     } else if (o.smooth) {
-      // a 3×3 binomial kernel: σ ≈ 0.7 px in one pass (a Gaussian takes two). Its edge is left transparent: duplicating
-      // it makes Skia draw the backdrop once more first, to clamp it, every frame. The bend reads that far out only for
-      // a few corner pixels of glass without fringing, which change by 16/255 at most.
-      first.append(svgEl('feConvolveMatrix', { in: src, order: 3, kernelMatrix: '1 2 1 2 4 2 1 2 1', divisor: 16, edgeMode: 'none', preserveAlpha: 'true', result: 'smooth' }));
+      // The bend reads the backdrop at the nearest pixel, so it's smoothed first. macOS's glass bends a copy of its
+      // backdrop at one sample per point (the mean of the device pixels in it), read between samples: at 2× that's a
+      // pixel spread 1 3 3 1 each way, half a pixel right and down, which a 4×4 kernel is (at 1×, the backdrop as it is,
+      // which bent at the nearest pixel would be grain: the 3×3 binomial, σ ≈ 0.7 px). One pass either way (a Gaussian
+      // takes two). Its edge is left transparent: duplicating it makes Skia draw the backdrop once more first, to clamp
+      // it, every frame. The bend reads that far out only for a few corner pixels of glass without fringing, which
+      // change by 16/255 at most.
+      first.append(svgEl('feConvolveMatrix', { in: src, ...smoothKernel(pointSmoothing()), edgeMode: 'none', preserveAlpha: 'true', result: 'smooth' }));
       src = 'smooth';
     }
     if (o.distortion > 0) {
@@ -620,14 +659,14 @@ export class Lens {
       shifts = stashed.shifts;
       second.append(...stashed.nodes);
     }
-    this.maps.push({ images, tables, cover, shifts, rimPx: 0 });
+    this.maps.push({ images, tables, cover, shifts, rimPx: 0, zero: { x: 0, y: 0 } });
     if (fringe) {
       first.append(svgEl('feMerge', {}, ...mergeNodes));
       src = 'SourceGraphic';
     }
 
     // a displacement, and its source moved by the quarter of its scale that the map's across channel starts from (see
-    // mapNodes)
+    // mapNodes), and by what its "no shift" reads as (zeroResidual)
     const pass = (result: string, channel: number, map: string) => {
       const source = svgEl('feOffset', { in: src, dx: 0, dy: 0, result: `${result}in` });
       const node = svgEl('feDisplacementMap', { in: `${result}in`, in2: map, xChannelSelector: 'A', yChannelSelector: 'R', result });
@@ -667,6 +706,18 @@ export class Lens {
       this.surface = { images, gain, offset };
       this.applySurface();
       out = 'surfaced';
+    }
+    if (this.keyed()) {
+      // macOS's key light: its image (how much of it, by place) times how strong it is at the glass's level (a table of
+      // the glass's colour), added to it. Where the backdrop is transparent the table's colour is too, and nothing's
+      // added. The image is a grey, as the maps are (colour management would mix a colour's channels).
+      const image = svgEl('feImage', { preserveAspectRatio: 'none', x: 0, y: 0, width: 1, height: 1, result: 'keylight' });
+      const table = svgEl('feComponentTransfer', { in: out, result: 'keyd' },
+        ...(['feFuncR', 'feFuncG', 'feFuncB'] as const).map((f) => svgEl(f, { type: 'table', tableValues: this.keyTable().join(' ') })));
+      second.append(image, table, svgEl('feComposite', { in: 'keyd', in2: 'keylight', operator: 'arithmetic', k1: 1, result: 'keym' }),
+        svgEl('feComposite', { in: out, in2: 'keym', operator: 'arithmetic', k2: 1, k3: 1, result: 'keyed' }));
+      this.key = { image, table };
+      out = 'keyed';
     }
     if (this.isFree()) {
       // the shape: the map's blue channel is the distance to its edge, its table turned it into coverage; as alpha, it
@@ -724,10 +775,13 @@ export class Lens {
     let m = colorMatrix(o.saturation, (1 + o.brightness + hover) * (1 + o.baseBrightness) - 1, gains);
     let base = Array.isArray(o.colorMatrix) ? o.colorMatrix : null;
     const env = this.host.env(), gamut = env.wideGamut === false ? 'srgb' : 'p3';
-    if (base && base === MACOS_COLOUR.regular[gamut][1] && o.bevelMode === 4 && this.w) {
-      // macOS's own dark regular colour: small glass's below 104 px (from 64 px down, all of it)
-      const t = Math.min(Math.max((Math.min(this.w, this.h) - 64) / 40, 0), 1), small = MACOS_SMALL_DARK[gamut], large = base;
-      base = small.map((v, i) => v + (large[i] - v) * t);
+    const active = MACOS_COLOUR_ACTIVE.regular[gamut], sizeOf = (lo: number, hi: number) => Math.min(Math.max((Math.min(this.w, this.h) - lo) / (hi - lo), 0), 1);
+    if (base && o.bevelMode === 4 && this.w) {
+      // macOS's own regular colours, by size: small glass's below 104 px in the dark (from 64 px down, all of it), and
+      // in a focused window below 160 px in the light
+      const small = base === MACOS_COLOUR.regular[gamut][1] ? MACOS_SMALL_DARK[gamut] : base === active[0] ? MACOS_SMALL_ACTIVE[gamut][0] : base === active[1] ? MACOS_SMALL_ACTIVE[gamut][1] : null;
+      const t = base === active[0] ? sizeOf(64, 160) : sizeOf(64, 104), large = base;
+      if (small) base = small.map((v, i) => v + (large[i] - v) * t);
     }
     if (base) {
       // m after base: each of m's rows of the base's rows, and its offset of their offsets
@@ -757,6 +811,26 @@ export class Lens {
     return o.bevelMode === 4 && o.variant === 'regular' && o.blurAmount > 0;
   }
 
+  /**
+   * macOS's shadow under regular glass in a focused window (its glass filter's inputShadow*): the glass's shape blurred
+   * by σ, 8 px down, at an opacity, both growing with the shorter side from 64 to 160 px (σ 3.3 to 20, 0.011 to 0.114,
+   * half as much again in the dark), as measured over white. None while the glass has a shadow of its own.
+   */
+  private macShadow() {
+    const o = this.options;
+    if (o.bevelMode !== 4 || o.variant !== 'regular' || this.host.env().active === false || o.shadowOpacity > 0 || !this.w) return 'none';
+    const t = Math.min(Math.max((Math.min(this.w, this.h) - 64) / 96, 0), 1);
+    const sigma = 3.3 + 16.7 * t, alpha = (0.0114 + 0.1026 * t) * (this.host.env().dark ? 1.5 : 1) * o.opacity * this.amount();
+    return alpha > 0.001 ? `0 8px ${+(2 * sigma).toFixed(2)}px 0 rgb(0 0 0 / ${+alpha.toFixed(4)})` : 'none';
+  }
+
+  /** macOS's cap on dark regular glass's luma: a little higher in a focused window. */
+  private maxLuma() {
+    // (0.03 higher at 104 px and larger, 0.04 at 64 px and smaller)
+    const t = Math.min(Math.max((Math.min(this.w, this.h) - 64) / 40, 0), 1);
+    return macMaxLuma(Math.min(this.w, this.h)) + (this.host.env().active !== false ? 0.04 - 0.01 * t : 0);
+  }
+
   /** Whether macOS's cap on dark regular glass's brightness applies. */
   private capped() {
     const o = this.options;
@@ -765,7 +839,7 @@ export class Lens {
 
   /** The cap's table: from 0.5 + luma / 2 (in alpha) to the share of the colour kept, at the current strength. */
   private capTable() {
-    const cap = 1 + (macMaxLuma(Math.min(this.w, this.h)) - 1) * this.amount();
+    const cap = 1 + (this.maxLuma() - 1) * this.amount();
     return Array.from({ length: 33 }, (_, k) => {
       const l = 2 * (k / 32) - 1;
       return +(l <= cap ? 1 : cap / l).toFixed(4);
@@ -776,7 +850,11 @@ export class Lens {
   private frost() {
     const o = this.options, sigma = blurSigma(o.blurAmount);
     if (o.bevelMode !== 4 || !this.w) return sigma;
-    return sigma * macFrost(Math.min(this.w, this.h), o.variant === 'clear', this.host.env().dark);
+    const s = Math.min(this.w, this.h), env = this.host.env();
+    // regular glass in a focused window mixes less of its blur in (from 64 to 160 px, a quarter to three quarters of
+    // what it is in a window that isn't), which measures as a narrower one
+    const focused = o.variant === 'regular' && env.active !== false ? 0.25 + 0.5 * Math.min(Math.max((s - 64) / 96, 0), 1) : 1;
+    return sigma * macFrost(s, o.variant === 'clear', env.dark) * focused;
   }
 
   // ---------------------------------------------------------------- size, map and light
@@ -802,7 +880,7 @@ export class Lens {
       if (this.el.style.borderRadius !== radiusCss) this.el.style.borderRadius = radiusCss;
       const deeper = this.pressed && o.press === 'flatten' ? 1.2 : 1;
       const shadow = boxShadow(o.shadowOpacity * o.opacity * this.amount(), o.shadowSpread * deeper, o.shadowOffsetY), line = outlineShadow(o, this.amount());
-      this.el.style.setProperty('--lg-shadow', [shadow, line].filter((v) => v !== 'none').join(', ') || 'none');
+      this.el.style.setProperty('--lg-shadow', [shadow, this.macShadow(), line].filter((v) => v !== 'none').join(', ') || 'none');
     }
     this.place();
     // macOS's frost and cap follow the size (and a group's copy of the filter has to follow them)
@@ -823,6 +901,7 @@ export class Lens {
     const { w, h } = this, m = this.margin;
     for (const f of [this.pre, this.main]) if (f) setAttrs(f, { x: 0, y: 0, width: w, height: h });
     if (this.surface) for (const image of this.surface.images) setAttrs(image, { x: 0, y: 0, width: w, height: h });
+    if (this.key) setAttrs(this.key.image, { x: 0, y: 0, width: w, height: h });
     if (!this.maps.length) return;
     // the map's rectangle: `m` past the shape's part of the box on each side, or a little more on a group's grid
     const r = this.region.w ? this.region : { x: 0, y: 0, w, h };
@@ -927,6 +1006,7 @@ export class Lens {
             for (const f of maps[i].tables[1].children) f.setAttribute('tableValues', e.tables.down);
             maps[i].cover?.children[0].setAttribute('tableValues', e.tables.cover);
             maps[i].rimPx = e.rimPx;
+            maps[i].zero = zeroResidual(e.tables.across);
           });
           this.margin = entries[0].margin;
           this.mapRect = entries[0].rect;
@@ -938,6 +1018,7 @@ export class Lens {
       }
     }
     applies.push(this.shape ? this.drawFieldLight(field, zR, moving, region) : free ? this.drawFreeLight(field, zR) : this.drawLight(zR));
+    if (this.keyed() && (this.key || this.gl)) applies.push(this.drawKeyLight(field));
     this.drawing = [Promise.all(applies).then((fns) => fns.forEach((f) => f?.()))];
   }
 
@@ -1073,8 +1154,11 @@ export class Lens {
       if (channel !== 1 && this.fringeMaps.length) this.fringeMaps[channel / 2].setAttribute('values', downScale(share ? y / share : 1));
       // the map's channels span half their range (see mapNodes): the scale is twice what it would be
       const rim = 4 * (this.maps[map]?.rimPx ?? 0) * share, scale = +(rim * k).toFixed(3);
+      // (and by what the map's "no shift" reads as, past ½: see zeroResidual)
+      const zero = this.maps[map]?.zero ?? { x: 0, y: 0 };
       node.setAttribute('scale', String(scale));
-      source.setAttribute('dx', String(scale / 4));
+      source.setAttribute('dx', String(+(scale * (0.25 + zero.x)).toFixed(3)));
+      source.setAttribute('dy', String(+(scale * zero.y).toFixed(3)));
       // its source is read from up to half the scale to the right: the filters reach that far, for the glass at full
       // strength (so they aren't reset while the strength is tweened, which costs a frame each time)
       most = Math.max(most, Math.abs(rim * full) / 2);
@@ -1084,6 +1168,24 @@ export class Lens {
       this.reach = reach;
       this.place();
     }
+  }
+
+  /** The key light's image for the shape, at a pixel per device pixel (it's measured in them), and where it goes. */
+  private drawKeyLight(field: Field): Promise<() => void> {
+    const scale = Math.max(1, devicePixelRatio || 1), o = this.options;
+    const key = [field.w, field.h, scale, this.shape?.key() ?? '', o.shape, o.path, o.cornerRadius, ...(this.radii ?? [])].join('|');
+    if (key === this.keyKey) return Promise.resolve(() => {});
+    const entry = keyCache.get(key) ?? remember(keyCache, key, (() => {
+      const pixels = keyLightImage(field, scale);
+      return { pixels, url: this.gl ? '' : toDataURL(pixels) };
+    })());
+    const ready = entry.url ? predecode(entry.url) : Promise.resolve();
+    return ready.then(() => () => {
+      this.keyKey = key;
+      this.keyPixels = entry.pixels;
+      this.key?.image.setAttribute('href', entry.url || toDataURL(entry.pixels));
+      this.changed();
+    });
   }
 
   /**

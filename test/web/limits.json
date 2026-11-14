@@ -1,137 +1,137 @@
 {
   "defaults": {
-    "mean": 2.75,
-    "rim": 2.63,
-    "outliers": 0.23
+    "mean": 3.82,
+    "rim": 3.8,
+    "outliers": 0.34
   },
   "capsule": {
-    "mean": 3.52,
-    "rim": 3.61,
-    "outliers": 0.72
+    "mean": 4.24,
+    "rim": 4.49,
+    "outliers": 1.02
   },
   "circle": {
-    "mean": 2.7,
-    "rim": 3.07,
+    "mean": 3.93,
+    "rim": 4.32,
     "outliers": 0.2
   },
   "nofringe": {
-    "mean": 2.76,
-    "rim": 2.64,
-    "outliers": 0.24
+    "mean": 3.76,
+    "rim": 3.73,
+    "outliers": 0.3
   },
   "unsmoothed": {
-    "mean": 6.74,
-    "rim": 8.01,
-    "outliers": 2.68
+    "mean": 5.77,
+    "rim": 6.94,
+    "outliers": 2.22
   },
   "strongfringe": {
-    "mean": 3.88,
-    "rim": 4.55,
-    "outliers": 0.91
+    "mean": 5.38,
+    "rim": 6.64,
+    "outliers": 2.12
   },
   "dome": {
-    "mean": 3.57,
-    "rim": 2.21,
-    "outliers": 0.5
+    "mean": 4.14,
+    "rim": 2.8,
+    "outliers": 0.55
   },
   "applelens": {
-    "mean": 1.54,
-    "rim": 1.91,
+    "mean": 2.87,
+    "rim": 3.03,
     "outliers": 0.2
   },
   "switchlens": {
-    "mean": 1.98,
-    "rim": 2.04,
+    "mean": 2.69,
+    "rim": 2.72,
     "outliers": 0.2
   },
   "frost": {
-    "mean": 1.78,
-    "rim": 2.29,
+    "mean": 1.77,
+    "rim": 2.37,
     "outliers": 0.21
   },
   "regular": {
-    "mean": 0.97,
-    "rim": 1.02,
+    "mean": 0.92,
+    "rim": 1.03,
     "outliers": 0.2
   },
   "clear": {
-    "mean": 0.95,
-    "rim": 1.45,
+    "mean": 1.05,
+    "rim": 1.55,
     "outliers": 0.2
   },
   "regulardark": {
-    "mean": 0.92,
-    "rim": 0.97,
+    "mean": 0.81,
+    "rim": 1,
     "outliers": 0.2
   },
   "smallregular": {
-    "mean": 1.65,
-    "rim": 1.88,
+    "mean": 1.55,
+    "rim": 1.9,
     "outliers": 0.2
   },
   "colour": {
-    "mean": 4.21,
-    "rim": 4.71,
-    "outliers": 1.7
+    "mean": 5.51,
+    "rim": 7.15,
+    "outliers": 2.84
   },
   "opacity": {
-    "mean": 1.64,
-    "rim": 1.6,
+    "mean": 2.94,
+    "rim": 3.03,
     "outliers": 0.2
   },
   "strength": {
-    "mean": 1.74,
-    "rim": 2.04,
+    "mean": 1.81,
+    "rim": 2.02,
     "outliers": 0.2
   },
   "squircle": {
-    "mean": 3.74,
-    "rim": 3.74,
-    "outliers": 0.84
+    "mean": 4.95,
+    "rim": 4.95,
+    "outliers": 1.37
   },
   "path": {
-    "mean": 3.25,
-    "rim": 3.25,
-    "outliers": 0.41
+    "mean": 4.51,
+    "rim": 4.51,
+    "outliers": 0.49
   },
   "surface": {
-    "mean": 3.75,
-    "rim": 4.73,
-    "outliers": 0.33
+    "mean": 5.07,
+    "rim": 6.77,
+    "outliers": 0.81
   },
   "fitted": {
-    "mean": 2.96,
-    "rim": 2.78,
-    "outliers": 0.22
+    "mean": 3.3,
+    "rim": 3.28,
+    "outliers": 0.3
   },
   "contained": {
-    "mean": 3.59,
-    "rim": 3.51,
-    "outliers": 0.63
+    "mean": 4.12,
+    "rim": 4.08,
+    "outliers": 0.88
   },
   "edge": {
-    "mean": 3.88,
-    "rim": 4.13,
-    "outliers": 0.77
+    "mean": 4.93,
+    "rim": 5.24,
+    "outliers": 1.43
   },
   "edgefrost": {
-    "mean": 0.88,
-    "rim": 0.73,
+    "mean": 0.81,
+    "rim": 0.77,
     "outliers": 0.2
   },
   "late": {
-    "mean": 2.75,
-    "rim": 2.63,
-    "outliers": 0.23
+    "mean": 3.82,
+    "rim": 3.8,
+    "outliers": 0.34
   },
   "retry": {
-    "mean": 3.97,
-    "rim": 4.63,
-    "outliers": 1.03
+    "mean": 4.99,
+    "rim": 6.1,
+    "outliers": 1.43
   },
   "replaced": {
-    "mean": 4.59,
-    "rim": 5.66,
-    "outliers": 0.9
+    "mean": 5.9,
+    "rim": 7.48,
+    "outliers": 1.73
   }
 }

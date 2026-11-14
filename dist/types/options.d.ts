@@ -88,6 +88,13 @@ export interface GlassOptions {
     outline: number;
     outlineTop: number;
     /**
+     * macOS's light along the glass's top and bottom edges, which it draws in a focused window: 1 = its own, 0 none;
+     * null (the default) = macOS's for the variants in a focused window (Environment.active), none otherwise. Bright at
+     * the edge and gone 15 device px in, strongest where the edge faces up or down; on clear glass stronger over
+     * mid-tones than over black or white, as macOS's is.
+     */
+    keyLight: number | null;
+    /**
      * rect (cornerRadius), capsule, circle, concentric (the radius of the glass it sits in, less the inset), squircle
      * (Apple's continuous corners, of cornerRadius), or path (any shape: `path`)
      */
@@ -141,6 +148,11 @@ export interface Environment {
     reduceMotion: boolean;
     /** the display is wide-gamut (Display P3), where Chromium composites in its colour space; unset counts as wide */
     wideGamut?: boolean;
+    /**
+     * the window has focus: macOS draws its glass otherwise in the window in use (its key window) than in the others
+     * (clear glass without frost and brighter); unset counts as focused
+     */
+    active?: boolean;
 }
 /** The options from every source, then adjusted for the system's settings. */
 export declare function resolve(sources: Partial<GlassOptions>[], env: Environment): GlassOptions;
@@ -151,6 +163,18 @@ export declare function resolve(sources: Partial<GlassOptions>[], env: Environme
  * filter sees there, and one for an sRGB display.
  */
 export declare const MACOS_COLOUR: Record<'regular' | 'clear', Record<'p3' | 'srgb', [number[], number[]]>>;
+/**
+ * macOS 27's clear glass in a focused window (Environment.active), fitted as MACOS_COLOUR is, to the flat colours and
+ * greys under SwiftUI's glass made key (to within half a level): brighter and a little more saturated than in a window
+ * that isn't, the same in light and dark (its glass filter's inputFaceColorMatrix: white 1.08, black 0.125, saturation
+ * 1.06; what passes white is clipped). The sRGB one is the Display P3 one carried over to sRGB's values.
+ */
+export declare const MACOS_COLOUR_ACTIVE: Record<'regular' | 'clear', Record<'p3' | 'srgb', [number[], number[]]>>;
+/**
+ * Focused regular glass's colour at 64 px and smaller, light and dark: between 64 and 160 px (dark, 104) it goes from
+ * this to MACOS_COLOUR_ACTIVE's (lens.ts).
+ */
+export declare const MACOS_SMALL_ACTIVE: Record<'p3' | 'srgb', [number[], number[]]>;
 /**
  * Dark regular glass's colour at 64 px and smaller: brighter than large glass's (macOS caps it less, see macMaxLuma);
  * between 64 and 104 px it goes from this to MACOS_COLOUR's (lens.ts).

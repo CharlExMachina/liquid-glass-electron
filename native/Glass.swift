@@ -45,12 +45,22 @@ struct SceneSpec: Decodable {
   /// inputAberrationAngle `aberrationAngle` (radians; 3π/2 by default: blue sampled further along the lens's shift)
   var aberration: Double?
   var aberrationAngle: Double?
+  /// any other inputs of the glass filter, set on every glass of the scene as the aberration is (e.g. inputBlurRadius 0:
+  /// macOS's lens over a sharp backdrop, to see how it samples it)
+  var filter: [String: Double]?
 }
 
 /// Every layer under `layer` that draws glass (a CABackdropLayer with the glassBackground filter).
 func glassLayers(_ layer: CALayer) -> [CALayer] {
   let own = (layer.filters ?? []).contains { "\($0)".contains("glassBackground") } ? [layer] : []
   return own + (layer.sublayers ?? []).flatMap(glassLayers)
+}
+
+/// Sets inputs of the glass filter (SceneSpec.filter) on every glass in `view`.
+func setInputs(_ view: NSView, _ inputs: [String: Double]) {
+  for layer in glassLayers(view.layer!) {
+    for (k, v) in inputs { layer.setValue(v, forKeyPath: "filters.glassBackground.\(k)") }
+  }
 }
 
 /// Sets the glass filter's aberration (see SceneSpec.aberration) on every glass in `view`.
@@ -189,21 +199,31 @@ final class SceneRunner: NSObject {
     win.contentView = NSHostingView(rootView: SceneView(scene: scene, backdrop: image))
     win.setFrame(rect, display: true)
     if activate {
-      NSApp.activate()
+      NSApp.activate(ignoringOtherApps: true)
       win.makeKeyAndOrderFront(nil)
     } else {
       win.orderFrontRegardless()
     }
     // the aberration once the glass is drawn, and again once it has settled (the first scene's glass can come later
     // than that, and SwiftUI may draw it anew), a few frames before it's captured
-    let settled = scene.aberration == nil ? 0.8 : 1.0
-    if let amount = scene.aberration {
-      for t in [0.3, 0.6, 0.8] {
-        DispatchQueue.main.asyncAfter(deadline: .now() + t) { setAberration(win.contentView!, amount: amount, angle: scene.aberrationAngle ?? 1.5 * .pi) }
+    let settled = scene.aberration == nil && scene.filter == nil ? 0.8 : 1.0
+    for t in [0.3, 0.6, 0.8] {
+      DispatchQueue.main.asyncAfter(deadline: .now() + t) {
+        if let amount = scene.aberration { setAberration(win.contentView!, amount: amount, angle: scene.aberrationAngle ?? 1.5 * .pi) }
+        if let inputs = scene.filter { setInputs(win.contentView!, inputs) }
       }
     }
     // glass settles over a few frames
     DispatchQueue.main.asyncAfter(deadline: .now() + settled) {
+      // (on stderr: what the glass filter has, and whether the window is key and the app active)
+      if ProcessInfo.processInfo.environment["GLASS_DUMP"] != nil {
+        for layer in glassLayers(win.contentView!.layer!) {
+          let f = (layer.filters ?? []).first { "\($0)".contains("glassBackground") } as? NSObject
+          let keys = (f?.value(forKey: "inputKeys") as? [String]) ?? []
+          let vals = keys.map { k in "\(k)=\(f?.value(forKey: k).map { "\($0)" } ?? "nil")" }
+          FileHandle.standardError.write("FILTER \(scene.name) key=\(win.isKeyWindow) active=\(NSApp.isActive) \(vals.joined(separator: " "))\n".data(using: .utf8)!)
+        }
+      }
       print("READY \(scene.name) \(win.windowNumber)")
       fflush(stdout)
     }
@@ -282,7 +302,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 enum Main {
   static func main() {
     let app = NSApplication.shared
-    app.setActivationPolicy(CommandLine.arguments.contains("--scenes") ? .accessory : .regular)
+    let args = CommandLine.arguments
+    // scenes in an app of no Dock icon, unless they're to be drawn as in an app in use (--activate)
+    app.setActivationPolicy(args.contains("--scenes") && !args.contains("--activate") ? .accessory : .regular)
     let delegate = AppDelegate()
     app.delegate = delegate
     app.run()

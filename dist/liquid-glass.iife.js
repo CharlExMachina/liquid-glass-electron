@@ -74,6 +74,7 @@ var LiquidGlass = (() => {
     colorMatrix: null,
     outline: 0,
     outlineTop: 0,
+    keyLight: null,
     shape: "rect",
     path: null,
     pathBox: null,
@@ -129,7 +130,8 @@ var LiquidGlass = (() => {
     "strength",
     "elasticity",
     "outline",
-    "outlineTop"
+    "outlineTop",
+    "keyLight"
   ];
   var BOOLEANS = ["floating", "button", "interactive", "smooth", "magnify", "adaptive", "group"];
   var STRINGS = ["variant", "tint", "fill", "surface", "shape", "press", "path", "pathBox", "backdrop", "backdropSource", "colorMatrix"];
@@ -258,20 +260,66 @@ var LiquidGlass = (() => {
       ]
     }
   };
+  var MACOS_COLOUR_ACTIVE = {
+    // regular glass 160 px and larger (smaller, see MACOS_SMALL_ACTIVE), brighter than in a window that isn't focused;
+    // dark, under a cap on its luma a little higher than there (lens.ts)
+    regular: {
+      p3: [
+        [1.0274, -0.3707, -0.0325, 0.415, -0.1186, 0.7848, -0.0419, 0.4163, -0.1104, -0.3791, 1.1137, 0.415],
+        [1.0179, -0.3306, -0.0207, 0.1435, -0.0294, 0.6636, 0.0137, 0.1425, -0.0952, -0.3172, 1.089, 0.1434]
+      ],
+      srgb: [
+        [0.9786, -0.3594, -0.0255, 0.4315, -0.0908, 0.7529, -0.035, 0.4137, -0.0895, -0.3818, 1.0725, 0.4247],
+        [1.013, -0.3208, -0.0283, 0.1408, -0.04, 0.6694, 0.0154, 0.142, -0.1095, -0.3186, 1.1051, 0.1367]
+      ]
+    },
+    clear: {
+      p3: [
+        [1.0394, -0.0766, -71e-4, 0.1246, -0.0229, 0.9865, -79e-4, 0.1247, -0.0209, -0.0755, 1.0521, 0.1248],
+        [1.0394, -0.0766, -71e-4, 0.1246, -0.0229, 0.9865, -79e-4, 0.1247, -0.0209, -0.0755, 1.0521, 0.1248]
+      ],
+      srgb: [
+        [1.0035, -0.0599, -64e-4, 0.1392, -0.011, 0.969, -66e-4, 0.1283, -0.0158, -0.0661, 1.0232, 0.1354],
+        [1.0035, -0.0599, -64e-4, 0.1392, -0.011, 0.969, -66e-4, 0.1283, -0.0158, -0.0661, 1.0232, 0.1354]
+      ]
+    }
+  };
+  var MACOS_SMALL_ACTIVE = {
+    p3: [
+      [1.0389, -0.405, -0.0388, 0.4036, -0.1215, 0.7577, -0.0411, 0.4039, -0.1196, -0.403, 1.1183, 0.4035],
+      [1.0699, -0.3265, -0.0383, 0.1598, -0.0506, 0.7588, -82e-4, 0.1569, -0.1053, -0.3247, 1.1382, 0.1616]
+    ],
+    srgb: [
+      [1.013, -0.4117, -0.0347, 0.4179, -0.0941, 0.7274, -0.0341, 0.4003, -0.0995, -0.4193, 1.0947, 0.4113],
+      [1.0743, -0.3315, -0.0434, 0.1561, -0.0557, 0.7591, -49e-4, 0.1554, -0.1168, -0.3384, 1.1617, 0.1545]
+    ]
+  };
   var MACOS_SMALL_DARK = {
     p3: [1.097, -0.2822, 69e-4, 0.093, -0.035, 0.8139, 0.0322, 0.095, -0.0641, -0.2836, 1.1696, 0.0934],
     srgb: [1.1322, -0.3705, 0.0417, 0.0906, -0.0471, 0.8063, 0.0327, 0.0978, -0.0684, -0.3061, 1.176, 0.0961]
   };
-  var DARK_OUTLINE = { regular: [0.605, 0.41], clear: [0.49, 0] };
+  var DARK_OUTLINE = { regular: [0.498, 0.339], clear: [0.49, 0] };
+  var ACTIVE_OUTLINE = {
+    regular: [[0.444, 0.183], [0.576, 0.089]],
+    clear: [[0.393, 0], [0.393, 0]]
+  };
   function finishFill(o, env) {
-    if (o.colorMatrix === "auto") o.colorMatrix = MACOS_COLOUR[o.variant === "clear" ? "clear" : "regular"][env.wideGamut === false ? "srgb" : "p3"][env.dark ? 1 : 0];
-    else if (o.colorMatrix !== null) {
+    const active = env.active !== false;
+    if (o.colorMatrix === "auto") {
+      const table = (active ? MACOS_COLOUR_ACTIVE : MACOS_COLOUR)[o.variant === "clear" ? "clear" : "regular"];
+      o.colorMatrix = table[env.wideGamut === false ? "srgb" : "p3"][env.dark ? 1 : 0];
+    } else if (o.colorMatrix !== null) {
       const m = typeof o.colorMatrix === "string" ? o.colorMatrix.split(/[\s,]+/).filter(Boolean).map(Number) : o.colorMatrix;
       o.colorMatrix = Array.isArray(m) && m.length === 12 && m.every(Number.isFinite) ? m : null;
     }
-    if (env.dark && (o.variant === "regular" || o.variant === "clear")) {
+    if (active && o.variant === "clear" && o.blurAmount === VARIANTS.clear.blurAmount) o.blurAmount = 0;
+    o.keyLight ??= active && (o.variant === "regular" || o.variant === "clear") ? 1 : 0;
+    if (o.variant === "regular" || o.variant === "clear") {
       const v = VARIANTS[o.variant];
-      if (o.outline === v.outline && o.outlineTop === v.outlineTop) [o.outline, o.outlineTop] = DARK_OUTLINE[o.variant];
+      if (o.outline === v.outline && o.outlineTop === v.outlineTop) {
+        if (active) [o.outline, o.outlineTop] = ACTIVE_OUTLINE[o.variant][env.dark ? 1 : 0];
+        else if (env.dark) [o.outline, o.outlineTop] = DARK_OUTLINE[o.variant];
+      }
     }
     const fills = {
       auto: ["rgb(255 255 255 / 0.1)", "rgb(20 20 24 / 0.12)"],
@@ -355,8 +403,15 @@ var LiquidGlass = (() => {
       const k = u * (t.length - 1), i = Math.min(Math.floor(k), t.length - 2);
       return t[i] + (t[i + 1] - t[i]) * (k - i) - bias;
     };
-    const encode = (t, from) => Array.from({ length: 256 }, (_, k) => +Math.min(Math.max(from + at(t, k / 255) / 2 + 0.5 / 255, 0), 1).toFixed(5)).join(" ");
-    return { across: encode(tableX, 0.5), down: encode(tableY, 0.25) };
+    const encode = (t, from, zero) => Array.from({ length: 256 }, (_, k) => {
+      const byte = Math.round((from + at(t, k / 255) / 2) * 255 + zero - (from + 0.25) * 255);
+      return byte >= 255 ? 1 : +((Math.max(byte, 0) + 0.25) / 255).toFixed(6);
+    }).join(" ");
+    return { across: encode(tableX, 0.5, 192), down: encode(tableY, 0.25, 128) };
+  }
+  function zeroResidual(across) {
+    const a = Math.floor(Number(across.split(" ")[128]) * 255 + 1e-6);
+    return { x: a / 255 - 0.75, y: 0.25 / 255 };
   }
   var decoded = /* @__PURE__ */ new Set();
   async function predecode(url) {
@@ -478,9 +533,9 @@ var LiquidGlass = (() => {
     const t = clamp(d / half, 0, 1) * (SWITCH_LENS.length - 1), i = Math.min(Math.floor(t), SWITCH_LENS.length - 2);
     return (SWITCH_LENS[i] + (SWITCH_LENS[i + 1] - SWITCH_LENS[i]) * (t - i)) * half;
   }
-  var MAC_LENS_T = [0, 0.05, 0.1, 0.15, 0.2, 0.3, 0.4, 0.5, 0.6, 0.8, 1, 1.25, 1.5, 2, 3];
-  var MAC_LENS = [0.95, 0.65, 0.55, 0.47, 0.41, 0.3, 0.235, 0.185, 0.14, 0.075, 0.04, 0.02, 0.015, 0, 0];
-  var MAC_LENS_REACH = 2;
+  var MAC_LENS_T = [0, 0.025, 0.05, 0.075, 0.1, 0.125, 0.15, 0.175, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95];
+  var MAC_LENS = [0.978, 0.873, 0.767, 0.691, 0.627, 0.574, 0.526, 0.484, 0.445, 0.376, 0.318, 0.267, 0.223, 0.183, 0.148, 0.118, 0.093, 0.071, 0.052, 0.035, 0.023, 0.013, 5e-3, 0];
+  var MAC_LENS_REACH = 1;
   function macLens(d, amount, height2) {
     const t = Math.max(d, 0) / Math.max(height2, 0.01);
     if (t >= MAC_LENS_T[MAC_LENS_T.length - 1]) return 0;
@@ -890,6 +945,45 @@ var LiquidGlass = (() => {
     const l = Math.hypot(gx, gy) || 1;
     return [gx / l, gy / l];
   }
+  var KEY_LIGHT = [103, 59, 21, 15, 12, 9, 7, 6, 4.5, 4, 3, 2, 1.2, 1, 0.8, 0.3, 0];
+  function keyLightAt(d, deg) {
+    if (d < -0.5) return 0;
+    const t = Math.max(d - 0.5, 0), i = Math.min(Math.floor(t), KEY_LIGHT.length - 2);
+    const p = KEY_LIGHT[i] + (KEY_LIGHT[i + 1] - KEY_LIGHT[i]) * Math.min(t - i, 1);
+    const a = Math.min(Math.abs(deg), 90);
+    const line = (1 - a / 90) ** (1.4 + 0.4 * Math.min(t, 1)), tail = Math.max(0, 1 - a / 48);
+    const w = Math.min(Math.max(d - 1.5, 0), 1);
+    return p / KEY_LIGHT[0] * (line * (1 - w) + tail * w);
+  }
+  function keyLightImage(f, scale) {
+    const width = Math.max(1, Math.round(f.w * scale)), height2 = Math.max(1, Math.round(f.h * scale));
+    const data = new Uint8ClampedArray(width * height2 * 4);
+    for (let j = 0; j < height2; j++) {
+      for (let i = 0; i < width; i++) {
+        const x = (i + 0.5) / scale, y = (j + 0.5) / scale, d = -f.sdf(x, y) * scale, k = (j * width + i) * 4;
+        data[k + 3] = 255;
+        if (d > KEY_LIGHT.length - 0.5 || d < -0.5) continue;
+        const [, ny] = normal(f, x, y);
+        data[k] = data[k + 1] = data[k + 2] = Math.round(keyLightAt(d, Math.acos(Math.min(Math.abs(ny), 1)) * 180 / Math.PI) * 255);
+      }
+    }
+    return { width, height: height2, data };
+  }
+  var KEY_CLEAR_M = [0, 32, 47, 62, 78, 93, 108, 124, 139, 154, 169, 185, 200, 215, 231, 246, 255];
+  var KEY_CLEAR_D = [0.81, 1, 1.09, 1.169, 1.253, 1.344, 1.412, 1.527, 1.56, 1.66, 1.576, 1.366, 1.113, 0.929, 0.676, 0.437, 0];
+  var KEY_REGULAR = 0.585;
+  function keyLightTable(clear, amount) {
+    return Array.from({ length: 33 }, (_, k) => {
+      const m = k / 32 * 255;
+      let d = KEY_REGULAR;
+      if (clear) {
+        let i = 0;
+        while (KEY_CLEAR_M[i + 1] < m) i++;
+        d = KEY_CLEAR_D[i] + (KEY_CLEAR_D[i + 1] - KEY_CLEAR_D[i]) * ((m - KEY_CLEAR_M[i]) / (KEY_CLEAR_M[i + 1] - KEY_CLEAR_M[i]));
+      }
+      return +(d * KEY_LIGHT[0] * amount / 255).toFixed(4);
+    });
+  }
   function fieldLight(f, bevel, o, shadow, scale, pad, fill = null) {
     const zR = Math.max(Math.min(bevel, f.shortHalf), 1);
     const reach = Math.max(zR, f.shortHalf * 0.35) + 2;
@@ -1018,19 +1112,19 @@ void main() {
 }`;
   var GLASS = `#version 300 es
 precision highp float;
-uniform sampler2D uBack, uWide, uMap, uTab, uGain, uOffset;
+uniform sampler2D uBack, uWide, uMap, uTab, uGain, uOffset, uKey;
+uniform float uKeyTab[33];  // the key light's strength by the glass's level (keyLightTable); uKeyOn, whether there's any
 uniform vec4 uTabInfo;      // entries, bias, rimPx
 uniform vec3 uKx, uKy;      // red, green, blue: times the map's shift across, and down
 uniform vec2 uSize;         // the element, px
 uniform vec4 uMapRect;
 uniform vec4 uToUv;         // the element's px to the backdrop texture's uv
 uniform vec2 uGx, uGy;      // the backdrop's uv per device pixel
-uniform float uPixel;       // a device pixel, in the element's px
 uniform vec2 uEdge;         // a device pixel in the backdrop's uv, where its edge is the picture's (0: it has the picture's edge in it, the frost's)
 uniform mat3 uColour;
 uniform vec3 uColourOffset;
 uniform float uFill, uCap, uOpacity, uSurface;
-uniform bool uFlip, uSmooth, uDarken, uFringe, uCover;
+uniform bool uFlip, uDarken, uFringe, uCover, uKeyOn;
 in vec2 v;
 out vec4 o;
 
@@ -1045,14 +1139,7 @@ vec4 tap(vec2 p) {
 
 // the backdrop the glass bends, not premultiplied (the frost, and macOS's blur fill laid over it)
 vec4 raw(vec2 p) {
-  vec4 c;
-  if (uSmooth) {
-    // four taps half a pixel out, each the mean of four pixels: the 3 x 3 kernel 1 2 1, 2 4 2, 1 2 1
-    vec2 d = vec2(uPixel * 0.5);
-    c = 0.25 * (tap(p + d) + tap(p - d) + tap(p + vec2(d.x, -d.y)) + tap(p + vec2(-d.x, d.y)));
-  } else {
-    c = tap(p);
-  }
+  vec4 c = tap(p);
   if (c.a <= 0.0) return vec4(0.0);
   vec3 s = c.rgb / c.a;
   if (uFill > 0.0) {
@@ -1103,6 +1190,16 @@ void main() {
   if (uSurface > 0.0 && col.a > 0.0) {
     float gain = textureLod(uGain, p / uSize, 0.0).r, offset = textureLod(uOffset, p / uSize, 0.0).r;
     col.rgb = clamp(col.rgb / col.a * (1.0 - uSurface + uSurface * gain) + uSurface * (offset - 0.5), 0.0, 1.0) * col.a;
+  }
+  if (uKeyOn && col.a > 0.0) {
+    // macOS's key light, as the filter adds it: the image times the table at each channel's level
+    float k = textureLod(uKey, p / uSize, 0.0).r;
+    vec3 m = clamp(col.rgb / col.a, 0.0, 1.0) * 32.0, add;
+    for (int c = 0; c < 3; c++) {
+      int i = int(min(floor(m[c]), 31.0));
+      add[c] = mix(uKeyTab[i], uKeyTab[i + 1], m[c] - float(i));
+    }
+    col.rgb = min(col.rgb + add * k * col.a, vec3(col.a));
   }
   // (where the glass sees none of the picture, none of it is drawn: what's under its canvas shows)
   o = col * (uCover ? clamp((edge * 255.0 - 128.0) / 8.0 + 0.5, 0.0, 1.0) : 1.0);
@@ -1160,6 +1257,7 @@ void main() {
       this.sources = /* @__PURE__ */ new WeakMap();
       this.mapTextures = /* @__PURE__ */ new WeakMap();
       this.tableTextures = /* @__PURE__ */ new WeakMap();
+      this.keyTextures = /* @__PURE__ */ new WeakMap();
       this.images = /* @__PURE__ */ new Map();
       this.maxTexture = Math.min(gl.getParameter(gl.MAX_TEXTURE_SIZE), 8192);
       this.copy = this.link(COPY);
@@ -1193,7 +1291,10 @@ void main() {
     get canWide() {
       return "drawingBufferColorSpace" in this.gl && "unpackColorSpace" in this.gl;
     }
-    /** The colour space the shader's numbers are in. */
+    /**
+     * The colour space the shader's numbers are in. Set before a source is read for a draw: a change uploads the sources
+     * again, and a draw from one unpacked for the other space would have its colours wrong until the glass changed.
+     */
     colourSpace(wide) {
       const gl = this.gl;
       const p3 = wide && this.canWide;
@@ -1322,6 +1423,18 @@ void main() {
       }
       return t;
     }
+    keyTextures = /* @__PURE__ */ new WeakMap();
+    keyTexture(p) {
+      const gl = this.gl;
+      let t = this.keyTextures.get(p);
+      if (!t) {
+        t = this.texture(gl.LINEAR);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, p.width, p.height, 0, gl.RGBA, gl.UNSIGNED_BYTE, p.data);
+        this.keyTextures.set(p, t);
+        this.gone.register(p, t);
+      }
+      return t;
+    }
     tableTexture(m) {
       const gl = this.gl;
       let t = this.tableTextures.get(m);
@@ -1375,12 +1488,17 @@ void main() {
     }
     /**
      * The backdrop around the glass (`pad` px past it on each side), blurred by σ px: at a resolution the blur can't
-     * tell from full, so its kernel stays 25 taps whatever σ is.
+     * tell from full, so its kernel stays 25 taps whatever σ is. σ 0: not blurred, at one texel per px (macOS's glass
+     * bends a copy of its backdrop at one sample per point, each the mean of the device pixels in it).
      */
-    frosted(src, f, toUv, shown, scale, sigma, pad, slot) {
+    frosted(src, f, toUv, shown, scale, sigma, pad, slot, grid = { x: 0, y: 0 }) {
       const gl = this.gl;
-      const texels = sigma * scale, q = Math.min(1, 2 ** -Math.ceil(Math.log2(Math.max(texels, 1e-3) / 4)));
-      const region = { x: -pad, y: -pad, w: f.w + 2 * pad, h: f.h + 2 * pad };
+      const texels = sigma * scale, q = sigma > 0 ? Math.min(1, 2 ** -Math.ceil(Math.log2(Math.max(texels, 1e-3) / 4))) : 1 / scale;
+      const region = { x: -pad - grid.x, y: -pad - grid.y, w: f.w + 2 * pad + grid.x, h: f.h + 2 * pad + grid.y };
+      if (sigma <= 0) {
+        region.w = Math.ceil(region.w - 1e-4);
+        region.h = Math.ceil(region.h - 1e-4);
+      }
       const w = Math.max(2, Math.round(region.w * scale * q)), h = Math.max(2, Math.round(region.h * scale * q));
       const a = this.target(w, h, slot), b = this.target(w, h, slot + 1);
       gl.useProgram(this.copy.program);
@@ -1392,6 +1510,7 @@ void main() {
       gl.uniform2f(this.copy.at.uGy, 0, toUv[1] * region.h / h);
       gl.uniform4f(this.copy.at.uShown, shown[0], shown[1], shown[2], shown[3]);
       this.run(a, 0, 0, w, h);
+      if (sigma <= 0) return { texture: a.texture, region };
       gl.useProgram(this.blur.program);
       gl.uniform1i(this.blur.at.uTex, 0);
       gl.uniform1f(this.blur.at.uSigma, Math.max(texels * q, 0.05));
@@ -1412,7 +1531,6 @@ void main() {
       const gl = this.gl;
       if (this.lost || gl.isContextLost()) return false;
       this.sweep();
-      this.colourSpace(jobs[0].f.wideGamut);
       const LIMIT = Math.min(this.maxTexture, 4096);
       for (let from = 0; from < jobs.length; ) {
         let x = 0, y = 0, row = 0, width = 0, to = from;
@@ -1466,6 +1584,13 @@ void main() {
         gx = [0, 0];
         gy = [0, 0];
         if (f.fill && f.fill.alpha > 0) wide = this.frosted(src, f, toUv, shown, scale, f.fill.sigma, pad, 2).texture;
+      } else if (f.smooth) {
+        const frac = (v) => v - Math.floor(v + 1e-4);
+        const point = this.frosted(src, f, toUv, shown, scale, 0, Math.ceil(f.reach) + 2, 0, { x: frac(glassBox.x) / sx, y: frac(glassBox.y) / sy });
+        back = point.texture;
+        backToUv = [1 / point.region.w, 1 / point.region.h, -point.region.x / point.region.w, -point.region.y / point.region.h];
+        gx = [0, 0];
+        gy = [0, 0];
       }
       const p = this.glass, at = p.at;
       gl.useProgram(p.program);
@@ -1486,7 +1611,10 @@ void main() {
         this.bind(4, back);
         this.bind(5, back);
       }
-      ["uBack", "uWide", "uMap", "uTab", "uGain", "uOffset"].forEach((name, unit2) => gl.uniform1i(at[name], unit2));
+      this.bind(6, f.key ? this.keyTexture(f.key.pixels) : back);
+      ["uBack", "uWide", "uMap", "uTab", "uGain", "uOffset", "uKey"].forEach((name, unit2) => gl.uniform1i(at[name], unit2));
+      gl.uniform1i(at.uKeyOn, f.key ? 1 : 0);
+      if (f.key) gl.uniform1fv(at.uKeyTab, f.key.table);
       gl.uniform4f(at.uTabInfo, f.map.tableX.length, f.map.bias, f.map.rimPx, 0);
       gl.uniform3f(at.uKx, f.kx[0], f.kx[1], f.kx[2]);
       gl.uniform3f(at.uKy, f.ky[0], f.ky[1], f.ky[2]);
@@ -1495,7 +1623,6 @@ void main() {
       gl.uniform4f(at.uToUv, backToUv[0], backToUv[1], backToUv[2], backToUv[3]);
       gl.uniform2f(at.uGx, gx[0], gx[1]);
       gl.uniform2f(at.uGy, gy[0], gy[1]);
-      gl.uniform1f(at.uPixel, 1 / scale);
       gl.uniform2f(at.uEdge, gx[0], gy[1]);
       gl.uniform4f(at.uShown, shown[0], shown[1], shown[2], shown[3]);
       const m = f.matrix;
@@ -1506,7 +1633,6 @@ void main() {
       gl.uniform1f(at.uOpacity, f.opacity);
       gl.uniform1f(at.uSurface, surface);
       gl.uniform1i(at.uFlip, 1);
-      gl.uniform1i(at.uSmooth, f.smooth && f.sigma <= 0.01 ? 1 : 0);
       gl.uniform1i(at.uDarken, f.fill?.darken ? 1 : 0);
       gl.uniform1i(at.uFringe, [0, 2].some((c) => f.kx[c] !== f.kx[1] || f.ky[c] !== f.ky[1]) ? 1 : 0);
       gl.uniform1i(at.uCover, f.cover ? 1 : 0);
@@ -1674,6 +1800,7 @@ void main() {
     prepare() {
       const f = this.host.frame();
       const r = renderer();
+      if (f) r.colourSpace(f.wideGamut);
       const src = f ? r.source(this.source) : null;
       if (src?.failed) {
         this.host.failed();
@@ -1712,10 +1839,11 @@ void main() {
         this.canvas.height = ch;
       }
       this.ctx ??= this.canvas.getContext("2d", f.wideGamut && r.canWide ? { colorSpace: "display-p3" } : void 0);
+      const snap = (v) => Math.round(v * dpr) / dpr;
       return {
         f,
         src,
-        glassBox: box,
+        glassBox: { ...box, x: snap(box.x), y: snap(box.y) },
         sourceBox,
         shown,
         cw,
@@ -1756,6 +1884,12 @@ void main() {
     const q = +k.toFixed(5), o = +(0.5 * (1 - q)).toFixed(5);
     return `${q} 0 0 0 ${o}  0 ${q} 0 0 ${o}  0 0 ${q} 0 ${o}  0 0 0 1 0`;
   };
+  var pointSmoothing = () => (typeof devicePixelRatio === "number" ? devicePixelRatio : 1) >= 1.75;
+  function smoothKernel(point) {
+    if (!point) return { order: 3, kernelMatrix: "1 2 1 2 4 2 1 2 1", divisor: 16 };
+    const k = [1, 3, 3, 1];
+    return { order: 4, targetX: 2, targetY: 2, kernelMatrix: k.flatMap((a) => k.map((b) => a * b)).join(" "), divisor: 64 };
+  }
   var nextId = 0;
   var shaderHere = () => !supportsSvgBackdrop() || !!globalThis.LIQUID_GLASS_WEBGL;
   var warned = /* @__PURE__ */ new WeakSet();
@@ -1767,6 +1901,7 @@ void main() {
     console.warn("liquid-glass-electron:", ...message);
   }
   var mapCache = /* @__PURE__ */ new Map();
+  var keyCache = /* @__PURE__ */ new Map();
   var lightCache = /* @__PURE__ */ new Map();
   var remember = (m, k, v) => {
     if (m.size > 200) m.delete(m.keys().next().value);
@@ -1794,6 +1929,11 @@ void main() {
     mixNode = null;
     // the surface (GlassOptions.surface): its image, and the composites that apply its gain and offset
     surface = null;
+    // macOS's key light (GlassOptions.keyLight): its image, the table of how strong it is by the glass's level, and the
+    // image's pixels for the shader
+    key = null;
+    keyPixels = null;
+    keyKey = "";
     // what backdrop-filter is while there's glass, and the filter's structure (rebuilt only when it changes)
     filterCss = "none";
     structure = "";
@@ -1982,6 +2122,7 @@ void main() {
      * What a group needs to draw this element's glass in a filter of its own, or null if it can't: glass that doesn't
      * bend, a free shape, a dome's per-channel maps, noise (it's in the filter's coordinates), CSS filters in front, a
      * surface (images in the element's box), glass with glass inside (it paints on a layer of its own), or no map yet.
+     * `key`: the key light's image and its pixels, which the group draws over its own layer for each member.
      * `filters` are the element's own filter elements (the group copies them), `images` its map's (a grey per channel),
      * `side` how far the map is stashed beside the element, `margin` how far the filters reach past it (and `right`, past
      * its right side, which can be further).
@@ -1989,6 +2130,7 @@ void main() {
     batchSource() {
       const o = this.options;
       if (!this.bends || this.gl || this.isFree() || this.shape || this.layer || o.surface || o.backdrop || o.distortion > 0 || this.amount() <= 0 || !this.main) return null;
+      if (this.keyed() && (!this.key || !this.keyPixels)) return null;
       const map = this.maps[0];
       if (!map.images[0].getAttribute("href") || !map.rimPx || !this.mapGrid) return null;
       const first = this.pre ?? this.main;
@@ -1997,6 +2139,7 @@ void main() {
         images: map.images,
         tables: map.tables,
         shifts: map.shifts,
+        key: this.key && this.keyPixels ? { image: this.key.image, pixels: this.keyPixels } : null,
         side: map.shifts.length ? -Number(map.shifts[0].getAttribute("dx")) : 0,
         margin: -Number(first.getAttribute("x")),
         right: Number(first.getAttribute("width")) - this.w + Number(first.getAttribute("x")),
@@ -2009,7 +2152,7 @@ void main() {
       const o = this.options;
       const gl = !!this.glNow;
       const bends = (supportsSvgBackdrop() || gl) && o.refraction > 0 && o.variant !== "identity";
-      return [bends, gl, o.backdrop, !!o.surface, o.chromAberration > 0, o.chromAberration > 0 && this.mixesColour(), o.bevelMode, o.blurAmount > 0, o.smooth, o.distortion > 0, o.opacity < 1, o.variant === "identity", o.magnify, this.isFree(), this.capped(), this.filled() ? this.host.env().dark ? "darken" : "lighten" : ""].join();
+      return [bends, gl, o.backdrop, !!o.surface, o.chromAberration > 0, o.chromAberration > 0 && this.mixesColour(), o.bevelMode, o.blurAmount > 0, o.smooth && (pointSmoothing() ? "point" : "pixel"), o.distortion > 0, o.opacity < 1, o.variant === "identity", o.magnify, this.isFree(), this.capped(), this.filled() ? this.host.env().dark ? "darken" : "lighten" : "", this.keyed()].join();
     }
     /**
      * The element a shader bends as this glass's backdrop, or null: the compositor bends what's behind (Chromium), no
@@ -2054,9 +2197,10 @@ void main() {
         fill: this.filled() ? { sigma: MAC_FILL_SIGMA * s, alpha: MAC_FILL_OPACITY * s, darken: this.host.env().dark } : null,
         smooth: !frosted && o.smooth,
         matrix: this.matrix(),
-        cap: this.capped() ? 1 + (macMaxLuma(Math.min(w, h)) - 1) * s : null,
+        cap: this.capped() ? 1 + (this.maxLuma() - 1) * s : null,
         opacity: o.opacity,
         surface: o.surface ? { urls: o.surface, strength: s } : null,
+        key: this.keyed() && this.keyPixels ? { pixels: this.keyPixels, table: this.keyTable() } : null,
         cover: this.isFree(),
         wideGamut: this.host.env().wideGamut !== false
       };
@@ -2085,6 +2229,7 @@ void main() {
         this.mixNode?.setAttribute("k2", String(o.opacity));
         this.mixNode?.setAttribute("k3", String(1 - o.opacity));
         this.applySurface();
+        this.key?.table.childNodes.forEach((f) => f.setAttribute("tableValues", this.keyTable().join(" ")));
         this.applyStrength();
         this.setBackdrop(s > 0 ? this.filterCss : "none");
         if (this.gl && this.glNow) this.gl.setSource(this.glNow);
@@ -2102,6 +2247,14 @@ void main() {
       });
       setAttrs(n.gain, { k1: +s.toFixed(4), k2: +(1 - s).toFixed(4) });
       setAttrs(n.offset, { k2: 1, k3: +s.toFixed(4), k4: +(-s / 2).toFixed(4) });
+    }
+    /** Whether there's macOS's key light. */
+    keyed() {
+      return (this.options.keyLight ?? 0) > 0;
+    }
+    /** The key light's table at the current strength: clear glass's by its level, any other's the same throughout. */
+    keyTable() {
+      return keyLightTable(this.options.variant === "clear", (this.options.keyLight ?? 0) * this.amount());
     }
     /** The strength, 0..1. */
     amount() {
@@ -2162,7 +2315,8 @@ void main() {
       const o = this.options;
       this.pre?.remove();
       this.main?.remove();
-      this.pre = this.main = this.colour = this.blurNode = this.mixNode = this.capNode = this.fillBlur = this.fillAlpha = this.surface = null;
+      this.pre = this.main = this.colour = this.blurNode = this.mixNode = this.capNode = this.fillBlur = this.fillAlpha = this.surface = this.key = null;
+      this.keyKey = "";
       this.maps = [];
       this.passes = [];
       this.fringeMaps = [];
@@ -2199,7 +2353,7 @@ void main() {
           src = "smooth";
         }
       } else if (o.smooth) {
-        first.append(svgEl("feConvolveMatrix", { in: src, order: 3, kernelMatrix: "1 2 1 2 4 2 1 2 1", divisor: 16, edgeMode: "none", preserveAlpha: "true", result: "smooth" }));
+        first.append(svgEl("feConvolveMatrix", { in: src, ...smoothKernel(pointSmoothing()), edgeMode: "none", preserveAlpha: "true", result: "smooth" }));
         src = "smooth";
       }
       if (o.distortion > 0) {
@@ -2236,7 +2390,7 @@ void main() {
         shifts = stashed.shifts;
         second.append(...stashed.nodes);
       }
-      this.maps.push({ images: images2, tables, cover, shifts, rimPx: 0 });
+      this.maps.push({ images: images2, tables, cover, shifts, rimPx: 0, zero: { x: 0, y: 0 } });
       if (fringe) {
         first.append(svgEl("feMerge", {}, ...mergeNodes));
         src = "SourceGraphic";
@@ -2275,6 +2429,22 @@ void main() {
         this.surface = { images: images3, gain, offset };
         this.applySurface();
         out = "surfaced";
+      }
+      if (this.keyed()) {
+        const image2 = svgEl("feImage", { preserveAspectRatio: "none", x: 0, y: 0, width: 1, height: 1, result: "keylight" });
+        const table = svgEl(
+          "feComponentTransfer",
+          { in: out, result: "keyd" },
+          ...["feFuncR", "feFuncG", "feFuncB"].map((f) => svgEl(f, { type: "table", tableValues: this.keyTable().join(" ") }))
+        );
+        second.append(
+          image2,
+          table,
+          svgEl("feComposite", { in: "keyd", in2: "keylight", operator: "arithmetic", k1: 1, result: "keym" }),
+          svgEl("feComposite", { in: out, in2: "keym", operator: "arithmetic", k2: 1, k3: 1, result: "keyed" })
+        );
+        this.key = { image: image2, table };
+        out = "keyed";
       }
       if (this.isFree()) {
         second.append(svgEl("feComposite", { in: out, in2: "map0_cover", operator: "in" }));
@@ -2326,9 +2496,11 @@ void main() {
       let m = colorMatrix(o.saturation, (1 + o.brightness + hover) * (1 + o.baseBrightness) - 1, gains);
       let base = Array.isArray(o.colorMatrix) ? o.colorMatrix : null;
       const env = this.host.env(), gamut = env.wideGamut === false ? "srgb" : "p3";
-      if (base && base === MACOS_COLOUR.regular[gamut][1] && o.bevelMode === 4 && this.w) {
-        const t = Math.min(Math.max((Math.min(this.w, this.h) - 64) / 40, 0), 1), small = MACOS_SMALL_DARK[gamut], large = base;
-        base = small.map((v, i) => v + (large[i] - v) * t);
+      const active = MACOS_COLOUR_ACTIVE.regular[gamut], sizeOf = (lo, hi) => Math.min(Math.max((Math.min(this.w, this.h) - lo) / (hi - lo), 0), 1);
+      if (base && o.bevelMode === 4 && this.w) {
+        const small = base === MACOS_COLOUR.regular[gamut][1] ? MACOS_SMALL_DARK[gamut] : base === active[0] ? MACOS_SMALL_ACTIVE[gamut][0] : base === active[1] ? MACOS_SMALL_ACTIVE[gamut][1] : null;
+        const t = base === active[0] ? sizeOf(64, 160) : sizeOf(64, 104), large = base;
+        if (small) base = small.map((v, i) => v + (large[i] - v) * t);
       }
       if (base) {
         const row = (r) => [0, 1, 2, 3].map((j) => m[r * 5] * base[j] + m[r * 5 + 1] * base[4 + j] + m[r * 5 + 2] * base[8 + j] + (j === 3 ? m[r * 5 + 4] : 0));
@@ -2357,6 +2529,23 @@ void main() {
       const o = this.options;
       return o.bevelMode === 4 && o.variant === "regular" && o.blurAmount > 0;
     }
+    /**
+     * macOS's shadow under regular glass in a focused window (its glass filter's inputShadow*): the glass's shape blurred
+     * by σ, 8 px down, at an opacity, both growing with the shorter side from 64 to 160 px (σ 3.3 to 20, 0.011 to 0.114,
+     * half as much again in the dark), as measured over white. None while the glass has a shadow of its own.
+     */
+    macShadow() {
+      const o = this.options;
+      if (o.bevelMode !== 4 || o.variant !== "regular" || this.host.env().active === false || o.shadowOpacity > 0 || !this.w) return "none";
+      const t = Math.min(Math.max((Math.min(this.w, this.h) - 64) / 96, 0), 1);
+      const sigma = 3.3 + 16.7 * t, alpha = (0.0114 + 0.1026 * t) * (this.host.env().dark ? 1.5 : 1) * o.opacity * this.amount();
+      return alpha > 1e-3 ? `0 8px ${+(2 * sigma).toFixed(2)}px 0 rgb(0 0 0 / ${+alpha.toFixed(4)})` : "none";
+    }
+    /** macOS's cap on dark regular glass's luma: a little higher in a focused window. */
+    maxLuma() {
+      const t = Math.min(Math.max((Math.min(this.w, this.h) - 64) / 40, 0), 1);
+      return macMaxLuma(Math.min(this.w, this.h)) + (this.host.env().active !== false ? 0.04 - 0.01 * t : 0);
+    }
     /** Whether macOS's cap on dark regular glass's brightness applies. */
     capped() {
       const o = this.options;
@@ -2364,7 +2553,7 @@ void main() {
     }
     /** The cap's table: from 0.5 + luma / 2 (in alpha) to the share of the colour kept, at the current strength. */
     capTable() {
-      const cap = 1 + (macMaxLuma(Math.min(this.w, this.h)) - 1) * this.amount();
+      const cap = 1 + (this.maxLuma() - 1) * this.amount();
       return Array.from({ length: 33 }, (_, k) => {
         const l = 2 * (k / 32) - 1;
         return +(l <= cap ? 1 : cap / l).toFixed(4);
@@ -2374,7 +2563,9 @@ void main() {
     frost() {
       const o = this.options, sigma = blurSigma(o.blurAmount);
       if (o.bevelMode !== 4 || !this.w) return sigma;
-      return sigma * macFrost(Math.min(this.w, this.h), o.variant === "clear", this.host.env().dark);
+      const s = Math.min(this.w, this.h), env = this.host.env();
+      const focused = o.variant === "regular" && env.active !== false ? 0.25 + 0.5 * Math.min(Math.max((s - 64) / 96, 0), 1) : 1;
+      return sigma * macFrost(s, o.variant === "clear", env.dark) * focused;
     }
     // ---------------------------------------------------------------- size, map and light
     /** The shape changed (a container's members moved): draw it again now. */
@@ -2395,7 +2586,7 @@ void main() {
         if (this.el.style.borderRadius !== radiusCss) this.el.style.borderRadius = radiusCss;
         const deeper = this.pressed && o.press === "flatten" ? 1.2 : 1;
         const shadow = boxShadow(o.shadowOpacity * o.opacity * this.amount(), o.shadowSpread * deeper, o.shadowOffsetY), line = outlineShadow(o, this.amount());
-        this.el.style.setProperty("--lg-shadow", [shadow, line].filter((v) => v !== "none").join(", ") || "none");
+        this.el.style.setProperty("--lg-shadow", [shadow, this.macShadow(), line].filter((v) => v !== "none").join(", ") || "none");
       }
       this.place();
       if (o.bevelMode === 4) {
@@ -2412,6 +2603,7 @@ void main() {
       const { w, h } = this, m = this.margin;
       for (const f of [this.pre, this.main]) if (f) setAttrs(f, { x: 0, y: 0, width: w, height: h });
       if (this.surface) for (const image2 of this.surface.images) setAttrs(image2, { x: 0, y: 0, width: w, height: h });
+      if (this.key) setAttrs(this.key.image, { x: 0, y: 0, width: w, height: h });
       if (!this.maps.length) return;
       const r = this.region.w ? this.region : { x: 0, y: 0, w, h };
       const rect = this.mapRect ?? { x: -m, y: -m, w: r.w + 2 * m, h: r.h + 2 * m };
@@ -2491,6 +2683,7 @@ void main() {
               for (const f of maps[i].tables[1].children) f.setAttribute("tableValues", e.tables.down);
               maps[i].cover?.children[0].setAttribute("tableValues", e.tables.cover);
               maps[i].rimPx = e.rimPx;
+              maps[i].zero = zeroResidual(e.tables.across);
             });
             this.margin = entries[0].margin;
             this.mapRect = entries[0].rect;
@@ -2502,6 +2695,7 @@ void main() {
         }
       }
       applies.push(this.shape ? this.drawFieldLight(field, zR, moving, region) : free ? this.drawFreeLight(field, zR) : this.drawLight(zR));
+      if (this.keyed() && (this.key || this.gl)) applies.push(this.drawKeyLight(field));
       this.drawing = [Promise.all(applies).then((fns) => fns.forEach((f) => f?.()))];
     }
     /**
@@ -2634,8 +2828,10 @@ void main() {
         const { x, y } = shares[channel], share = channel === 0 ? Math.max(x, y / 2) : x;
         if (channel !== 1 && this.fringeMaps.length) this.fringeMaps[channel / 2].setAttribute("values", downScale(share ? y / share : 1));
         const rim = 4 * (this.maps[map]?.rimPx ?? 0) * share, scale = +(rim * k).toFixed(3);
+        const zero = this.maps[map]?.zero ?? { x: 0, y: 0 };
         node.setAttribute("scale", String(scale));
-        source.setAttribute("dx", String(scale / 4));
+        source.setAttribute("dx", String(+(scale * (0.25 + zero.x)).toFixed(3)));
+        source.setAttribute("dy", String(+(scale * zero.y).toFixed(3)));
         most2 = Math.max(most2, Math.abs(rim * full) / 2);
       }
       const reach = Math.ceil((most2 + 1) / 4) * 4;
@@ -2643,6 +2839,24 @@ void main() {
         this.reach = reach;
         this.place();
       }
+    }
+    /** The key light's image for the shape, at a pixel per device pixel (it's measured in them), and where it goes. */
+    drawKeyLight(field) {
+      const scale = Math.max(1, devicePixelRatio || 1), o = this.options;
+      const key = [field.w, field.h, scale, this.shape?.key() ?? "", o.shape, o.path, o.cornerRadius, ...this.radii ?? []].join("|");
+      if (key === this.keyKey) return Promise.resolve(() => {
+      });
+      const entry = keyCache.get(key) ?? remember(keyCache, key, (() => {
+        const pixels = keyLightImage(field, scale);
+        return { pixels, url: this.gl ? "" : toDataURL(pixels) };
+      })());
+      const ready = entry.url ? predecode(entry.url) : Promise.resolve();
+      return ready.then(() => () => {
+        this.keyKey = key;
+        this.keyPixels = entry.pixels;
+        this.key?.image.setAttribute("href", entry.url || toDataURL(entry.pixels));
+        this.changed();
+      });
     }
     /**
      * Red's, green's and blue's shares of the lens's shift, across and down: 1, and with fringing macOS's (fringeShares):
@@ -3190,7 +3404,8 @@ void main() {
         for (const n of f.querySelectorAll("*")) {
           parts.push(n.tagName);
           for (const a of n.attributes) {
-            if (src.images.includes(n) && (a.name === "x" || a.name === "y" || a.name === "width" || a.name === "height" || a.name === "href")) continue;
+            const placedImage = src.images.includes(n) || n === src.key?.image;
+            if (placedImage && (a.name === "x" || a.name === "y" || a.name === "width" || a.name === "height" || a.name === "href")) continue;
             if (src.shifts.includes(n) && a.name === "dx") continue;
             if (src.tables.includes(n.parentNode) && a.name === "tableValues") continue;
             if (n.tagName === "feDisplacementMap" && a.name === "scale") {
@@ -3475,6 +3690,22 @@ void main() {
         return { urls, x: left, y: top, w: cv.width / c.kx, h: cv.height / c.ky, tables: c.tables };
       }));
       if (this.destroyed) return;
+      let keyUrl = null;
+      if (looks[0].source.src.key) {
+        const d = devicePixelRatio || 1, cv = document.createElement("canvas");
+        cv.width = Math.max(1, Math.round(w * d));
+        cv.height = Math.max(1, Math.round(h * d));
+        const ctx = cv.getContext("2d");
+        ctx.fillStyle = "#000";
+        ctx.fillRect(0, 0, cv.width, cv.height);
+        for (const l of looks) {
+          const px = l.source.src.key.pixels;
+          ctx.putImageData(new ImageData(px.data, px.width, px.height), Math.round((l.rect.left - x0) * d), Math.round((l.rect.top - y0) * d));
+        }
+        keyUrl = cv.toDataURL();
+        await predecode(keyUrl);
+        if (this.destroyed) return;
+      }
       const mapMargin = Math.max(...looks.map((l) => -l.source.map.y));
       if (!fixed && getComputedStyle(parent).position === "static" && looks.every((l) => l.cs.position === "static" || l.cs.position === "relative")) {
         if (this.implicit && this.savedParentPosition === null && !canPosition(parent, new Set(looks.map((l) => l.m.el)))) return;
@@ -3482,7 +3713,7 @@ void main() {
         parent.style.position = "relative";
       }
       const placed = /* @__PURE__ */ new Map();
-      this.atlas = { w, h, fixed, placed, classes: drawn, mapMargin };
+      this.atlas = { w, h, fixed, placed, classes: drawn, mapMargin, key: keyUrl };
       this.placeLayer(looks[0].cs, fixed, x0, y0, w, h);
       const lr = this.layer.getBoundingClientRect();
       for (const l of looks) {
@@ -3553,6 +3784,10 @@ void main() {
       const anchor = first.children[at];
       for (const n of [...first.children].slice(at + 1, endAt + 1)) n.remove();
       anchor.replaceWith(...nodes);
+      if (src.key && atlas.key) {
+        const at2 = [...src.filters[src.filters.length - 1].children].indexOf(src.key.image);
+        setAttrs(filters[filters.length - 1].children[at2], { x: 0, y: 0, width: atlas.w, height: atlas.h, href: atlas.key });
+      }
       src.shifts.forEach((shift, k) => {
         const shiftAt2 = [...src.filters[1].children].indexOf(shift);
         filters[1].children[shiftAt2].setAttribute("dx", String(-side * (k + 1)));
@@ -3753,7 +3988,8 @@ void main() {
       reduceTransparency: overrides.reduceTransparency ?? !!queries.reduceTransparency?.matches,
       increaseContrast: overrides.increaseContrast ?? !!queries.increaseContrast?.matches,
       reduceMotion: overrides.reduceMotion ?? !!queries.reduceMotion?.matches,
-      wideGamut: overrides.wideGamut ?? (queries.wideGamut ? queries.wideGamut.matches : true)
+      wideGamut: overrides.wideGamut ?? (queries.wideGamut ? queries.wideGamut.matches : true),
+      active: overrides.active ?? (typeof document !== "undefined" && typeof document.hasFocus === "function" ? document.hasFocus() : true)
     };
   }
   function setEnvironment(env) {
@@ -3771,6 +4007,15 @@ void main() {
     if (watching || typeof document === "undefined") return;
     watching = true;
     for (const q of Object.values(queries)) q?.addEventListener("change", refreshAll);
+    let focused = getEnvironment().active;
+    const focus = () => {
+      if (overrides.active !== void 0 || document.hasFocus() === focused) return;
+      focused = document.hasFocus();
+      refreshAll();
+    };
+    window.addEventListener("focus", focus);
+    window.addEventListener("blur", focus);
+    document.addEventListener("visibilitychange", focus);
     new MutationObserver(refreshAll).observe(document.documentElement, { attributes: true, attributeFilter: ["data-glass-theme", "data-glass-appearance"] });
   }
   function observe(lens) {

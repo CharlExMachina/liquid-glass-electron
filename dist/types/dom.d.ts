@@ -40,11 +40,29 @@ export declare function stashNodes(out: string, channels: 2 | 3): {
 /**
  * A map's tables (maps.ts: 0..1 for −largest..+largest shift, `bias` added against Chromium's truncation) for the
  * channels mapNodes puts them in: across at 0.75 ± ¼, down at 0.5 ± ¼. 256 entries each, one per byte of the map's
- * grey, as Chromium bakes them; each a step of a half byte more, so that baking rounds.
+ * grey, as Chromium bakes them.
+ *
+ * Each entry is the byte it should bake to and a quarter more: Chromium truncates when it bakes a table on screen and
+ * rounds off screen, and between a byte and a half more both give that byte (at half a byte more, as these were, no
+ * shift baked to 191 across on screen and 192 off it). No shift bakes to 192 across and 128 down; what a displacement
+ * reads there is zeroResidual's.
  */
 export declare function encodeTables(tableX: number[], tableY: number[], bias: number): {
     across: string;
     down: string;
+};
+/**
+ * What a displacement reads where a map says "no shift" (its grey's byte 128), less what that should be: across 0.75
+ * and down 0.5. Across, the byte the table bakes no shift to (192 with encodeTables'), over 255. Down is premultiplied
+ * by that byte (128 × 192 / 255 = 96.4) and divided by it again when the displacement reads it: off screen Chromium keeps
+ * it as a byte, 96, and it reads ½ exactly; on screen (its GPU raster, measured on a Mac) it reads a quarter of a byte
+ * past ½, as the place a grid's lines are bent to shows (no other amount keeps them all where they are, from small
+ * glass to liquidglass's big lens). Times a scale of a few hundred device px, either is up to a pixel. The
+ * displacement's source is moved by as much the other way.
+ */
+export declare function zeroResidual(across: string): {
+    x: number;
+    y: number;
 };
 /**
  * Decode an image before an feImage or border-image points at it. Swapping an feImage to an image that isn't decoded

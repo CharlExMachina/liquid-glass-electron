@@ -278,6 +278,71 @@ function normal(f: Field, x: number, y: number): [number, number] {
   return [gx / l, gy / l];
 }
 
+/**
+ * macOS's key light (its glass filter's inputKeyFillHighlight*, drawn in a focused window), measured from SwiftUI's
+ * glass over greys: what it adds, in levels of 255, at the top of the glass, every device px from the edge (0.5, 1.5,
+ * …) over glass of level 32. The same at every size: it's in device px, not points.
+ */
+const KEY_LIGHT = [103, 59, 21, 15, 12, 9, 7, 6, 4.5, 4, 3, 2, 1.2, 1, 0.8, 0.3, 0];
+
+/**
+ * How much of the key light there is `d` device px in from an edge whose normal is `deg` degrees from vertical, as a
+ * share of the most (KEY_LIGHT's first): the line at the edge fades as the edge turns sideways and is gone where it
+ * faces sideways; what's further in fades linearly and is gone 48° from vertical (half the filter's spread, 96°).
+ */
+export function keyLightAt(d: number, deg: number): number {
+  if (d < -0.5) return 0;
+  const t = Math.max(d - 0.5, 0), i = Math.min(Math.floor(t), KEY_LIGHT.length - 2);
+  const p = KEY_LIGHT[i] + (KEY_LIGHT[i + 1] - KEY_LIGHT[i]) * Math.min(t - i, 1);
+  const a = Math.min(Math.abs(deg), 90);
+  const line = (1 - a / 90) ** (1.4 + 0.4 * Math.min(t, 1)), tail = Math.max(0, 1 - a / 48);
+  const w = Math.min(Math.max(d - 1.5, 0), 1);
+  return (p / KEY_LIGHT[0]) * (line * (1 - w) + tail * w);
+}
+
+/** The key light over a shape, a grey per device px (`scale` per px of the box): KEY_LIGHT's most is 255. */
+export function keyLightImage(f: Field, scale: number): Pixels {
+  const width = Math.max(1, Math.round(f.w * scale)), height = Math.max(1, Math.round(f.h * scale));
+  const data = new Uint8ClampedArray(width * height * 4);
+  for (let j = 0; j < height; j++) {
+    for (let i = 0; i < width; i++) {
+      const x = (i + 0.5) / scale, y = (j + 0.5) / scale, d = -f.sdf(x, y) * scale, k = (j * width + i) * 4;
+      data[k + 3] = 255;
+      // (nothing past 16 device px in)
+      if (d > KEY_LIGHT.length - 0.5 || d < -0.5) continue;
+      const [, ny] = normal(f, x, y);
+      data[k] = data[k + 1] = data[k + 2] = Math.round(keyLightAt(d, (Math.acos(Math.min(Math.abs(ny), 1)) * 180) / Math.PI) * 255);
+    }
+  }
+  return { width, height, data };
+}
+
+/**
+ * How strongly clear glass shows the key light, by the glass's own level (0..1, after its colour): macOS's light is
+ * strongest over mid-tones and none over white (measured over 17 greys, as a share of what it adds over level 32).
+ */
+const KEY_CLEAR_M = [0, 32, 47, 62, 78, 93, 108, 124, 139, 154, 169, 185, 200, 215, 231, 246, 255];
+const KEY_CLEAR_D = [0.81, 1, 1.09, 1.169, 1.253, 1.344, 1.412, 1.527, 1.56, 1.66, 1.576, 1.366, 1.113, 0.929, 0.676, 0.437, 0];
+/** Regular glass's, whatever its level: this share of clear glass's over level 32. */
+const KEY_REGULAR = 0.585;
+
+/**
+ * The key light's strength by the glass's level, as a table of 33 values over 0..1 (feFuncR's tableValues, and the
+ * shader's): what's added where the image is at its most, times `amount`.
+ */
+export function keyLightTable(clear: boolean, amount: number): number[] {
+  return Array.from({ length: 33 }, (_, k) => {
+    const m = (k / 32) * 255;
+    let d = KEY_REGULAR;
+    if (clear) {
+      let i = 0;
+      while (KEY_CLEAR_M[i + 1] < m) i++;
+      d = KEY_CLEAR_D[i] + (KEY_CLEAR_D[i + 1] - KEY_CLEAR_D[i]) * ((m - KEY_CLEAR_M[i]) / (KEY_CLEAR_M[i + 1] - KEY_CLEAR_M[i]));
+    }
+    return +((d * KEY_LIGHT[0] * amount) / 255).toFixed(4);
+  });
+}
+
 export interface FieldLight {
   /** the light inside the shape, its shadow outside it, and its coverage (for mask-image), all the same size */
   light: Pixels;

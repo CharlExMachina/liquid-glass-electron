@@ -75,15 +75,31 @@ const photo = (name) => {
   return scaled.crop({ x: Math.floor((s.width - W) / 2), y: Math.floor((s.height - H) / 2), width: W, height: H });
 };
 
-/** Writes the backdrops that are missing (all of them with `force`) into test/native/backdrops/. */
+/** The same backdrop at 1× (capture.mjs --scale=1): each pixel the mean of the four it covers. */
+function half(img) {
+  const src = img.toBitmap(), w = W / 2, h = H / 2, out = Buffer.alloc(w * h * 4);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      for (let c = 0; c < 4; c++) {
+        const at = (dx, dy) => src[((2 * y + dy) * W + 2 * x + dx) * 4 + c];
+        out[(y * w + x) * 4 + c] = Math.round((at(0, 0) + at(1, 0) + at(0, 1) + at(1, 1)) / 4);
+      }
+    }
+  }
+  return nativeImage.createFromBitmap(out, { width: w, height: h });
+}
+
+/** Writes the backdrops that are missing (all of them with `force`) into test/native/backdrops/, at 2× and at 1×. */
 export function writeBackdrops({ force = false } = {}) {
   mkdirSync(here('./backdrops'), { recursive: true });
   const all = { ...PATTERNS, coast: () => photo('coast'), ponds: () => photo('ponds'), alps: () => photo('alps'), night: () => photo('night') };
   let n = 0;
   for (const [name, make] of Object.entries(all)) {
-    const file = here(`./backdrops/${name}.png`);
-    if (existsSync(file) && !force) continue;
-    writeFileSync(file, make().toPNG());
+    const file = here(`./backdrops/${name}.png`), small = here(`./backdrops/${name}@1x.png`);
+    if (existsSync(file) && existsSync(small) && !force) continue;
+    const img = existsSync(file) && !force ? nativeImage.createFromPath(file) : make();
+    writeFileSync(file, img.toPNG());
+    writeFileSync(small, half(img).toPNG());
     n++;
   }
   return n;

@@ -54,8 +54,9 @@ Options can also come from data attributes (`data-glass-refraction="0.4"`, `data
 | Apple's button styles | `glassButton(el, 'glass' \| 'prominent')`; accent from `--glass-accent` | `demo/demos/buttons.js` |
 | Glass over video, canvas, CSS animation | Nothing special: it bends whatever is drawn behind it, live | `demo/demos/video.js`, `demo/demos/drag.js` |
 | A website whose glass also bends in Safari and Firefox | Name the picture behind the glass: `backdropSource`. Read [Websites](#websites-safari-and-firefox) first | `demo/web/minimal.html`, `demo/web/web.js` |
-| Apple's glass as macOS 27 draws it | `variant: 'regular'` or `'clear'` (both frosted, `clear` more so with less colour, a lens along the rim; measured against SwiftUI's own, `pnpm test:native`); no variant for liquidglass's sharp bending; `blurAmount` for your own frost | `demo/demos/appearance.js`, `native/Glass.swift` |
+| Apple's glass as macOS 27 draws it | `variant: 'regular'` or `'clear'` (both frosted, `clear` more so with less colour, a lens along the rim; in a focused window as macOS draws them there, `clear` unfrosted; measured against SwiftUI's own, `pnpm test:native`); no variant for liquidglass's sharp bending; `blurAmount` for your own frost | `demo/demos/appearance.js`, `native/Glass.swift` |
 | Dark mode, Tinted, accessibility | `setEnvironment({ dark, appearance: 'tinted', reduceTransparency, increaseContrast, reduceMotion })` | `demo/demos/appearance.js` |
+| Glass that looks as macOS's does in the window in use (clear glass unfrosted, both lit along their edges) | automatic: the variants follow `document.hasFocus()`; `setEnvironment({ active: true })` (or `false`) fixes it, e.g. for screenshots | `demo/demos/appearance.js` |
 | Every knob at once | the playground: it prints the `glass()` call for what you set | `demo/demos/playground.js` |
 
 ## What's cheap, what isn't

@@ -15,7 +15,8 @@
 //                                    open yourself (on this machine, or with --host on another: a phone, Windows)
 //   pnpm test:web --timeout=300      seconds a browser has to finish (120)
 //   pnpm test:web --case=defaults    one case (or several: --case=edge,late)
-//   pnpm test:web --calibrate        write limits.json from what the glass measures now, with room
+//   pnpm test:web --calibrate        write limits.json from what the glass measures now, with room (one set holds at 1×
+//                                    and 2×, macOS's scales: calibrate at each and keep the larger)
 //   pnpm test:web --self-check       bend half as much again on purpose; fails unless the cases that bend catch it
 //   pnpm test:web --scale=2          the device scale to draw the reference at (the browsers' windows must be at it)
 import { app, BrowserWindow, nativeImage, nativeTheme } from 'electron';

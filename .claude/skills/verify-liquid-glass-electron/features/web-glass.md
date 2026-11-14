@@ -22,6 +22,7 @@ pnpm test:web                      # 27 cases × Electron, Safari, Firefox, and 
 pnpm test:web --case=regulardark   # one case
 pnpm test:web --self-check         # must print: 27 of 27 cases caught the glass bent wrong
 pnpm bench:web safari,firefox glass idle,move,scroll,n30,video
+pnpm test:native --gl              # on a Mac: the shader's glass against SwiftUI's own (test/native/reference/)
 ```
 
 `ok   defaults  mean 1.89  rim 1.79  outliers 0.02%` means: inside the glass, the shader's pixels differ from the
@@ -34,7 +35,13 @@ all within `test/web/limits.json`. After a change meant to move the glass, `--ca
   and on a display whose profile has another tone curve than sRGB's that moves what's under the glass.
 - The page reads the glass's canvas back, which holds the bending only: the light, shadow and outline are off in the
   cases (they're CSS in both paths). To see the whole, open `pnpm demo:web`.
-- At a device scale other than 1, pass `--scale=2`, so the reference is drawn at the browsers' scale.
+- At a device scale other than 1, pass `--scale=2`, so the reference is drawn at the browsers' scale (on a Retina Mac,
+  Safari and Firefox are at 2×: without it every case fails on its size). The limits hold at 1× and 2×.
+- The shader is held to macOS by `test:native --gl`, the compositor by `test:native`; test:web holds them to each other.
+  Where they differ it's the compositor that can't follow macOS: it bends at the nearest pixel, where macOS (and the
+  shader) read between the samples of a copy at one per point.
+- The shader draws glass between device pixels from the nearest one, as the compositor and macOS do (its canvas is
+  snapped there by the browser): `capsule-clear-light-ponds-sharp-at0.25` in test:native is that.
 - Firefox started as a child of a script reports its profile missing on a Mac; the runners start it through
   `open -na` there (on Linux, directly).
 - The edge cases (`edge`, `edgefrost`) compare what the shader drew and count what it left clear (`clear` in

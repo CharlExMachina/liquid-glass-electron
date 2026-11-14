@@ -49,7 +49,10 @@ export interface GlFrame {
   /** the frost, σ px; and macOS's blur fill, laid over it */
   sigma: number;
   fill: { sigma: number; alpha: number; darken: boolean } | null;
-  /** the 3 × 3 smoothing (glass with no frost) */
+  /**
+   * Glass with no frost, smoothed: it bends the backdrop as macOS's glass does, a copy of it at one sample per CSS px
+   * (each the mean of the device pixels in it), read between its samples
+   */
   smooth: boolean;
   /** the colour matrix, as feColorMatrix's 20 values (its first three rows count) */
   matrix: number[];
@@ -57,6 +60,8 @@ export interface GlFrame {
   cap: number | null;
   opacity: number;
   surface: { urls: [string, string]; strength: number } | null;
+  /** macOS's key light: its image (a grey over the element) and the table of how strong it is by the glass's level */
+  key: { pixels: Pixels; table: number[] } | null;
   /** cut the glass to the shape in the map's blue channel */
   cover: boolean;
   /** work in Display P3, as Chromium does on a wide-gamut display (the variants' colour is fitted there) */
@@ -187,19 +192,19 @@ void main() {
 // and shape.
 const GLASS = `#version 300 es
 precision highp float;
-uniform sampler2D uBack, uWide, uMap, uTab, uGain, uOffset;
+uniform sampler2D uBack, uWide, uMap, uTab, uGain, uOffset, uKey;
+uniform float uKeyTab[33];  // the key light's strength by the glass's level (keyLightTable); uKeyOn, whether there's any
 uniform vec4 uTabInfo;      // entries, bias, rimPx
 uniform vec3 uKx, uKy;      // red, green, blue: times the map's shift across, and down
 uniform vec2 uSize;         // the element, px
 uniform vec4 uMapRect;
 uniform vec4 uToUv;         // the element's px to the backdrop texture's uv
 uniform vec2 uGx, uGy;      // the backdrop's uv per device pixel
-uniform float uPixel;       // a device pixel, in the element's px
 uniform vec2 uEdge;         // a device pixel in the backdrop's uv, where its edge is the picture's (0: it has the picture's edge in it, the frost's)
 uniform mat3 uColour;
 uniform vec3 uColourOffset;
 uniform float uFill, uCap, uOpacity, uSurface;
-uniform bool uFlip, uSmooth, uDarken, uFringe, uCover;
+uniform bool uFlip, uDarken, uFringe, uCover, uKeyOn;
 in vec2 v;
 out vec4 o;
 
@@ -214,14 +219,7 @@ vec4 tap(vec2 p) {
 
 // the backdrop the glass bends, not premultiplied (the frost, and macOS's blur fill laid over it)
 vec4 raw(vec2 p) {
-  vec4 c;
-  if (uSmooth) {
-    // four taps half a pixel out, each the mean of four pixels: the 3 x 3 kernel 1 2 1, 2 4 2, 1 2 1
-    vec2 d = vec2(uPixel * 0.5);
-    c = 0.25 * (tap(p + d) + tap(p - d) + tap(p + vec2(d.x, -d.y)) + tap(p + vec2(-d.x, d.y)));
-  } else {
-    c = tap(p);
-  }
+  vec4 c = tap(p);
   if (c.a <= 0.0) return vec4(0.0);
   vec3 s = c.rgb / c.a;
   if (uFill > 0.0) {
@@ -272,6 +270,16 @@ void main() {
   if (uSurface > 0.0 && col.a > 0.0) {
     float gain = textureLod(uGain, p / uSize, 0.0).r, offset = textureLod(uOffset, p / uSize, 0.0).r;
     col.rgb = clamp(col.rgb / col.a * (1.0 - uSurface + uSurface * gain) + uSurface * (offset - 0.5), 0.0, 1.0) * col.a;
+  }
+  if (uKeyOn && col.a > 0.0) {
+    // macOS's key light, as the filter adds it: the image times the table at each channel's level
+    float k = textureLod(uKey, p / uSize, 0.0).r;
+    vec3 m = clamp(col.rgb / col.a, 0.0, 1.0) * 32.0, add;
+    for (int c = 0; c < 3; c++) {
+      int i = int(min(floor(m[c]), 31.0));
+      add[c] = mix(uKeyTab[i], uKeyTab[i + 1], m[c] - float(i));
+    }
+    col.rgb = min(col.rgb + add * k * col.a, vec3(col.a));
   }
   // (where the glass sees none of the picture, none of it is drawn: what's under its canvas shows)
   o = col * (uCover ? clamp((edge * 255.0 - 128.0) / 8.0 + 0.5, 0.0, 1.0) : 1.0);
@@ -347,6 +355,7 @@ class Renderer {
     this.sources = new WeakMap();
     this.mapTextures = new WeakMap();
     this.tableTextures = new WeakMap();
+    this.keyTextures = new WeakMap();
     this.images = new Map();
     this.maxTexture = Math.min(gl.getParameter(gl.MAX_TEXTURE_SIZE) as number, 8192);
     this.copy = this.link(COPY);
@@ -383,8 +392,11 @@ class Renderer {
     return 'drawingBufferColorSpace' in this.gl && 'unpackColorSpace' in this.gl;
   }
 
-  /** The colour space the shader's numbers are in. */
-  private colourSpace(wide: boolean) {
+  /**
+   * The colour space the shader's numbers are in. Set before a source is read for a draw: a change uploads the sources
+   * again, and a draw from one unpacked for the other space would have its colours wrong until the glass changed.
+   */
+  colourSpace(wide: boolean) {
     const gl = this.gl as WebGL2RenderingContext & { drawingBufferColorSpace?: string; unpackColorSpace?: string };
     const p3 = wide && this.canWide;
     if (p3 === this.p3) return;
@@ -526,6 +538,19 @@ class Renderer {
     return t;
   }
 
+  private keyTextures = new WeakMap<Pixels, WebGLTexture>();
+  private keyTexture(p: Pixels) {
+    const gl = this.gl;
+    let t = this.keyTextures.get(p);
+    if (!t) {
+      t = this.texture(gl.LINEAR);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, p.width, p.height, 0, gl.RGBA, gl.UNSIGNED_BYTE, p.data as Uint8ClampedArray<ArrayBuffer>);
+      this.keyTextures.set(p, t);
+      this.gone.register(p, t);
+    }
+    return t;
+  }
+
   private tableTexture(m: GlMap) {
     const gl = this.gl;
     let t = this.tableTextures.get(m);
@@ -583,12 +608,19 @@ class Renderer {
 
   /**
    * The backdrop around the glass (`pad` px past it on each side), blurred by σ px: at a resolution the blur can't
-   * tell from full, so its kernel stays 25 taps whatever σ is.
+   * tell from full, so its kernel stays 25 taps whatever σ is. σ 0: not blurred, at one texel per px (macOS's glass
+   * bends a copy of its backdrop at one sample per point, each the mean of the device pixels in it).
    */
-  private frosted(src: SourceEntry, f: GlFrame, toUv: number[], shown: number[], scale: number, sigma: number, pad: number, slot: number): { texture: WebGLTexture; region: Box } {
+  private frosted(src: SourceEntry, f: GlFrame, toUv: number[], shown: number[], scale: number, sigma: number, pad: number, slot: number, grid = { x: 0, y: 0 }): { texture: WebGLTexture; region: Box } {
     const gl = this.gl;
-    const texels = sigma * scale, q = Math.min(1, 2 ** -Math.ceil(Math.log2(Math.max(texels, 1e-3) / 4)));
-    const region = { x: -pad, y: -pad, w: f.w + 2 * pad, h: f.h + 2 * pad };
+    const texels = sigma * scale, q = sigma > 0 ? Math.min(1, 2 ** -Math.ceil(Math.log2(Math.max(texels, 1e-3) / 4))) : 1 / scale;
+    // (starting `grid` px further up and left: a copy at one texel per px has its texels on the page's px)
+    const region = { x: -pad - grid.x, y: -pad - grid.y, w: f.w + 2 * pad + grid.x, h: f.h + 2 * pad + grid.y };
+    // (and a whole number of them)
+    if (sigma <= 0) {
+      region.w = Math.ceil(region.w - 1e-4);
+      region.h = Math.ceil(region.h - 1e-4);
+    }
     const w = Math.max(2, Math.round(region.w * scale * q)), h = Math.max(2, Math.round(region.h * scale * q));
     const a = this.target(w, h, slot), b = this.target(w, h, slot + 1);
     gl.useProgram(this.copy.program);
@@ -600,6 +632,7 @@ class Renderer {
     gl.uniform2f(this.copy.at.uGy, 0, (toUv[1] * region.h) / h);
     gl.uniform4f(this.copy.at.uShown, shown[0], shown[1], shown[2], shown[3]);
     this.run(a, 0, 0, w, h);
+    if (sigma <= 0) return { texture: a.texture, region };
     gl.useProgram(this.blur.program);
     gl.uniform1i(this.blur.at.uTex, 0);
     gl.uniform1f(this.blur.at.uSigma, Math.max(texels * q, 0.05));
@@ -621,7 +654,6 @@ class Renderer {
     const gl = this.gl;
     if (this.lost || gl.isContextLost()) return false;
     this.sweep();
-    this.colourSpace(jobs[0].f.wideGamut);
     const LIMIT = Math.min(this.maxTexture, 4096);
     for (let from = 0; from < jobs.length;) {
       // in rows, as many as fit one canvas
@@ -681,6 +713,15 @@ class Renderer {
       gy = [0, 0];
       // the wide blur's texture has the same place (the same region), whatever its own resolution
       if (f.fill && f.fill.alpha > 0) wide = this.frosted(src, f, toUv, shown, scale, f.fill.sigma, pad, 2).texture;
+    } else if (f.smooth) {
+      // macOS's: a copy at one sample per px, read between its samples. Its samples are the window's points, not the
+      // glass's: they start on a whole px of the viewport
+      const frac = (v: number) => v - Math.floor(v + 1e-4);
+      const point = this.frosted(src, f, toUv, shown, scale, 0, Math.ceil(f.reach) + 2, 0, { x: frac(glassBox.x) / sx, y: frac(glassBox.y) / sy });
+      back = point.texture;
+      backToUv = [1 / point.region.w, 1 / point.region.h, -point.region.x / point.region.w, -point.region.y / point.region.h];
+      gx = [0, 0];
+      gy = [0, 0];
     }
     const p = this.glass, at = p.at;
     gl.useProgram(p.program);
@@ -701,7 +742,10 @@ class Renderer {
       this.bind(4, back);
       this.bind(5, back);
     }
-    ['uBack', 'uWide', 'uMap', 'uTab', 'uGain', 'uOffset'].forEach((name, unit) => gl.uniform1i(at[name], unit));
+    this.bind(6, f.key ? this.keyTexture(f.key.pixels) : back);
+    ['uBack', 'uWide', 'uMap', 'uTab', 'uGain', 'uOffset', 'uKey'].forEach((name, unit) => gl.uniform1i(at[name], unit));
+    gl.uniform1i(at.uKeyOn, f.key ? 1 : 0);
+    if (f.key) gl.uniform1fv(at.uKeyTab, f.key.table);
     gl.uniform4f(at.uTabInfo, f.map.tableX.length, f.map.bias, f.map.rimPx, 0);
     gl.uniform3f(at.uKx, f.kx[0], f.kx[1], f.kx[2]);
     gl.uniform3f(at.uKy, f.ky[0], f.ky[1], f.ky[2]);
@@ -710,7 +754,6 @@ class Renderer {
     gl.uniform4f(at.uToUv, backToUv[0], backToUv[1], backToUv[2], backToUv[3]);
     gl.uniform2f(at.uGx, gx[0], gx[1]);
     gl.uniform2f(at.uGy, gy[0], gy[1]);
-    gl.uniform1f(at.uPixel, 1 / scale);
     gl.uniform2f(at.uEdge, gx[0], gy[1]);
     gl.uniform4f(at.uShown, shown[0], shown[1], shown[2], shown[3]);
     const m = f.matrix;
@@ -722,7 +765,6 @@ class Renderer {
     gl.uniform1f(at.uOpacity, f.opacity);
     gl.uniform1f(at.uSurface, surface);
     gl.uniform1i(at.uFlip, 1);
-    gl.uniform1i(at.uSmooth, f.smooth && f.sigma <= 0.01 ? 1 : 0);
     gl.uniform1i(at.uDarken, f.fill?.darken ? 1 : 0);
     gl.uniform1i(at.uFringe, [0, 2].some((c) => f.kx[c] !== f.kx[1] || f.ky[c] !== f.ky[1]) ? 1 : 0);
     gl.uniform1i(at.uCover, f.cover ? 1 : 0);
@@ -924,6 +966,7 @@ export class GlGlass {
   prepare(): Job | null {
     const f = this.host.frame();
     const r = renderer();
+    if (f) r.colourSpace(f.wideGamut);
     const src = f ? r.source(this.source) : null;
     if (src?.failed) {
       this.host.failed();
@@ -968,8 +1011,11 @@ export class GlGlass {
       this.canvas.height = ch;
     }
     this.ctx ??= this.canvas.getContext('2d', f.wideGamut && r.canWide ? { colorSpace: 'display-p3' } : undefined)!;
+    // The canvas's pixels start on a device pixel: glass between them is drawn from the nearest (as the compositor
+    // draws its glass, and macOS's), so what's under each of its pixels is read from there.
+    const snap = (v: number) => Math.round(v * dpr) / dpr;
     return {
-      f, src: src!, glassBox: box, sourceBox, shown, cw, ch, out: this.ctx,
+      f, src: src!, glassBox: { ...box, x: snap(box.x), y: snap(box.y) }, sourceBox, shown, cw, ch, out: this.ctx,
       redraw: () => this.invalidate(),
       done: () => {
         this.dirty = false;

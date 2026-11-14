@@ -1,5 +1,5 @@
 import { type Field } from './field.js';
-import { type MapGrid } from './maps.js';
+import { type MapGrid, type Pixels } from './maps.js';
 import { type Environment, type GlassOptions } from './options.js';
 export interface LensHost {
     env(): Environment;
@@ -42,6 +42,9 @@ export declare class Lens {
     private blurNode;
     private mixNode;
     private surface;
+    private key;
+    private keyPixels;
+    private keyKey;
     private filterCss;
     private structure;
     private following;
@@ -112,6 +115,7 @@ export declare class Lens {
      * What a group needs to draw this element's glass in a filter of its own, or null if it can't: glass that doesn't
      * bend, a free shape, a dome's per-channel maps, noise (it's in the filter's coordinates), CSS filters in front, a
      * surface (images in the element's box), glass with glass inside (it paints on a layer of its own), or no map yet.
+     * `key`: the key light's image and its pixels, which the group draws over its own layer for each member.
      * `filters` are the element's own filter elements (the group copies them), `images` its map's (a grey per channel),
      * `side` how far the map is stashed beside the element, `margin` how far the filters reach past it (and `right`, past
      * its right side, which can be further).
@@ -126,6 +130,10 @@ export declare class Lens {
         right: number;
         grid: MapGrid;
         mapMargin: number;
+        key: {
+            image: SVGFEImageElement;
+            pixels: Pixels;
+        } | null;
     } | null;
     /** What, in the options, decides which filter nodes there are. */
     private structureKey;
@@ -145,6 +153,10 @@ export declare class Lens {
     private live;
     /** The surface's images and, at strength s, its gain and offset: a gain of 1 − s·(1 − g), an offset of s·(o − ½). */
     private applySurface;
+    /** Whether there's macOS's key light. */
+    private keyed;
+    /** The key light's table at the current strength: clear glass's by its level, any other's the same throughout. */
+    private keyTable;
     /** The strength, 0..1. */
     private amount;
     /** Follow running transitions and animations of --glass-* properties on the element, a frame at a time. */
@@ -170,6 +182,14 @@ export declare class Lens {
     private mixesColour;
     /** Whether macOS's blur fill applies (regular glass, bevelMode 4). */
     private filled;
+    /**
+     * macOS's shadow under regular glass in a focused window (its glass filter's inputShadow*): the glass's shape blurred
+     * by σ, 8 px down, at an opacity, both growing with the shorter side from 64 to 160 px (σ 3.3 to 20, 0.011 to 0.114,
+     * half as much again in the dark), as measured over white. None while the glass has a shadow of its own.
+     */
+    private macShadow;
+    /** macOS's cap on dark regular glass's luma: a little higher in a focused window. */
+    private maxLuma;
     /** Whether macOS's cap on dark regular glass's brightness applies. */
     private capped;
     /** The cap's table: from 0.5 + luma / 2 (in alpha) to the share of the colour kept, at the current strength. */
@@ -205,6 +225,8 @@ export declare class Lens {
      */
     private applyLight;
     private applyStrength;
+    /** The key light's image for the shape, at a pixel per device pixel (it's measured in them), and where it goes. */
+    private drawKeyLight;
     /**
      * Red's, green's and blue's shares of the lens's shift, across and down: 1, and with fringing macOS's (fringeShares):
      * Δ px further or short at the rim, falling off inward as the shift does.

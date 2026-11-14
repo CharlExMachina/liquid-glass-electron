@@ -97,6 +97,13 @@ export interface GlassOptions {
   outline: number;
   outlineTop: number;
   /**
+   * macOS's light along the glass's top and bottom edges, which it draws in a focused window: 1 = its own, 0 none;
+   * null (the default) = macOS's for the variants in a focused window (Environment.active), none otherwise. Bright at
+   * the edge and gone 15 device px in, strongest where the edge faces up or down; on clear glass stronger over
+   * mid-tones than over black or white, as macOS's is.
+   */
+  keyLight: number | null;
+  /**
    * rect (cornerRadius), capsule, circle, concentric (the radius of the glass it sits in, less the inset), squircle
    * (Apple's continuous corners, of cornerRadius), or path (any shape: `path`)
    */
@@ -156,6 +163,7 @@ export const DEFAULTS: GlassOptions = {
   colorMatrix: null,
   outline: 0,
   outlineTop: 0,
+  keyLight: null,
   shape: 'rect',
   path: null,
   pathBox: null,
@@ -188,7 +196,7 @@ export const VARIANTS: Record<Variant, Partial<GlassOptions>> = {
 
 const NUMBERS = ['blurAmount', 'refraction', 'chromAberration', 'edgeHighlight', 'specular', 'fresnel', 'distortion', 'cornerRadius',
   'zRadius', 'opacity', 'saturation', 'tintStrength', 'brightness', 'baseBrightness', 'shadowOpacity', 'shadowSpread', 'shadowOffsetY', 'bevelMode',
-  'pressBulge', 'strength', 'elasticity', 'outline', 'outlineTop'] as const;
+  'pressBulge', 'strength', 'elasticity', 'outline', 'outlineTop', 'keyLight'] as const;
 const BOOLEANS = ['floating', 'button', 'interactive', 'smooth', 'magnify', 'adaptive', 'group'] as const;
 const STRINGS = ['variant', 'tint', 'fill', 'surface', 'shape', 'press', 'path', 'pathBox', 'backdrop', 'backdropSource', 'colorMatrix'] as const;
 const ALL: readonly string[] = [...NUMBERS, ...BOOLEANS, ...STRINGS];
@@ -295,6 +303,11 @@ export interface Environment {
   reduceMotion: boolean;
   /** the display is wide-gamut (Display P3), where Chromium composites in its colour space; unset counts as wide */
   wideGamut?: boolean;
+  /**
+   * the window has focus: macOS draws its glass otherwise in the window in use (its key window) than in the others
+   * (clear glass without frost and brighter); unset counts as focused
+   */
+  active?: boolean;
 }
 
 /** The options from every source, then adjusted for the system's settings. */
@@ -363,6 +376,52 @@ export const MACOS_COLOUR: Record<'regular' | 'clear', Record<'p3' | 'srgb', [nu
 };
 
 /**
+ * macOS 27's clear glass in a focused window (Environment.active), fitted as MACOS_COLOUR is, to the flat colours and
+ * greys under SwiftUI's glass made key (to within half a level): brighter and a little more saturated than in a window
+ * that isn't, the same in light and dark (its glass filter's inputFaceColorMatrix: white 1.08, black 0.125, saturation
+ * 1.06; what passes white is clipped). The sRGB one is the Display P3 one carried over to sRGB's values.
+ */
+export const MACOS_COLOUR_ACTIVE: Record<'regular' | 'clear', Record<'p3' | 'srgb', [number[], number[]]>> = {
+  // regular glass 160 px and larger (smaller, see MACOS_SMALL_ACTIVE), brighter than in a window that isn't focused;
+  // dark, under a cap on its luma a little higher than there (lens.ts)
+  regular: {
+    p3: [
+      [1.0274, -0.3707, -0.0325, 0.415, -0.1186, 0.7848, -0.0419, 0.4163, -0.1104, -0.3791, 1.1137, 0.415],
+      [1.0179, -0.3306, -0.0207, 0.1435, -0.0294, 0.6636, 0.0137, 0.1425, -0.0952, -0.3172, 1.089, 0.1434],
+    ],
+    srgb: [
+      [0.9786, -0.3594, -0.0255, 0.4315, -0.0908, 0.7529, -0.035, 0.4137, -0.0895, -0.3818, 1.0725, 0.4247],
+      [1.013, -0.3208, -0.0283, 0.1408, -0.04, 0.6694, 0.0154, 0.142, -0.1095, -0.3186, 1.1051, 0.1367],
+    ],
+  },
+  clear: {
+    p3: [
+      [1.0394, -0.0766, -0.0071, 0.1246, -0.0229, 0.9865, -0.0079, 0.1247, -0.0209, -0.0755, 1.0521, 0.1248],
+      [1.0394, -0.0766, -0.0071, 0.1246, -0.0229, 0.9865, -0.0079, 0.1247, -0.0209, -0.0755, 1.0521, 0.1248],
+    ],
+    srgb: [
+      [1.0035, -0.0599, -0.0064, 0.1392, -0.011, 0.969, -0.0066, 0.1283, -0.0158, -0.0661, 1.0232, 0.1354],
+      [1.0035, -0.0599, -0.0064, 0.1392, -0.011, 0.969, -0.0066, 0.1283, -0.0158, -0.0661, 1.0232, 0.1354],
+    ],
+  },
+};
+
+/**
+ * Focused regular glass's colour at 64 px and smaller, light and dark: between 64 and 160 px (dark, 104) it goes from
+ * this to MACOS_COLOUR_ACTIVE's (lens.ts).
+ */
+export const MACOS_SMALL_ACTIVE: Record<'p3' | 'srgb', [number[], number[]]> = {
+  p3: [
+    [1.0389, -0.405, -0.0388, 0.4036, -0.1215, 0.7577, -0.0411, 0.4039, -0.1196, -0.403, 1.1183, 0.4035],
+    [1.0699, -0.3265, -0.0383, 0.1598, -0.0506, 0.7588, -0.0082, 0.1569, -0.1053, -0.3247, 1.1382, 0.1616],
+  ],
+  srgb: [
+    [1.013, -0.4117, -0.0347, 0.4179, -0.0941, 0.7274, -0.0341, 0.4003, -0.0995, -0.4193, 1.0947, 0.4113],
+    [1.0743, -0.3315, -0.0434, 0.1561, -0.0557, 0.7591, -0.0049, 0.1554, -0.1168, -0.3384, 1.1617, 0.1545],
+  ],
+};
+
+/**
  * Dark regular glass's colour at 64 px and smaller: brighter than large glass's (macOS caps it less, see macMaxLuma);
  * between 64 and 104 px it goes from this to MACOS_COLOUR's (lens.ts).
  */
@@ -371,20 +430,46 @@ export const MACOS_SMALL_DARK: Record<'p3' | 'srgb', number[]> = {
   srgb: [1.1322, -0.3705, 0.0417, 0.0906, -0.0471, 0.8063, 0.0327, 0.0978, -0.0684, -0.3061, 1.176, 0.0961],
 };
 
-/** macOS's outline in the dark: darker, where light glass's is lighter. */
-const DARK_OUTLINE: Record<'regular' | 'clear', [number, number]> = { regular: [0.605, 0.41], clear: [0.49, 0] };
+/**
+ * macOS's outline in the dark: darker, where light glass's is lighter. macOS's darkens what's behind it more the darker
+ * that is (over a grey x, clear light glass's is about x × (¼ + x/2)), and a box-shadow can only scale it: regular
+ * glass's is the opacity closest to macOS's over the tones of photos (test/native's), from its outline over nine greys
+ * (the others, fitted so, came out further from macOS's around curves, where the shadows across and down overlap).
+ */
+const DARK_OUTLINE: Record<'regular' | 'clear', [number, number]> = { regular: [0.498, 0.339], clear: [0.49, 0] };
+
+/**
+ * macOS's outline in a focused window, light and dark: fitted as DARK_OUTLINE's regular one, from its outline over nine
+ * greys around a circle (the sides', and the top's). Regular glass's is darker at the sides there and, in the dark, all
+ * but gone at the top; clear glass's is the same light or dark.
+ */
+const ACTIVE_OUTLINE: Record<'regular' | 'clear', [[number, number], [number, number]]> = {
+  regular: [[0.444, 0.183], [0.576, 0.089]],
+  clear: [[0.393, 0], [0.393, 0]],
+};
 
 /** The automatic fills, for light and dark. */
 function finishFill(o: GlassOptions, env: Environment): GlassOptions {
-  if (o.colorMatrix === 'auto') o.colorMatrix = MACOS_COLOUR[o.variant === 'clear' ? 'clear' : 'regular'][env.wideGamut === false ? 'srgb' : 'p3'][env.dark ? 1 : 0];
-  else if (o.colorMatrix !== null) {
+  const active = env.active !== false;
+  if (o.colorMatrix === 'auto') {
+    const table = (active ? MACOS_COLOUR_ACTIVE : MACOS_COLOUR)[o.variant === 'clear' ? 'clear' : 'regular'];
+    o.colorMatrix = table[env.wideGamut === false ? 'srgb' : 'p3'][env.dark ? 1 : 0];
+  } else if (o.colorMatrix !== null) {
     const m = typeof o.colorMatrix === 'string' ? o.colorMatrix.split(/[\s,]+/).filter(Boolean).map(Number) : o.colorMatrix;
     o.colorMatrix = Array.isArray(m) && m.length === 12 && m.every(Number.isFinite) ? m : null;
   }
-  // the variants' outline, darker in the dark (an outline of your own stays as it is)
-  if (env.dark && (o.variant === 'regular' || o.variant === 'clear')) {
+  // In a focused window macOS's clear glass has no frost (its blur, 0): only its lens shows (frost of your own stays)
+  if (active && o.variant === 'clear' && o.blurAmount === VARIANTS.clear.blurAmount) o.blurAmount = 0;
+  // and the variants have its light along their top and bottom edges
+  o.keyLight ??= active && (o.variant === 'regular' || o.variant === 'clear') ? 1 : 0;
+  // the variants' outline, darker in the dark, and as macOS draws it in a focused window (an outline of your own stays
+  // as it is)
+  if (o.variant === 'regular' || o.variant === 'clear') {
     const v = VARIANTS[o.variant];
-    if (o.outline === v.outline && o.outlineTop === v.outlineTop) [o.outline, o.outlineTop] = DARK_OUTLINE[o.variant];
+    if (o.outline === v.outline && o.outlineTop === v.outlineTop) {
+      if (active) [o.outline, o.outlineTop] = ACTIVE_OUTLINE[o.variant][env.dark ? 1 : 0];
+      else if (env.dark) [o.outline, o.outlineTop] = DARK_OUTLINE[o.variant];
+    }
   }
   const fills: Record<string, [string, string]> = {
     auto: ['rgb(255 255 255 / 0.1)', 'rgb(20 20 24 / 0.12)'],

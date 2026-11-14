@@ -70,6 +70,8 @@ interface Atlas {
   placed: Map<HTMLElement, string>;
   classes: { urls: string[]; x: number; y: number; w: number; h: number; tables: SVGFEComponentTransferElement[] }[];
   mapMargin: number;
+  /** the members' key light (macOS's, GlassOptions.keyLight) over the whole layer, at a pixel per device pixel */
+  key: string | null;
 }
 
 export interface GroupHost {
@@ -232,7 +234,8 @@ export class GlassGroup {
       for (const n of f.querySelectorAll('*')) {
         parts.push(n.tagName);
         for (const a of n.attributes) {
-          if (src.images.includes(n as SVGFEImageElement) && (a.name === 'x' || a.name === 'y' || a.name === 'width' || a.name === 'height' || a.name === 'href')) continue;
+          const placedImage = src.images.includes(n as SVGFEImageElement) || n === src.key?.image;
+          if (placedImage && (a.name === 'x' || a.name === 'y' || a.name === 'width' || a.name === 'height' || a.name === 'href')) continue;
           if (src.shifts.includes(n as SVGFEOffsetElement) && a.name === 'dx') continue;
           if (src.tables.includes(n.parentNode as SVGFEComponentTransferElement) && a.name === 'tableValues') continue;
           // elements of different sizes differ in the shift's scale in the fifth digit: shared, that moves a sample
@@ -543,6 +546,23 @@ export class GlassGroup {
       return { urls, x: left, y: top, w: cv.width / c.kx, h: cv.height / c.ky, tables: c.tables };
     }));
     if (this.destroyed) return;
+    // the key light: each member's image where it is in the layer, in one image as big as the layer
+    let keyUrl: string | null = null;
+    if (looks[0].source!.src.key) {
+      const d = devicePixelRatio || 1, cv = document.createElement('canvas');
+      cv.width = Math.max(1, Math.round(w * d));
+      cv.height = Math.max(1, Math.round(h * d));
+      const ctx = cv.getContext('2d')!;
+      ctx.fillStyle = '#000';
+      ctx.fillRect(0, 0, cv.width, cv.height);
+      for (const l of looks) {
+        const px = l.source!.src.key!.pixels;
+        ctx.putImageData(new ImageData(px.data as Uint8ClampedArray<ArrayBuffer>, px.width, px.height), Math.round((l.rect.left - x0) * d), Math.round((l.rect.top - y0) * d));
+      }
+      keyUrl = cv.toDataURL();
+      await predecode(keyUrl);
+      if (this.destroyed) return;
+    }
     const mapMargin = Math.max(...looks.map((l) => -l.source!.map.y));
     // where the layer goes: over the members, in its containing block's px
     if (!fixed && getComputedStyle(parent).position === 'static' && looks.every((l) => l.cs.position === 'static' || l.cs.position === 'relative')) {
@@ -553,7 +573,7 @@ export class GlassGroup {
       parent.style.position = 'relative';
     }
     const placed = new Map<HTMLElement, string>();
-    this.atlas = { w, h, fixed, placed, classes: drawn, mapMargin };
+    this.atlas = { w, h, fixed, placed, classes: drawn, mapMargin, key: keyUrl };
     this.placeLayer(looks[0].cs, fixed, x0, y0, w, h);
     // the members as they are in it, relative to its corner (the planned ones that haven't moved meanwhile)
     const lr = this.layer.getBoundingClientRect();
@@ -635,6 +655,11 @@ export class GlassGroup {
     const anchor = first.children[at];
     for (const n of [...first.children].slice(at + 1, endAt + 1)) n.remove();
     anchor.replaceWith(...nodes);
+    if (src.key && atlas.key) {
+      // the key light over the whole layer (the copy of a member's image is where that member's own filter has it)
+      const at = [...src.filters[src.filters.length - 1].children].indexOf(src.key.image);
+      setAttrs(filters[filters.length - 1].children[at], { x: 0, y: 0, width: atlas.w, height: atlas.h, href: atlas.key });
+    }
     src.shifts.forEach((shift, k) => {
       const shiftAt = [...src.filters[1].children].indexOf(shift);
       filters[1].children[shiftAt].setAttribute('dx', String(-side * (k + 1)));
