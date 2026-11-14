@@ -70,7 +70,7 @@ function surfaceImages(w, h) {
 
 async function show(c) {
   document.body.replaceChildren();
-  setEnvironment({ dark: !!c.dark, wideGamut: false, appearance: 'clear', reduceTransparency: false, increaseContrast: false, reduceMotion: true });
+  setEnvironment({ dark: !!c.dark, wideGamut: false, appearance: 'clear', reduceTransparency: false, increaseContrast: false, reduceMotion: true, active: false });
   // what happens to the source after glass(): only where the shader draws (the reference is over the picture as it ends up)
   const gl = mode === 'gl', late = gl && c.late, retry = gl && c.retry, replace = gl && c.replace;
   const img = picture(c, replace || c.photo);

@@ -95,16 +95,19 @@ export function switchLens(d: number, half: number) {
 }
 
 /**
- * macOS 27's lens, measured from SwiftUI's glassEffect over ramps of known levels (test/native): the inward shift along
- * the edge's normal, as a share of the lens's amount, at these depths in units of its height. Glass of every size and
- * shape (a 44 pt capsule, a 340 × 200 panel, a circle, a 500 × 300 panel) falls on this one profile, scaled by the
- * amount and height macOS gives it, and around corners too: the shift follows the normal, never sideways.
+ * macOS 27's lens, measured from SwiftUI's glassEffect with its frost set to 0 (the glass filter's inputBlurRadius), over
+ * a ramp and a sawtooth of known levels that say where each device pixel is sampled from to a tenth of one
+ * (test/native): the inward shift along the edge's normal, as a share of the lens's amount, at these depths in units of
+ * its height, over the variants' refraction (0.9). Glass of every size and shape (from a 28 pt capsule to a 500 × 300
+ * panel, and a circle) falls on this one profile to within 0.01, scaled by the amount and height macOS gives it, and
+ * around corners too: the shift follows the normal, never sideways. It's gone 0.9 heights in. (Measured over frost, as
+ * it was before, the blur spread it: lower at the edge and twice as deep.)
  */
-const MAC_LENS_T = [0, 0.05, 0.1, 0.15, 0.2, 0.3, 0.4, 0.5, 0.6, 0.8, 1, 1.25, 1.5, 2, 3];
-const MAC_LENS = [0.95, 0.65, 0.55, 0.47, 0.41, 0.3, 0.235, 0.185, 0.14, 0.075, 0.04, 0.02, 0.015, 0, 0];
+const MAC_LENS_T = [0, 0.025, 0.05, 0.075, 0.1, 0.125, 0.15, 0.175, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95];
+const MAC_LENS = [0.978, 0.873, 0.767, 0.691, 0.627, 0.574, 0.526, 0.484, 0.445, 0.376, 0.318, 0.267, 0.223, 0.183, 0.148, 0.118, 0.093, 0.071, 0.052, 0.035, 0.023, 0.013, 0.005, 0];
 
 /** How far in macOS's lens reaches, in units of its height: nothing is moved deeper than this. */
-export const MAC_LENS_REACH = 2;
+export const MAC_LENS_REACH = 1;
 
 /** macOS's lens: the inward shift, px, `d` px in from the edge. */
 export function macLens(d: number, amount: number, height: number) {

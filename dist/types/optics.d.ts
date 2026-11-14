@@ -54,7 +54,7 @@ export interface Optics {
 /** The switch lens's shift outward, px, at `d` px in from the edge, for a glass whose shorter side is 2 × `half` px. */
 export declare function switchLens(d: number, half: number): number;
 /** How far in macOS's lens reaches, in units of its height: nothing is moved deeper than this. */
-export declare const MAC_LENS_REACH = 2;
+export declare const MAC_LENS_REACH = 1;
 /** macOS's lens: the inward shift, px, `d` px in from the edge. */
 export declare function macLens(d: number, amount: number, height: number): number;
 /**

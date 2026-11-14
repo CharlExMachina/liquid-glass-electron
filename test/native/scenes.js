@@ -34,5 +34,7 @@ export function toOptions(g) {
   else o.cornerRadius = g.radius ?? 0;
   if (g.tint) o.fill = g.tint;
   if (g.chromAberration !== undefined) o.chromAberration = g.chromAberration;
+  // more options on top of a variant's (a scene's `filter` changes macOS's glass to match)
+  if (g.variant !== 'none' && g.options) Object.assign(o, g.options);
   return o;
 }

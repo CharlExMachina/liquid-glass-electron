@@ -36,7 +36,10 @@ export interface GlFrame {
         alpha: number;
         darken: boolean;
     } | null;
-    /** the 3 × 3 smoothing (glass with no frost) */
+    /**
+     * Glass with no frost, smoothed: it bends the backdrop as macOS's glass does, a copy of it at one sample per CSS px
+     * (each the mean of the device pixels in it), read between its samples
+     */
     smooth: boolean;
     /** the colour matrix, as feColorMatrix's 20 values (its first three rows count) */
     matrix: number[];
@@ -46,6 +49,11 @@ export interface GlFrame {
     surface: {
         urls: [string, string];
         strength: number;
+    } | null;
+    /** macOS's key light: its image (a grey over the element) and the table of how strong it is by the glass's level */
+    key: {
+        pixels: Pixels;
+        table: number[];
     } | null;
     /** cut the glass to the shape in the map's blue channel */
     cover: boolean;

@@ -10,8 +10,8 @@ can't do in a browser engine. Sources are Apple's documentation and the WWDC25 s
 | Apple | Here | Notes |
 |---|---|---|
 | `.glassEffect(_ glass: Glass = .regular, in: some Shape)` | `glass(el, options)`, or `data-glass` with `autoGlass()` | The glass covers the element's border box, as Apple's covers the view's bounds with its padding. |
-| `Glass.regular` | `variant: 'regular'` | macOS 27's regular glass, measured against SwiftUI's own (`pnpm test:native`): frost of σ ≈ 10 px on large glass and less on small, a lens along the rim that samples inward (`bevelMode: 4`), macOS's colour as a matrix for light and dark (lighter and more saturated in light, a cap on brightness in the dark), a thin dark outline, no fringe, no light, no shadow. |
-| `Glass.clear` | `variant: 'clear'` | macOS 27's clear glass: twice the frost (σ ≈ 20 px on large glass, from 10 on small), the same lens a little deeper, less colour. On macOS clear glass is frosted too: what's behind shows through as light and colour, not detail. No variant at all is liquidglass's glass: sharp bending, no frost. |
+| `Glass.regular` | `variant: 'regular'` | macOS 27's regular glass, measured against SwiftUI's own (`pnpm test:native`): frost of σ ≈ 10 px on large glass and less on small, a lens along the rim that samples inward (`bevelMode: 4`), macOS's colour as a matrix for light and dark (lighter and more saturated in light, a cap on brightness in the dark), a thin dark outline, no fringe, no light, no shadow. In a focused window (`Environment.active`) brighter, with half the frost mixed in on large glass and almost none on small, a light along its top and bottom edges (`keyLight`), and a shadow 8 px down. |
+| `Glass.clear` | `variant: 'clear'` | macOS 27's clear glass: twice the frost (σ ≈ 20 px on large glass, from 10 on small), the same lens a little deeper, less colour. In a window that isn't focused, macOS frosts clear glass: what's behind shows through as light and colour, not detail. In the focused one it has no frost at all (only its lens), a brighter colour and the key light, and so here (`Environment.active`, from `document.hasFocus()`). No variant at all is liquidglass's glass: sharp bending, no frost. |
 | `Glass.identity` | `variant: 'identity'` | No glass at all, the layout unchanged: for switching it off conditionally. |
 | `.tint(_ color:)` | `fill: '<css colour>'` (laid over the glass), or `tint` + `tintStrength` (the backdrop multiplied toward the colour, as liquidglass's tint) | Apple maps its tint to the brightness of what's behind; here the fill is a plain colour with alpha. |
 | `.interactive()` | `interactive: true` | A press scales the glass up (1.04, with a spring), bends it more, and lights it where it's pressed; hover lights it a little. Apple's shimmer isn't reproduced. |
@@ -28,13 +28,20 @@ can't do in a browser engine. Sources are Apple's documentation and the WWDC25 s
 draws identical pixels), and `test/native/` draws them with this library; both windows are captured with
 `screencapture`, at 2× in the display's colour space, where without glass they match to within a level. Measured that
 way, with backdrops chosen to show one part at a time (flat colours and nine greys for the colour, an edge for the
-frost, ramps for the lens to a pixel, photos to check it all), and with the filter's inputs read from the glass's
-layers (a `CABackdropLayer` with a `glassBackground` filter):
+frost, ramps for the lens, with the frost set to 0, to a tenth of a pixel, photos to check it all), and with the
+filter's inputs read from the glass's layers (a `CABackdropLayer` with a `glassBackground` filter):
 
 - **Frost**: a Gaussian blur of the backdrop around the glass too, not only under it. `.clear` is the more frosted.
 - **Lens**: every point samples inward along the edge's normal (around corners too, never sideways), by one profile for
   every size and shape, scaled by an amount and height that follow the shorter side (`inputInnerRefractionAmount`,
-  `inputInnerRefractionHeight`). Over frost it reads as a brighter, smeared rim, not as visible bending.
+  `inputInnerRefractionHeight`): most of the amount at the edge, falling off steeply, gone 0.9 heights in. Over frost it
+  reads as a brighter, smeared rim, not as visible bending.
+- **Sampling**: the glass bends a copy of its backdrop at one sample per point (each the mean of the device pixels in
+  it, on the window's points, not the glass's), read between samples. At 1× that's the backdrop itself; at 2× a pixel's
+  line spreads over four, half a pixel right and down. Glass between device pixels is drawn from the nearest one, and
+  its edge stays sharp. Without frost (clear glass in a focused window is nearly without it) this is what shows: the
+  shader does the same; the compositor, which bends at the nearest pixel, smooths the backdrop by the same four pixels
+  first (the 3×3 binomial at 1×).
 - **Colour**: an affine colour matrix in the display's space (greys stay grey: `regular` light lifts black to 40% and
   takes white to 92.5%, more saturated; dark glass is darker, with its brightness capped by luma, more so the larger it
   is).
@@ -44,6 +51,20 @@ layers (a `CABackdropLayer` with a `glassBackground` filter):
   (`inputShadowOpacity` 0) on macOS 27; a one-device-pixel dark outline just outside the edge, darker where the edge
   faces sideways (here, box-shadows a device pixel each way). `.interactive()` glass at rest draws the same as plain
   glass.
+- **In a focused window** (the key window; `test:native`'s `-active` cases are captured from one) the filter's inputs
+  change: clear glass loses its blur and its white fill and gets a brighter matrix (`inputFaceColorMatrix` white 1.08,
+  black 0.125, saturation 1.06); regular glass mixes less of its blur in (`inputBlurOpacity*`: none at 64 pt and
+  below, up to 0.8 at 160 and above), is brighter, its dark cap a little higher, and gets a shadow (`inputShadow*`:
+  8 pt down, opacity and radius growing from 64 to 160 pt). Both get the key light (`inputKeyFillHighlight*`): added
+  to the glass along its top and bottom edges, +103 levels at the edge pixel and gone 15 device px in (in device px at
+  every size), fading as the edge turns sideways; on clear glass scaled by the glass's own level (most over mid-tones,
+  none over white), on regular glass the same everywhere. Here it's an image of the shape at a pixel per device pixel,
+  added in the filter after the colour (in a group, one image for all its members). There's also an outer refraction
+  (`inputOuterRefraction*`), which draws nothing on clear glass (its `inputRefractionOpacity` is 0).
+- **The outline**, around a circle over nine greys: a line one device pixel outside the edge whose darkening is a
+  function of what's behind it (clear light glass's takes a grey x to about x × (¼ + x/2) at the sides, and nothing at
+  the top), the line at any angle the top's plus a share of the side's (a share that grows as about (θ/90°)^1.7). The
+  box-shadows here scale what's behind by a constant, fitted to photos' tones.
 
 ## Colour fringing: macOS's model, which its glass doesn't use
 

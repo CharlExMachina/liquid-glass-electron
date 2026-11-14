@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { DEFAULTS, fromCss, fromData, resolve, UNSET, type Environment } from '../../src/options.ts';
 
-const env: Environment = { dark: false, appearance: 'clear', reduceTransparency: false, increaseContrast: false, reduceMotion: false };
+const env: Environment = { dark: false, appearance: 'clear', reduceTransparency: false, increaseContrast: false, reduceMotion: false, active: false };
 const css = (props: Record<string, string>) => ({ getPropertyValue: (n: string) => props[n] ?? '' }) as unknown as CSSStyleDeclaration;
 const element = (attrs: Record<string, string>) => ({
   dataset: { glass: attrs['data-glass'] },
@@ -99,6 +99,16 @@ test('Apple\'s variants are macOS 27\'s glass: its lens, frost and colour, no fr
   // the outline is darker in the dark; one of your own stays
   assert.ok(resolve([{ variant: 'regular' }], { ...env, dark: true }).outline > resolve([{ variant: 'regular' }], env).outline);
   assert.equal(resolve([{ variant: 'regular', outline: 0.1 }], { ...env, dark: true }).outline, 0.1);
+  // in a focused window (macOS's key window): clear glass has no frost and another colour, both variants the key light;
+  // frost and a key light of your own stay
+  const on = { ...env, active: true };
+  assert.equal(resolve([{ variant: 'clear' }], on).blurAmount, 0);
+  assert.notDeepEqual(resolve([{ variant: 'clear' }], on).colorMatrix, resolve([{ variant: 'clear' }], env).colorMatrix);
+  assert.equal(resolve([{ variant: 'clear', blurAmount: 1 }], on).blurAmount, 1);
+  assert.equal(resolve([{ variant: 'regular' }], on).keyLight, 1);
+  assert.equal(resolve([{ variant: 'regular' }], env).keyLight, 0);
+  assert.equal(resolve([{ variant: 'clear', keyLight: 0 }], on).keyLight, 0);
+  assert.equal(resolve([{}], on).keyLight, 0);
   // a matrix of your own, as CSS gives it
   assert.deepEqual(resolve([fromCss(css({ '--glass-color-matrix': '1 0 0 0 0 1 0 0 0 0 1 0.1' }))], env).colorMatrix, [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0.1]);
 });

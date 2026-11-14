@@ -2,7 +2,7 @@
 // Liquid Glass) with the command line tools' swiftc, and runs it unless --build-only. Arguments go on to the app
 // (--page=<name>, --theme=light|dark, --size=WxH). macOS 26 or later; `xcode-select --install` gives swiftc.
 import { execFileSync, spawn } from 'node:child_process';
-import { mkdirSync, readdirSync, statSync, existsSync } from 'node:fs';
+import { copyFileSync, mkdirSync, readdirSync, statSync, existsSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
@@ -15,6 +15,23 @@ const sources = ['native', 'native/demos'].flatMap((dir) => readdirSync(`${root}
 mkdirSync(build, { recursive: true });
 if (!existsSync(bin) || sources.some((s) => statSync(bin).mtimeMs < statSync(s).mtimeMs)) {
   execFileSync('swiftc', ['-O', '-parse-as-library', ...sources, '-o', bin], { stdio: 'inherit' });
+}
+// The same app in a bundle that asks for no Retina backing (NSHighResolutionCapable): its windows draw at 1× on a 2×
+// display, the window server doubling each pixel, for test/native/capture.mjs --scale=1
+const low = `${build}/Low.app/Contents`;
+if (!existsSync(`${low}/MacOS/playground`) || statSync(`${low}/MacOS/playground`).mtimeMs < statSync(bin).mtimeMs) {
+  mkdirSync(`${low}/MacOS`, { recursive: true });
+  copyFileSync(bin, `${low}/MacOS/playground`);
+  writeFileSync(`${low}/Info.plist`, `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>CFBundleExecutable</key><string>playground</string>
+<key>CFBundleIdentifier</key><string>dev.liquid-glass-electron.native-1x</string>
+<key>CFBundleName</key><string>Liquid glass at 1x</string>
+<key>CFBundlePackageType</key><string>APPL</string>
+<key>NSHighResolutionCapable</key><false/>
+</dict></plist>
+`);
 }
 // AVFoundation doesn't play WebM: the video demo's clip, as H.264, made once (with ffmpeg, if it's there)
 const video = `${build}/orbit.mp4`;

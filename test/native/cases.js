@@ -21,6 +21,21 @@ const one = (layout, variant, appearance, backdrop, extra = {}) => ({
  * 0.95 at the edge, and this library's fringe is chromAberration × FRINGE (36) px there.
  */
 export const aberration = (points) => +((0.95 * 0.8 * points) / 36).toFixed(4);
+/**
+ * A case with no frost: macOS's glass with its filter's blur set to 0 (it's nearly that on clear glass in a focused
+ * window), and this library's with blurAmount 0. What the frost hides shows: how each samples what it bends (macOS reads
+ * a copy at one sample per point, between samples), and, moved by `dx` points, glass between device pixels.
+ */
+const unfrosted = (c, dx = 0) => ({
+  ...c, name: `${c.name}-sharp${dx ? `-at${dx}` : ''}`, filter: { inputBlurRadius: 0, inputBleedBlurRadius: 0 },
+  glass: c.glass.map((g) => ({ ...g, x: g.x + dx, y: g.y + dx, options: { blurAmount: 0 } })),
+});
+/**
+ * A case in a focused window (macOS's key window, where it draws its glass otherwise: clear glass without frost, both
+ * variants brighter and lit along their top and bottom edges, regular glass with a shadow): the reference is captured
+ * from SwiftUI's window made key, and this library's glass has Environment.active.
+ */
+const focused = (c) => ({ ...c, name: `${c.name}-active`, active: true });
 const fringed = (c, points) => ({ ...c, name: `${c.name}-fringe`, aberration: points, glass: c.glass.map((g) => ({ ...g, chromAberration: aberration(points) })) });
 
 export const CASES = [
@@ -51,6 +66,18 @@ export const CASES = [
   fringed(one('circle', 'clear', 'light', 'rampx-circle'), 20),
   fringed(one('circle', 'clear', 'light', 'rampy-circle'), 20),
   fringed(one('circle', 'clear', 'light', 'coast'), 20),
+  // no frost: how the backdrop is sampled, over a grid and over a photo, the second a quarter point off the pixel grid
+  unfrosted(one('circle', 'clear', 'light', 'grid')),
+  unfrosted(one('capsule', 'clear', 'light', 'ponds'), 0.25),
+  // in a focused window
+  focused(one('panel', 'clear', 'light', 'coast')),
+  focused(one('capsule', 'clear', 'dark', 'ponds')),
+  focused(one('small', 'clear', 'light', 'alps')),
+  focused(one('circle', 'clear', 'light', 'grid')),
+  focused(one('panel', 'regular', 'light', 'coast')),
+  focused(one('capsule', 'regular', 'light', 'ponds')),
+  focused(one('small', 'regular', 'dark', 'alps')),
+  focused(one('big', 'regular', 'dark', 'night')),
   // three capsules in a row, as toolbar buttons: glass beside glass
   {
     name: 'row-regular-light-coast', ...SIZE, backdrop: 'coast', appearance: 'light',

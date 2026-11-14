@@ -118,17 +118,39 @@ test('a union\'s light covers its shape, and its shadow is outside it', () => {
   assert.equal(alpha(out.shadow, 70, 70), 0, 'none under the glass');
 });
 
-test('a map\'s tables, as its channels carry them: across at 0.75 ± ¼, down at 0.5 ± ¼, rounding when baked', async () => {
-  const { encodeTables } = await import('../../src/dom.ts');
+test('a map\'s tables, as its channels carry them: across at 0.75 ± ¼, down at 0.5 ± ¼, the same bytes however baked', async () => {
+  const { encodeTables, zeroResidual } = await import('../../src/dom.ts');
   const m = tableMap(roundedRect(200, 80, [40, 40, 40, 40]), { ...optics, dome: true }, 0.3);
   const { across, down } = encodeTables(m.tableX, m.tableY, m.bias);
   const a = across.split(' ').map(Number), d = down.split(' ').map(Number);
   assert.equal(a.length, 256);
-  // Chromium bakes a table into a byte per entry by truncating: no shift (the map's 128) comes out as the bytes
-  // nearest 0.75 and 0.5
-  assert.equal(Math.floor(a[128] * 255), 191);
+  // Chromium bakes a table into a byte per entry, truncating on screen and rounding off screen: each entry gives the
+  // same byte either way
+  for (const t of [a, d]) for (const v of t) assert.equal(Math.floor(v * 255), Math.min(Math.round(v * 255), 255), `${v}`);
+  // no shift (the map's 128) is 192 across and 128 down
+  assert.equal(Math.floor(a[128] * 255), 192);
   assert.equal(Math.floor(d[128] * 255), 128);
+  const zero = zeroResidual(across);
+  assert.ok(Math.abs(zero.x - 0.75 / 255) < 1e-9, JSON.stringify(zero));
   // the full range: −largest..+largest shift is 0.5..1 across, 0.25..0.75 down
   assert.ok(Math.abs(a[1] - 0.5) < 3 / 255 && Math.abs(a[255] - 1) < 3 / 255, `${a[1]} … ${a[255]}`);
   assert.ok(Math.abs(d[1] - 0.25) < 3 / 255 && Math.abs(d[255] - 0.75) < 3 / 255, `${d[1]} … ${d[255]}`);
+});
+
+test('macOS\'s key light: brightest at the top edge, gone where the edge faces sideways and 16 device px in; clear glass\'s strongest over mid-tones', async () => {
+  const { keyLightAt, keyLightTable, keyLightImage } = await import('../../src/maps.ts');
+  assert.equal(keyLightAt(0.5, 0), 1);
+  assert.equal(keyLightAt(0.5, 90), 0);
+  assert.ok(keyLightAt(1.5, 0) < keyLightAt(0.5, 0) && keyLightAt(4, 0) > 0);
+  assert.equal(keyLightAt(20, 0), 0);
+  // what's further in is gone 48° from vertical
+  assert.equal(keyLightAt(5, 50), 0);
+  const clear = keyLightTable(true, 1), regular = keyLightTable(false, 1);
+  assert.ok(clear[16] > clear[0] && clear[16] > clear[31] && clear[32] === 0, String(clear));
+  assert.ok(regular.every((v) => v === regular[0]) && regular[0] < clear[4]);
+  assert.ok(keyLightTable(true, 0.5)[16] < clear[16]);
+  // over a capsule: bright along the top, none in the middle or at the ends' sides
+  const img = keyLightImage(roundedRect(100, 40, [20, 20, 20, 20]), 2), at = (x: number, y: number) => img.data[(y * img.width + x) * 4];
+  assert.equal(img.width, 200);
+  assert.ok(at(100, 0) > 200 && at(100, 40) === 0 && at(0, 40) === 0);
 });

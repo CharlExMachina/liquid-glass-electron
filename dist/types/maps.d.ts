@@ -70,6 +70,19 @@ export declare function ownGrid(w: number, h: number, scale: number, margin: num
  * interpolated rather than clamped.
  */
 export declare function tableMap(f: Field, o: Optics, scale: number, N?: number, profile?: Field, grid?: MapGrid | null): TableMap;
+/**
+ * How much of the key light there is `d` device px in from an edge whose normal is `deg` degrees from vertical, as a
+ * share of the most (KEY_LIGHT's first): the line at the edge fades as the edge turns sideways and is gone where it
+ * faces sideways; what's further in fades linearly and is gone 48° from vertical (half the filter's spread, 96°).
+ */
+export declare function keyLightAt(d: number, deg: number): number;
+/** The key light over a shape, a grey per device px (`scale` per px of the box): KEY_LIGHT's most is 255. */
+export declare function keyLightImage(f: Field, scale: number): Pixels;
+/**
+ * The key light's strength by the glass's level, as a table of 33 values over 0..1 (feFuncR's tableValues, and the
+ * shader's): what's added where the image is at its most, times `amount`.
+ */
+export declare function keyLightTable(clear: boolean, amount: number): number[];
 export interface FieldLight {
     /** the light inside the shape, its shadow outside it, and its coverage (for mask-image), all the same size */
     light: Pixels;

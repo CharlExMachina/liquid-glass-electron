@@ -65,8 +65,9 @@ let overrides: Partial<Environment> = {};
 /**
  * What the glass adapts to. Each comes from the page unless set with setEnvironment(): dark from
  * prefers-color-scheme (or <html data-glass-theme="dark">), appearance from <html data-glass-appearance="tinted">,
- * the accessibility settings from prefers-reduced-transparency, prefers-contrast and prefers-reduced-motion, and
- * whether the display is wide-gamut from color-gamut (macOS's colour is fitted for either).
+ * the accessibility settings from prefers-reduced-transparency, prefers-contrast and prefers-reduced-motion,
+ * whether the display is wide-gamut from color-gamut (macOS's colour is fitted for either), and whether the window
+ * has focus from document.hasFocus() (macOS's glass is drawn otherwise in the window in use).
  */
 export function getEnvironment(): Environment {
   const root = typeof document !== 'undefined' ? document.documentElement.dataset : {};
@@ -78,6 +79,7 @@ export function getEnvironment(): Environment {
     increaseContrast: overrides.increaseContrast ?? !!queries.increaseContrast?.matches,
     reduceMotion: overrides.reduceMotion ?? !!queries.reduceMotion?.matches,
     wideGamut: overrides.wideGamut ?? (queries.wideGamut ? queries.wideGamut.matches : true),
+    active: overrides.active ?? (typeof document !== 'undefined' && typeof document.hasFocus === 'function' ? document.hasFocus() : true),
   };
 }
 
@@ -104,6 +106,16 @@ function watchEnvironment() {
   if (watching || typeof document === 'undefined') return;
   watching = true;
   for (const q of Object.values(queries)) q?.addEventListener('change', refreshAll);
+  // the window gaining or losing focus (macOS's glass looks otherwise in the window in use); only when it changes
+  let focused = getEnvironment().active;
+  const focus = () => {
+    if (overrides.active !== undefined || document.hasFocus() === focused) return;
+    focused = document.hasFocus();
+    refreshAll();
+  };
+  window.addEventListener('focus', focus);
+  window.addEventListener('blur', focus);
+  document.addEventListener('visibilitychange', focus);
   new MutationObserver(refreshAll).observe(document.documentElement, { attributes: true, attributeFilter: ['data-glass-theme', 'data-glass-appearance'] });
 }
 

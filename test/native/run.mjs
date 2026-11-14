@@ -23,8 +23,9 @@ import { CASES } from './cases.js';
 
 const here = (p) => fileURLToPath(new URL(p, import.meta.url));
 const argv = process.argv.slice(2);
+const gl = argv.includes('--gl');
 const update = argv.includes('--update'), selfCheck = argv.includes('--self-check'), force = argv.includes('--force'), calibrate = argv.includes('--calibrate');
-const LIMITS = here('./limits.json');
+const LIMITS = here(gl ? './limits-gl.json' : './limits.json');
 const limits = existsSync(LIMITS) ? JSON.parse(readFileSync(LIMITS, 'utf8')) : {};
 // the room calibrate leaves: a quarter more and a little (p95 is in whole levels); near is fixed, enough to see a shadow
 const room = { inside: (v) => v * 1.25 + 0.3, rim: (v) => v * 1.25 + 0.3, edge: (v) => v * 1.25 + 0.5, near: () => 1, p95: (v) => v * 1.25 + 1, bias: (v) => Math.abs(v) + 0.75 };
@@ -46,8 +47,9 @@ const MUTATIONS = { nolens: 3, frost: 3, colour: 3, outline: 1, nofringe: 1 };
 function crop(c) {
   const x0 = Math.min(...c.glass.map((g) => g.x)) - MARGIN, y0 = Math.min(...c.glass.map((g) => g.y)) - MARGIN;
   const x1 = Math.max(...c.glass.map((g) => g.x + g.w)) + MARGIN, y1 = Math.max(...c.glass.map((g) => g.y + g.h)) + MARGIN;
-  const x = Math.max(x0, 0) * S, y = Math.max(y0, 0) * S;
-  return { x, y, width: Math.min(x1, c.width) * S - x, height: Math.min(y1, c.height) * S - y };
+  // (in whole device px: glass may be between them)
+  const x = Math.floor(Math.max(x0, 0) * S), y = Math.floor(Math.max(y0, 0) * S);
+  return { x, y, width: Math.ceil(Math.min(x1, c.width) * S) - x, height: Math.ceil(Math.min(y1, c.height) * S) - y };
 }
 
 /** Signed distance to the nearest glass's edge at a device px of the crop (negative inside), device px. */
@@ -107,7 +109,7 @@ function compare(a, b, d, width, height) {
 
 /** Each case drawn by this library (with `mutate`, wrong on purpose) and measured against its reference. */
 async function measure(cases, raw, ref, mutate) {
-  await captureElectron(cases, raw, { mutate });
+  await captureElectron(cases, raw, { mutate, gl });
   return cases.map((c) => {
     const r = crop(c);
     const mine = nativeImage.createFromPath(`${raw}/${c.name}.png`).crop(r), theirs = nativeImage.createFromPath(`${ref}/${c.name}.png`);
@@ -139,7 +141,7 @@ app.whenReady().then(async () => {
     return;
   }
   writeBackdrops();
-  const ref = here('./reference'), out = here('./out'), raw = `${out}/raw`;
+  const ref = here('./reference'), out = here(gl ? './out/gl' : './out'), raw = `${out}/raw`;
   rmSync(raw, { recursive: true, force: true });
   mkdirSync(raw, { recursive: true });
   try {
@@ -195,7 +197,7 @@ app.whenReady().then(async () => {
       const next = { ...limits };
       for (const { c, res } of rows) if (!rows.find((r) => r.c === c).broken) next[c.name] = Object.fromEntries(MEASURES.map((k) => [k, Math.ceil(room[k](res[k]) * 10) / 10]));
       writeFileSync(LIMITS, `${JSON.stringify(next, null, 1)}\n`);
-      console.log(`limits written for ${rows.length} cases (test/native/limits.json)`);
+      console.log(`limits written for ${rows.length} cases (test/native/${gl ? "limits-gl.json" : "limits.json"})`);
     }
     console.log(failed ? `${failed} failed (test/native/out/report.html)` : 'all within macOS\'s glass (test/native/out/report.html)');
     app.exit(failed ? 1 : 0);
@@ -215,5 +217,5 @@ figure{margin:0}img{max-width:420px;display:block;border-radius:6px}figcaption{c
 <h1>This library's glass against macOS ${esc(index.macos)}'s</h1>
 <p>Mean difference per channel, 0..255, inside the glass, in its outermost 24 device px (rim), within 2 px of its edge, and 2–40 px outside it (near); the 95th percentile and the mean signed difference inside. The references were captured ${esc(index.captured)} on ${esc(index.label)} (${esc(index.display)}, ${esc(index.scale)}×). The difference is 4× brighter, red past 32 levels.</p>
 ${rows.map(({ c, res, bad }) => `<h2 class="${bad.length ? 'bad' : ''}">${esc(c.name)}: ${esc(fmt(res))}${bad.length ? ` (${esc(bad.join('; '))})` : ''}</h2>
-<div class="row">${fig(`../reference/${c.name}.png`, 'macOS (SwiftUI glassEffect)')}${fig(`${c.name}.png`, 'liquid-glass-electron')}${fig(`${c.name}-diff.png`, 'difference')}</div>`).join('\n')}`;
+<div class="row">${fig(`${gl ? "../" : ""}../reference/${c.name}.png`, 'macOS (SwiftUI glassEffect)')}${fig(`${c.name}.png`, 'liquid-glass-electron')}${fig(`${c.name}-diff.png`, 'difference')}</div>`).join('\n')}`;
 }

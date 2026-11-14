@@ -172,8 +172,9 @@ test('macOS\'s lens (bevelMode 4) samples inward along the normal, by its measur
     near(x, macLens(d, 60, 20), 1e-6);
     near(y, 0, 1e-9);
   }
-  // falling from the edge to nothing two heights in
-  assert.ok(macLens(0, 60, 20) > macLens(4, 60, 20) && macLens(4, 60, 20) > macLens(20, 60, 20) && macLens(20, 60, 20) > 0);
+  // falling from the edge to nothing by 0.95 heights in (measured without frost)
+  assert.ok(macLens(0, 60, 20) > macLens(4, 60, 20) && macLens(4, 60, 20) > macLens(16, 60, 20) && macLens(16, 60, 20) > 0);
+  near(macLens(19, 60, 20), 0);
   near(macLens(40, 60, 20), 0);
   // around a corner it follows the normal: on the diagonal, the same inward and down
   const r = 40, k = 10 / Math.SQRT2, [cx, cy] = shiftAt(r - (r - 10) / Math.SQRT2, r - (r - 10) / Math.SQRT2, f, o);

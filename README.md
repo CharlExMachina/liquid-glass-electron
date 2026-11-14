@@ -114,7 +114,7 @@ The rest of the API:
 | `materialize(el, 'in' \| 'out')` | glass grows in or fades away in place |
 | `glassButton(el, 'glass' \| 'prominent')` | Apple's `.glass` and `.glassProminent` button styles |
 | `scrollEdge(scroller, { style: 'soft' \| 'hard' })` | content dissolving into a blur under a bar |
-| `setEnvironment({ dark, appearance, reduceTransparency, increaseContrast, reduceMotion, wideGamut })` | what the glass adapts to, if not the page's media queries |
+| `setEnvironment({ dark, appearance, reduceTransparency, increaseContrast, reduceMotion, wideGamut, active })` | what the glass adapts to, if not the page's media queries (`active`: the window has focus, from `document.hasFocus()`; macOS draws its glass otherwise in the window in use) |
 | `unglass(el)`, `glassOf(el)`, `refreshAll()` | |
 
 ## If you are an AI agent
@@ -152,9 +152,10 @@ And this library's:
 |---|---|---|
 | `baseBrightness` | 0.06 | The brightening liquidglass's glass always has (6%); 0 for none |
 | `strength` | 1 | How much glass there is, 0..1: bending, fringe, frost, colour, light, fill and shadow together. Cheap to change every frame; at 0 there's no filter |
-| `variant` | none | `regular` and `clear`, macOS 27's glass ([measured](#compared-with-macos)): frost, a lens along the rim, macOS's colour for light and dark, a thin outline, no fringe, light or shadow (`clear` is twice as frosted, with less colour); `identity` (no glass). None is liquidglass's glass |
+| `variant` | none | `regular` and `clear`, macOS 27's glass ([measured](#compared-with-macos)): frost, a lens along the rim, macOS's colour for light and dark, a thin outline, no fringe (`clear` is twice as frosted, with less colour). In a focused window, as macOS draws them there: `clear` without frost, both brighter and lit along the top and bottom edges (`keyLight`), `regular` with a shadow. `identity` (no glass). None is liquidglass's glass |
 | `colorMatrix` | – | The backdrop's colour as a matrix, 12 numbers (rows of red, green and blue gains and an offset), before saturation, brightness and tint; `'auto'` is macOS's for the variant, light or dark, and the display's gamut |
 | `outline`, `outlineTop` | 0, 0 | macOS's thin dark line around the edge: its opacity where the edge faces sideways, and up or down |
+| `keyLight` | auto | macOS's light along the top and bottom edges (1 = its own, 0 none); auto: the variants' in a focused window |
 | `shape` | `rect` | `rect`, `capsule`, `circle`, `concentric` (the radius of the glass it sits in, less the inset), `squircle` (continuous corners), `path` |
 | `path`, `pathBox` | – | For `shape: 'path'`: SVG path data, in the element's px or in a viewBox (`"0 0 100 100"`) stretched over it |
 | `fill` | – | A colour over the glass (Apple's tinted glass, prominent buttons). Painted with the light, so a CSS reset can't remove it |
@@ -225,8 +226,10 @@ the first way whose frame reaches a canvas as drawn, checked once (WebKitGTK 2.5
 It matches Chromium's glass: `pnpm test:web` draws 27 cases (every bevel mode, the variants light and dark, fringe,
 frost, colour, opacity, strength, free shapes, a surface, `object-fit`, glass across its picture's edge, and a source
 that comes late, is replaced, or can't be read at first) with the shader in Electron, Safari and Firefox (on Linux:
-Firefox and WebKitGTK), and compares each with what Chromium's compositor draws. On the machine below they differ by 0.5 to 3 levels of 255 on
-average inside the glass (5 where `smooth` is off: the shader has none of the grain that option leaves in Chromium).
+Firefox and WebKitGTK), and compares each with what Chromium's compositor draws. On the machine below they differ by 0.4 to 3.7 levels of 255 on
+average inside the glass, at 1× and 2×. Where they differ most it's the shader that's closer to macOS: it samples the
+backdrop as macOS's glass does, between the samples of a copy at one per point, where the compositor can only take
+the nearest pixel (`pnpm test:native --gl` holds the shader to macOS's own glass, as it does the compositor).
 
 Nothing is drawn unless something changed. A page gets no event when an element moves, so while anything is going on
 (scrolling, the pointer, a transition, a change of options, a playing video) each glass's place is read every frame,
@@ -474,8 +477,10 @@ Clear glass measures 0.4–0.8 at every size from a 28 px capsule to a 500 × 30
 
 - Two blind judges (agents shown each scene as A and B, native on a random side, and four labelled examples of native
   glass on other photos) told the earlier variants from macOS in 24 of 24 trials, and these in 12 of 24: chance.
-- The test (`pnpm test:native`) holds each of its 21 cases to within a quarter of what it measures now, inside the glass,
-  at its rim, at its edge and just outside it (three of them with macOS's colour fringe turned on in its filter), and
+- The test (`pnpm test:native`) holds each of its 31 cases to within a quarter of what it measures now, inside the glass,
+  at its rim, at its edge and just outside it (three of them with macOS's colour fringe turned on in its filter, two
+  with its frost turned off, one of those between device pixels, eight in a focused window), the compositor's glass and
+  the shader's (`--gl`), and
   `pnpm test:native --self-check` draws the glass wrong on purpose (the lens off, 30% less frost, a little more
   saturation, no outline, no fringe) and checks that the cases catch each.
 - Dark regular glass is the furthest from macOS (about 3–5 levels): macOS caps its brightness by luma and blends a
@@ -514,8 +519,10 @@ liquidglass's look is two; its blur fill and dark cap add nodes Skia draws with 
 - **A glass element's own border isn't drawn**: the light is a `border-image`. Its border width still lays out. Use
   `edgeHighlight` instead of a border.
 - **Bending samples the nearest pixel** (that's Chromium's feDisplacementMap), so the backdrop is smoothed slightly
-  first (σ ≈ 0.7 px), which softens fine detail under the glass a little. `smooth: false` turns it off, with grain
-  where the rim squeezes the backdrop.
+  first: at 2× as macOS's glass samples it (a copy at one sample per point, which spreads a pixel over four), at 1× by
+  σ ≈ 0.7 px, which macOS doesn't. The rim of glass without frost is still grainier than macOS's where it squeezes the
+  backdrop hardest; the shader's isn't (it reads between pixels, as macOS does). `smooth: false` turns the smoothing
+  off, with grain where the rim squeezes the backdrop.
 - **Specular highlights and strong edge light are laid over as white**, where liquidglass adds them to the colour: at
   high `specular` they're dimmer over mid-tones than liquidglass's. At its defaults (`specular` 0) it makes no
   visible difference.
@@ -555,7 +562,10 @@ liquidglass's look is two; its blur fill and dark cap add nodes Skia draws with 
   versions other than 27.0.1 (`pnpm test:native --update` captures them on yours).
 - **macOS frosts the backdrop around the glass too**; a backdrop filter in Chromium sees only what's under the element,
   so in the outermost few pixels the frost leans toward the glass's own edge. The outline is box-shadows (rounded
-  rectangles only: free shapes and containers have none).
+  rectangles only: free shapes and containers have none): macOS's darkens what's behind it more the darker that is,
+  and fades sooner as the edge turns from vertical, neither of which a shadow can do. At 1:1 it reads the same; 4×
+  magnified, macOS's is softer over mid-tones. Drawing it exactly takes a backdrop filter of its own, which made ten
+  glass elements cost the GPU 5.5× as much (it can't be grouped), so it isn't.
 - Not done: Apple's shimmer on interactive glass, `backgroundExtensionEffect`.
 
 ## Tests
@@ -577,7 +587,9 @@ captures them again, with `native/Glass.swift`). Both windows go through `screen
 match to within a level; inside the glass each case has a limit on how far from macOS it may be, and a report
 (`test/native/out/report.html`) shows macOS's glass, this library's and the difference. `--self-check` draws the
 glass wrong on purpose and fails unless the cases catch it; `--calibrate` writes the limits (`test/native/limits.json`)
-from what the glass measures now, which is for after a change meant to move the glass closer to macOS. It needs Screen
+from what the glass measures now, which is for after a change meant to move the glass closer to macOS. `--gl` draws the
+cases with the shader instead (Safari's and Firefox's glass, in Electron, over the backdrop as its source), against the
+same references and limits of its own (`test/native/limits-gl.json`). It needs Screen
 Recording permission for the terminal, and stops if macOS's version, the display's gamut or its scale differ from the
 references'.
 
